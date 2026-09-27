@@ -1611,3 +1611,1215 @@ docs reachability check passed (85 reachable, 35 in exempt record trees)
 OK — 40 mermaid blocks in 154 files parse cleanly
 > build · stealth
 All five gates green. Committing batch 1:
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && git add -A && git commit -q -F - <<'EOF' && git log --oneline -1
+docs(architecture): correct stack/sensor counts and dashboard-tier stack membership
+
+Established the authoritative inventory from
+arcane/manifests/home-production.json and the compose files:
+
+- 39 sync entries in the manifest, not 37
+- 33 of them under arcane/home/ (32 honeypot-* + unsloth), not 31/32
+- 6 at their own repository-root paths, unchanged
+- 20 sensor stacks (decoy stacks each on its own isolated network),
+  not 22 or 21
+- 34 stack directories on disk under arcane/home/: the 33 manifest ones
+  plus rex86-eval, which is deliberately not a deployment piece
+
+Fixed:
+- ARCHITECTURE.md prose counts and both mermaid node labels that carried
+  stale sensor counts; added the sonicwall-sma decoy the second diagram
+  was missing
+- README.md "38 deployment pieces - 32 under arcane/home/" -> 39/33, plus
+  the two stacks its table never enumerated (sonicwall-sma, unsloth)
+- README.md's honeypot-dashboard-backend row was inverted: that stack
+  holds the unprivileged :8081 backend-service, while the write-capable
+  :8082 backend-service-mounted stayed in honeypot-dashboard. ARCHITECTURE
+  .md's dashboard-tier diagram put both inside honeypot-dashboard; moved
+  :8081 into its own subgraph and noted its two extra worker loops.
+- NETWORK.md "zero exceptions across all 32 stacks": the HP_BIND rule does
+  hold, but unsloth spells the variable UNSLOTH_BIND. Restated as the
+  claim that is actually true (no 0.0.0.0 published bind) plus the one
+  naming exception.
+
+All five doc gates green.
+EOF
+64d96b82 docs(architecture): correct stack/sensor counts and dashboard-tier stack membership
+> build · stealth
+Now let me sweep my assigned list for the specific drift categories. Starting with retired-thing claims:
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && FILES="docs/STACK-REBUILD.md docs/GEOIP-THREAT-INTEL.md docs/RECOVERY.md docs/NETWORK.md docs/TESTING.md docs/persona-design.md docs/settings-operations.md docs/KEYCLOAK-OPERATIONS.md docs/ARCHITECTURE.md docs/ROCKY-10-MIGRATION.md docs/PIPELINES.md docs/gpu-docker-passthrough.md docs/gpu-ml-worker-acceleration.md docs/knowledge-store-design.md docs/STORAGE.md docs/DASHBOARD-CUTOVER.md docs/ES-CONSUME-PATTERNS.md docs/KEYCLOAK-CUTOVER.md docs/OPERATIONS.md docs/canarytoken-live-fire-checklist.md docs/community-threat-intel-sharing.md docs/container-writable-layer-audit-2026-09-03.md docs/dionaea-bistreams-retention.md docs/honeypot-network-isolation.md docs/ip-reporting-plan.md docs/kvm-network-traffic-analysis.md docs/kvm-snapshot-vs-golden-image.md docs/llm-inference-backend-comparison.md docs/ml-gpu-coordinated-roadmap.md docs/security-fixes.md README.md docs/ROADMAP.md docs/agent-intrusion-threat-model.md docs/benchmarks/claim-pools/README.md docs/dashboard-manual-ip-block-design.md docs/ml-worker-plan.md"; echo "$FILES" | tr ' ' '\n' | while read f; do [ -f "$f" ] || echo "MISSING FILE: $f"; done; echo "--- all present? ---"; echo; echo "=== Go dashboard / Xore / wordpot / python worker refs ==="; grep -n -iE 'Xore|auth-backend|go dashboard|golang|wordpot|dashboard-go|apiary-go' $FILES | cut -c1-200
+--- all present? ---
+
+=== Go dashboard / Xore / wordpot / python worker refs ===
+docs/GEOIP-THREAT-INTEL.md:28:from the old Go dashboard's `intelCategoryRank`): `blocklist:*` (a
+docs/RECOVERY.md:15:Arcane-managed stacks [#258](https://github.com/Xore/APIARY/issues/258)
+docs/RECOVERY.md:17:[#1185](https://github.com/Xore/APIARY/issues/1185); each now a
+docs/RECOVERY.md:19:[#1502](https://github.com/Xore/APIARY/issues/1502), see
+docs/TESTING.md:172:       `strip-auth-identity`, `xore_sso`, and `X-Auth-Role` and confirm
+docs/persona-design.md:11:([#91](https://github.com/Xore/APIARY/issues/91)/[#94](https://github.com/Xore/APIARY/issues/94)/[#96](https://github.com/Xore/APIARY/issues/96))
+docs/persona-design.md:112:([#71](https://github.com/Xore/APIARY/issues/71); the old technique
+docs/settings-operations.md:118:- **Admin configuration API:** revoke the admin role in auth-backend; the
+docs/KEYCLOAK-OPERATIONS.md:28:- `Xore/auth-backend` supplies only the read-only `themes/apiary` directory.
+docs/KEYCLOAK-OPERATIONS.md:37:| Theme | `Xore/auth-backend:themes/apiary` | `/var/dockge/stacks/honeypot-keycloak/theme/apiary` |
+docs/ARCHITECTURE.md:12:dashboard cutover (#1628, completed 2026-08-22) — the Go dashboard is
+docs/gpu-docker-passthrough.md:13:> Ada Generation, 20475 MiB VRAM) during the [#518](https://github.com/Xore/APIARY/issues/518)
+docs/gpu-ml-worker-acceleration.md:4:> [#67](https://github.com/Xore/APIARY/issues/67) (closed, not completed) —
+docs/gpu-ml-worker-acceleration.md:5:> consolidated into [#1523](https://github.com/Xore/APIARY/issues/1523)'s
+docs/gpu-ml-worker-acceleration.md:75:**Settled by [#602](https://github.com/Xore/APIARY/issues/602)** (verbatim
+docs/gpu-ml-worker-acceleration.md:413:| Re-verify §3 — GPU, toolkit, network name — and confirm the pinned `+cu126` wheel on the real card | [#82](https://github.com/Xore/APIARY/issues/82) |
+docs/gpu-ml-worker-acceleration.md:414:| `analysis-net` vs `honeynet` — resolved: `ml-worker/docker-compose.yml` joins `honeynet` | [#61](https://github.com/Xore/APIARY/issues/61) (closed) |
+docs/gpu-ml-worker-acceleration.md:415:| The §4 diffs, `get_device()`, the OOM→CPU wrapper, `models/embedder.py` and the `ml-embeddings` index, acceptance tests T1–T7 | [#67](https://github.com/Xore/A
+docs/gpu-ml-worker-acceleration.md:416:| Retrain windows offset from the LLM report hour (§5) | [#84](https://github.com/Xore/APIARY/issues/84) |
+docs/DASHBOARD-CUTOVER.md:3:**Status: COMPLETE (2026-08-22, per Xore).** The cutover finished and its
+docs/DASHBOARD-CUTOVER.md:9:to the Go dashboard** — falling back means checking out a pre-cutover
+docs/DASHBOARD-CUTOVER.md:37:[#1628](https://github.com/Xore/APIARY/issues/1628). **Do not start the
+docs/ES-CONSUME-PATTERNS.md:18:Related: [#1971](https://github.com/Xore/APIARY/issues/1971) (this note,
+docs/ES-CONSUME-PATTERNS.md:19:the shared modules, the first audit), [#1977](https://github.com/Xore/APIARY/issues/1977)
+docs/ES-CONSUME-PATTERNS.md:20:(platform-hygiene epic), [#168](https://github.com/Xore/APIARY/issues/168)
+docs/ES-CONSUME-PATTERNS.md:22:[#1959](https://github.com/Xore/APIARY/issues/1959) (ml-worker pathologies).
+docs/KEYCLOAK-CUTOVER.md:6:[`KEYCLOAK-OPERATIONS.md`](KEYCLOAK-OPERATIONS.md). `Xore/auth-backend` owns
+docs/KEYCLOAK-CUTOVER.md:9:[`Xore/auth-backend#96`](https://github.com/Xore/auth-backend/issues/96) (that
+docs/KEYCLOAK-CUTOVER.md:10:repo's own epic) and [`Xore/auth-backend#91`](https://github.com/Xore/auth-backend/issues/91)
+docs/KEYCLOAK-CUTOVER.md:78:- `/_auth/verify`, `/_auth/introspect`, and the `xore_sso` cookie;
+docs/OPERATIONS.md:69:Suricata, and dead-letter data views plus the **XORE Honeypot — enriched
+docs/OPERATIONS.md:89:  The frontend follows the shared [**Xore/theme**](https://github.com/Xore/theme)
+docs/OPERATIONS.md:91:  [MIGRATE-HONEYPOT-STACK.md](https://github.com/Xore/theme/blob/main/docs/MIGRATE-HONEYPOT-STACK.md)):
+docs/OPERATIONS.md:95:  implemented in `Xore/theme` and re-vendored. The theme and Leaflet are
+docs/OPERATIONS.md:136:  they fed the retired Go dashboard's server-side template; the Leaflet layer
+docs/canarytoken-live-fire-checklist.md:114:run by:              Xore (via #2136)
+docs/canarytoken-live-fire-checklist.md:163:memo:       "Xore verification token (working)"
+docs/canarytoken-live-fire-checklist.md:176:   tokens" tab issues) returns this event as row `detail: "token fired: Xore
+docs/honeypot-network-isolation.md:12:> [#61](https://github.com/Xore/APIARY/issues/61) came from: an override
+docs/honeypot-network-isolation.md:17:> [#88](https://github.com/Xore/APIARY/issues/88) (no automated
+docs/honeypot-network-isolation.md:18:> isolation audit), [#89](https://github.com/Xore/APIARY/issues/89)
+docs/honeypot-network-isolation.md:73:[#235](https://github.com/Xore/APIARY/issues/235): the stack used to
+docs/honeypot-network-isolation.md:96:  [#89](https://github.com/Xore/APIARY/issues/89) (SNARE/TANNER) and
+docs/ip-reporting-plan.md:9:> ([#68](https://github.com/Xore/APIARY/issues/68)) and Phase 2
+docs/ip-reporting-plan.md:10:> ([#69](https://github.com/Xore/APIARY/issues/69)) are both closed.
+docs/ip-reporting-plan.md:12:> [#153](https://github.com/Xore/APIARY/issues/153), closed and implemented:
+docs/ip-reporting-plan.md:245:[#68](https://github.com/Xore/APIARY/issues/68) and
+docs/ip-reporting-plan.md:246:[#69](https://github.com/Xore/APIARY/issues/69).
+docs/ip-reporting-plan.md:253:  ([#69](https://github.com/Xore/APIARY/issues/69)).
+docs/kvm-network-traffic-analysis.md:10:> [#87](https://github.com/Xore/APIARY/issues/87).
+docs/kvm-network-traffic-analysis.md:131:That is [#94](https://github.com/Xore/APIARY/issues/94) — a decision to
+docs/kvm-network-traffic-analysis.md:160:  sandbox captures — [#87](https://github.com/Xore/APIARY/issues/87).
+docs/kvm-network-traffic-analysis.md:166:  ([#79](https://github.com/Xore/APIARY/issues/79)).
+docs/kvm-network-traffic-analysis.md:174:  [#87](https://github.com/Xore/APIARY/issues/87).
+docs/kvm-snapshot-vs-golden-image.md:13:> [#90](https://github.com/Xore/APIARY/issues/90).
+docs/kvm-snapshot-vs-golden-image.md:333:reliably from it (2026-08-02) — [#47](https://github.com/Xore/APIARY/issues/47).
+docs/kvm-snapshot-vs-golden-image.md:335:[#86](https://github.com/Xore/APIARY/issues/86).
+docs/llm-inference-backend-comparison.md:3:Status: research for [issue #598](https://github.com/Xore/APIARY/issues/598), 2026-08-05.
+docs/ml-gpu-coordinated-roadmap.md:22:| A — runtime and hardware truth | [#82](https://github.com/Xore/APIARY/issues/82) |
+docs/ml-gpu-coordinated-roadmap.md:23:| B, C — ML foundation and reliable ES pipeline | [#61](https://github.com/Xore/APIARY/issues/61), [#62](https://github.com/Xore/APIARY/issues/62) |
+docs/ml-gpu-coordinated-roadmap.md:24:| D — temporal/composite quality and lifecycle | [#63](https://github.com/Xore/APIARY/issues/63), [#65](https://github.com/Xore/APIARY/issues/65) |
+docs/ml-gpu-coordinated-roadmap.md:25:| E — dashboard ML delivery | [#64](https://github.com/Xore/APIARY/issues/64) |
+docs/ml-gpu-coordinated-roadmap.md:26:| F — guarded LLM worker, dry-run only | [#66](https://github.com/Xore/APIARY/issues/66) |
+docs/ml-gpu-coordinated-roadmap.md:27:| G — local Ollama canary | [#83](https://github.com/Xore/APIARY/issues/83) |
+docs/ml-gpu-coordinated-roadmap.md:28:| H — ML GPU acceleration | [#67](https://github.com/Xore/APIARY/issues/67) |
+docs/ml-gpu-coordinated-roadmap.md:29:| I — shared GPU operations and rollout | [#84](https://github.com/Xore/APIARY/issues/84) |
+docs/security-fixes.md:4:[#80](https://github.com/Xore/APIARY/issues/80) and in the
+docs/security-fixes.md:5:[Security tab](https://github.com/Xore/APIARY/security/code-scanning),
+docs/security-fixes.md:12:— `vps/forward-auth/` moved to `Xore/auth-backend`, `analysis/scan_samples.py`
+docs/security-fixes.md:14:`Xore/theme`. The document went on describing all seventeen as open. Meanwhile
+README.md:41:| `honeypot-dicompot`, `honeypot-dns-honeypot`, `honeypot-citrix`, `honeypot-cisco-asa`, `honeypot-sonicwall-sma`, `honeypot-rdp`, `honeypot-endlessh`, `honeypot-beelzebub`, `honeypot-hel
+README.md:47:| `honeypot-dashboard` ([arcane/home/honeypot-dashboard/compose.yml](arcane/home/honeypot-dashboard/compose.yml)) | **home** | the live investigation dashboard: TanStack Start frontend (`
+README.md:86:| [branding/](branding/) / [live specimen](https://xore.github.io/APIARY/) | Canonical logos, favicons, social assets, web theme starter, design tokens, and printable brand guide |
+README.md:92:| [scripts/install.sh](scripts/install.sh) | Single entry point for host provisioning — `sudo ./scripts/install.sh --profile home\|vps`, which dispatches to the installer below (or [scrip
+README.md:93:| [scripts/install-homeserver.sh](scripts/install-homeserver.sh) | Unattended provisioning script (Docker, GPU/NVIDIA, WireGuard, Arcane, the stacks themselves) for a manually-installed b
+README.md:112:Work is tracked in [GitHub issues](https://github.com/Xore/APIARY/issues).
+docs/ROADMAP.md:5:[GitHub issues](https://github.com/Xore/APIARY/issues) — see
+docs/ROADMAP.md:37:  image epic ([#47](https://github.com/Xore/APIARY/issues/47)) is
+docs/ROADMAP.md:42:  ([#670](https://github.com/Xore/APIARY/issues/670), closed
+docs/ROADMAP.md:46:  ([#1608](https://github.com/Xore/APIARY/issues/1608) and its
+docs/ROADMAP.md:48:  `next` profile alongside the current Go dashboard. Feature-complete
+docs/ROADMAP.md:51:  [#1628](https://github.com/Xore/APIARY/issues/1628) for what's left
+docs/ROADMAP.md:57:[#671](https://github.com/Xore/APIARY/issues/671).
+docs/ROADMAP.md:65:- ✅ [#670](https://github.com/Xore/APIARY/issues/670) — consolidate
+docs/ROADMAP.md:67:- This rewrite — [#719](https://github.com/Xore/APIARY/issues/719)
+docs/ROADMAP.md:70:- [#498](https://github.com/Xore/APIARY/issues/498) — dashboard:
+docs/ROADMAP.md:75:- [#593](https://github.com/Xore/APIARY/issues/593) — verify the
+docs/ROADMAP.md:77:- [#594](https://github.com/Xore/APIARY/issues/594) — functionally
+docs/ROADMAP.md:79:- ✅ [#597](https://github.com/Xore/APIARY/issues/597) — end-to-end
+docs/ROADMAP.md:97:| Phase 1 golden image (epic) | [#47](https://github.com/Xore/APIARY/issues/47) |
+docs/ROADMAP.md:98:| Golden-image lifecycle: checksum + scheduled rebuild | [#86](https://github.com/Xore/APIARY/issues/86) |
+docs/ROADMAP.md:99:| VM-detection tells (pafish/al-khaser) | [#368](https://github.com/Xore/APIARY/issues/368) |
+docs/ROADMAP.md:100:| windows_kimi realism gaps | [#493](https://github.com/Xore/APIARY/issues/493) |
+docs/ROADMAP.md:101:| ProcMon CLI export hang | [#502](https://github.com/Xore/APIARY/issues/502) |
+docs/ROADMAP.md:102:| CAPEv2 debugger-class-evasion sandbox (9 issues) | [#314-322](https://github.com/Xore/APIARY/issues/314) |
+docs/ROADMAP.md:109:- [#662](https://github.com/Xore/APIARY/issues/662) — 72-hour
+docs/ROADMAP.md:112:- [#84](https://github.com/Xore/APIARY/issues/84) — shared-GPU slot
+docs/ROADMAP.md:114:  [#67](https://github.com/Xore/APIARY/issues/67) (CUDA selection,
+docs/ROADMAP.md:117:- [#174](https://github.com/Xore/APIARY/issues/174) — ml-worker
+docs/agent-intrusion-threat-model.md:169:  Go dashboard; the file-based secret delivery pattern it described carried
+docs/agent-intrusion-threat-model.md:364:  retired with the Go dashboard: "the dashboard never writes one of these
+docs/agent-intrusion-threat-model.md:461:    Go dashboard; the equivalent alert-refresh wiring lives in the Rust
+docs/agent-intrusion-threat-model.md:499:    them), pinned by mutable tag only (`golang:1.26-alpine`,
+docs/benchmarks/claim-pools/README.md:4:under [issue #1805](https://github.com/Xore/APIARY/issues/1805).
+docs/dashboard-manual-ip-block-design.md:10:> **Status**: Decided and implemented, first cut. Tracking: [#914](https://github.com/Xore/APIARY/issues/914).
+docs/dashboard-manual-ip-block-design.md:14:[#914](https://github.com/Xore/APIARY/issues/914) noted that portbridge already
+docs/dashboard-manual-ip-block-design.md:20:[#912](https://github.com/Xore/APIARY/issues/912)/[#913](https://github.com/Xore/APIARY/issues/913),
+docs/ml-worker-plan.md:18:> `/api/ml/anomalies`+`/api/ml/stats` on the retired Go dashboard, #64),
+docs/ml-worker-plan.md:23:> **Tracked in:** [#61](https://github.com/Xore/APIARY/issues/61)–[#65](https://github.com/Xore/APIARY/issues/65)
+docs/ml-worker-plan.md:40:> [issue #61](https://github.com/Xore/APIARY/issues/61). This is a
+docs/ml-worker-plan.md:344:[#132](https://github.com/Xore/APIARY/issues/132).
+docs/ml-worker-plan.md:540:**Implemented, current (#1628 cutover retired the Go dashboard on
+docs/ml-worker-plan.md:705:repository — [#61](https://github.com/Xore/APIARY/issues/61)) has
+docs/ml-worker-plan.md:721:  ([#67](https://github.com/Xore/APIARY/issues/67)), which itself
+docs/ml-worker-plan.md:729:[#64](https://github.com/Xore/APIARY/issues/64). Do not copy a
+docs/ml-worker-plan.md:857:several other fields. (Originally landed against the Go dashboard's
+docs/ml-worker-plan.md:879:| **v0.1** | Scaffold: Dockerfile, worker.py, IsoForest, ES write | [#61](https://github.com/Xore/APIARY/issues/61) |
+docs/ml-worker-plan.md:880:| **v0.2** | HBOS fast filter + feature engineering for all 5 sources | [#62](https://github.com/Xore/APIARY/issues/62) |
+docs/ml-worker-plan.md:881:| **v0.3** | LSTM-AE temporal model + sequence windowing | [#63](https://github.com/Xore/APIARY/issues/63) |
+docs/ml-worker-plan.md:882:| **v0.4** | Composite scoring + explanation generation | [#63](https://github.com/Xore/APIARY/issues/63) |
+docs/ml-worker-plan.md:883:| **v0.5–v0.7** | Elasticsearch-polled delivery to the dashboard: originally `dashboard/ml_anomalies.go`, `/api/ml/anomalies`+`/api/ml/stats`, and the `/ml-anomalies` page —
+docs/ml-worker-plan.md:884:| **v0.8** | Retraining scheduler + model versioning | [#65](https://github.com/Xore/APIARY/issues/65) |
+docs/ml-worker-plan.md:885:| **v1.0** | Drift detection + alert threshold tuning UI | [#65](https://github.com/Xore/APIARY/issues/65) |
+docs/ml-worker-plan.md:910:assumption rather than a measurement ([#174](https://github.com/Xore/APIARY/issues/174),
+docs/ml-worker-plan.md:911:open, blocked on live data from [#167](https://github.com/Xore/APIARY/issues/167)).
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && sed -n '40,60p' docs/ROADMAP.md && echo "=== settings-operations 105-135 ===" && sed -n '105,135p' docs/settings-operations.md
+- Documentation has been consolidated: every doc that used to be scattered
+  next to its source now lives under `docs/`, mirroring the source tree
+  ([#670](https://github.com/Xore/APIARY/issues/670), closed
+  2026-08-05).
+- A separate, not-yet-cut-over track: the dashboard is being rewritten as
+  a TanStack Start frontend/BFF + Rust service tier
+  ([#1608](https://github.com/Xore/APIARY/issues/1608) and its
+  follow-ups), living on the `port-foundation` branch behind Compose's
+  `next` profile alongside the current Go dashboard. Feature-complete
+  enough to demo; not yet live in production. See
+  [`DASHBOARD-CUTOVER.md`](DASHBOARD-CUTOVER.md) and
+  [#1628](https://github.com/Xore/APIARY/issues/1628) for what's left
+  before it replaces the row above.
+
+Everything that was tracked here as "Gate 0" and "Release 1" through
+"Release 3" and "Release 5" in prior versions of this document is now closed.
+What remains before a 0.1.0 cut is the gate list below, tracked live in
+[#671](https://github.com/Xore/APIARY/issues/671).
+
+## Pre-0.1.0 gates
+
+=== settings-operations 105-135 ===
+the settings modal's history pane lists retained revisions, and
+`POST /api/settings/config/rollback` restores one. Rollback entries are
+themselves audited and become a new revision, so rollback-of-rollback works.
+
+## Break-glass disabling
+
+If the settings subsystem itself misbehaves:
+
+- **Configuration:** the store already fails open to compiled defaults,
+  read-only, whenever Elasticsearch is unreachable — no manual action needed
+  to force this state; if you need a deliberate outage, block network access
+  from the dashboard to Elasticsearch instead of touching a file.
+- **Per-user preferences:** same posture as configuration above.
+- **Admin configuration API:** revoke the admin role in auth-backend; the
+  admin panes and endpoints are gated server-side on live introspection, so
+  access ends on the next request.
+- **Orphan retention:** `DASHBOARD_USER_RETENTION_DAYS` (default 90) controls
+  the sweep; it cannot fully disable live-introspection revocation, which is
+  always immediate.
+
+## Staged rollout sequence
+
+1. **Observe-only.** Deploy the build. Stores start, metrics appear, the
+   settings UI reads. No admin writes yet; per-user preference writes are the
+   only mutations and are strictly isolated per subject.
+2. **Per-user writes.** Let users save preferences; watch
+   `save_failures_total{kind="preferences"}` and the store health gauges.
+3. **Admin configuration.** Grant admin role to operators and exercise the
+   configuration pane; watch `config_revision`,
+   `save_failures_total{kind="config"}`, and the audit pane.
+4. **Soak.** Run 72 hours multi-user (roadmap §8 exit criteria) before
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && grep -n -iE 'keycloak|auth-backend|introspect|admin role|apiary_admin|realm' docs/settings-operations.md | cut -c1-190
+92:restore, or `keycloak/restore.sh`-style tooling if one exists for these
+118:- **Admin configuration API:** revoke the admin role in auth-backend; the
+119:  admin panes and endpoints are gated server-side on live introspection, so
+122:  the sweep; it cannot fully disable live-introspection revocation, which is
+132:3. **Admin configuration.** Grant admin role to operators and exercise the
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== where does the dashboard introspect the admin role? ===" && grep -rn -iE 'introspect|admin_role|is_admin|roles' arcane/home/honeypot-dashboard/backend-service/src/*.rs 2>/dev/null | grep -iE 'introspect|admin' | cut -c1-190 | head -20; echo; echo "=== keycloak stack env for role name ==="; grep -rn -iE 'KEYCLOAK.*(REALM|CLIENT|ROLE)|ADMIN_ROLE|apiary-admin' arcane/home/honeypot-dashboard/compose.yml arcane/home/honeypot-dashboard-backend/compose.yml arcane/home/honeypot-keycloak/compose.yml 2>/dev/null | cut -c1-190 | head -20
+=== where does the dashboard introspect the admin role? ===
+arcane/home/honeypot-dashboard/backend-service/src/criticality_rules.rs:630:        let raw = json!({"event": "token_mint", "requested_scope": "introspection", "requested_ttl_hours": 1, "act
+arcane/home/honeypot-dashboard/backend-service/src/main.rs:7://! introspects today. Browsers never reach this service directly. An unset
+
+=== keycloak stack env for role name ===
+arcane/home/honeypot-dashboard/compose.yml:105:  # until the VPS-side socat bridge, DNS, and Keycloak client
+arcane/home/honeypot-keycloak/compose.yml:76:          /opt/keycloak/realm-template/apiary-realm.json \
+arcane/home/honeypot-keycloak/compose.yml:77:          > /opt/keycloak/data/import/apiary-realm.json
+arcane/home/honeypot-keycloak/compose.yml:78:        exec /opt/keycloak/bin/kc.sh start --import-realm
+arcane/home/honeypot-keycloak/compose.yml:105:      # not copied), not the real file's directory. A relative ./keycloak/realm
+arcane/home/honeypot-keycloak/compose.yml:111:      - ./keycloak/realm:/opt/keycloak/realm-template:ro
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== realm roles ===" && python3 -c "
+import json,glob
+for f in glob.glob('arcane/home/honeypot-keycloak/keycloak/realm/*.json'):
+    d=json.load(open(f))
+    print(f, '| realm:', d.get('realm'))
+    for r in d.get('roles',{}).get('realm',[]):
+        print('   realm role:', r.get('name'))
+    for c in d.get('clients',[]):
+        for r in c.get('roles',[]) or []:
+            print('   client', c.get('clientId'), 'role:', r.get('name'))
+        for dr in c.get('defaultRoles',[]) or []:
+            print('   client', c.get('clientId'), 'default:', dr)
+" 2>&1 | head -30; echo; echo "=== how dashboard checks admin ==="; grep -rn -iE 'admin' arcane/home/honeypot-dashboard/frontend-next/app/lib/*.ts 2>/dev/null | grep -iE 'role|introspect' | head -10; grep -rln 'realm_access\|resource_access' arcane/home/honeypot-dashboard/ 2>/dev/null | head
+=== realm roles ===
+arcane/home/honeypot-keycloak/keycloak/realm/apiary-realm.json | realm: apiary
+   realm role: apiary-user
+   realm role: apiary-admin
+
+=== how dashboard checks admin ===
+arcane/home/honeypot-dashboard/frontend-next/src/lib/oidc.server.ts
+> build · stealth
+[0m← [0mEdit docs/settings-operations.md
+Index: docs/settings-operations.md
+===================================================================
+--- docs/settings-operations.md
++++ docs/settings-operations.md
+@@ -114,11 +114,14 @@
+   read-only, whenever Elasticsearch is unreachable — no manual action needed
+   to force this state; if you need a deliberate outage, block network access
+   from the dashboard to Elasticsearch instead of touching a file.
+ - **Per-user preferences:** same posture as configuration above.
+-- **Admin configuration API:** revoke the admin role in auth-backend; the
+-  admin panes and endpoints are gated server-side on live introspection, so
+-  access ends on the next request.
++- **Admin configuration API:** revoke the `apiary-admin` role in Keycloak
++  (realm `apiary`, roles defined in
++  [`arcane/home/honeypot-keycloak/keycloak/realm/apiary-realm.json`](../arcane/home/honeypot-keycloak/keycloak/realm/apiary-realm.json));
++  the admin panes and endpoints are gated server-side on live
++  introspection, so access ends on the next request. `Xore/auth-backend`
++  was the pre-Keycloak home for those roles and is retired.
+ - **Orphan retention:** `DASHBOARD_USER_RETENTION_DAYS` (default 90) controls
+   the sweep; it cannot fully disable live-introspection revocation, which is
+   always immediate.
+ 
+
+> build · stealth
+[0m← [0mEdit docs/ROADMAP.md
+Index: docs/ROADMAP.md
+===================================================================
+--- docs/ROADMAP.md
++++ docs/ROADMAP.md
+@@ -40,17 +40,16 @@
+ - Documentation has been consolidated: every doc that used to be scattered
+   next to its source now lives under `docs/`, mirroring the source tree
+   ([#670](https://github.com/Xore/APIARY/issues/670), closed
+   2026-08-05).
+-- A separate, not-yet-cut-over track: the dashboard is being rewritten as
+-  a TanStack Start frontend/BFF + Rust service tier
++- The dashboard rewrite is done, not pending: the TanStack Start
++  frontend/BFF + Rust service tier
+   ([#1608](https://github.com/Xore/APIARY/issues/1608) and its
+-  follow-ups), living on the `port-foundation` branch behind Compose's
+-  `next` profile alongside the current Go dashboard. Feature-complete
+-  enough to demo; not yet live in production. See
+-  [`DASHBOARD-CUTOVER.md`](DASHBOARD-CUTOVER.md) and
+-  [#1628](https://github.com/Xore/APIARY/issues/1628) for what's left
+-  before it replaces the row above.
++  follow-ups) cut over on 2026-08-22 under
++  [#1628](https://github.com/Xore/APIARY/issues/1628), the Go dashboard is
++  deleted from Compose, and `dashboard-next` runs unconditionally — no
++  `next` profile, no runtime fallback. See
++  [`DASHBOARD-CUTOVER.md`](DASHBOARD-CUTOVER.md).
+ 
+ Everything that was tracked here as "Gate 0" and "Release 1" through
+ "Release 3" and "Release 5" in prior versions of this document is now closed.
+ What remains before a 0.1.0 cut is the gate list below, tracked live in
+
+> build · stealth
+Now the PIPELINES.md index catalog — the init stack is authoritative:
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && ls arcane/home/honeypot-init/ && echo "=== index names authored by init ===" && grep -rhoE '"index_patterns"|index_patterns|index\.patterns' arcane/home/honeypot-init/ 2>/dev/null | sort -u | head; echo; grep -rn -E '^(index_patterns|  index_patterns|.*"index_patterns")' arcane/home/honeypot-init/*.json arcane/home/honeypot-init/**/*.json 2>/dev/null | head -40
+analysis
+arkime
+compose.yml
+snare
+=== index names authored by init ===
+"index_patterns"
+index_patterns
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && ls -R arcane/home/honeypot-init/analysis | head -40 && echo "=== index_patterns occurrences ===" && grep -rn 'index_patterns' arcane/home/honeypot-init/ | cut -c1-200
+arcane/home/honeypot-init/analysis:
+elasticsearch-setup.sh
+honeypot-kibana-setup.sh
+=== index_patterns occurrences ===
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:354:  "index_patterns": ["honeypot-v2-*"],
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:407:  "index_patterns": ["suricata-*"],
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:468:  "index_patterns": ["portbridge-v2-*"],
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:528:  "index_patterns": [
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:655:  "index_patterns": ["zeek-proxy-v1-*"],
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:711:  "index_patterns": ["extracted-files-v1-*"],
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:762:  "index_patterns": ["huginn-v1-*"],
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:808:  "index_patterns": ["traefik-v1-*"],
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:862:  "index_patterns": ["dashboard-backend-v1-*"],
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:899:  "index_patterns": ["dashboard-bff-v1-*"],
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:949:  "index_patterns": ["dionaea-incidents-v1-*"],
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:1018:  "index_patterns": ["${index_name}"],
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:1061:  "index_patterns": ["ghidra-report-artifacts-v1"],
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:1098:  "index_patterns": ["sandbox-export-artifacts-v1"],
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:1137:  "index_patterns": ["dashboard-alert-state-v1"],
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:1172:  "index_patterns": ["dashboard-problem-reports-v1"],
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:1226:  "index_patterns": ["'"${dashboard_settings_index}"'"],
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:1256:  "index_patterns": ["dashboard-static-analysis-v1"],
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:1298:  "index_patterns": ["dashboard-payload-inventory-v1"],
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:1338:  "index_patterns": ["dashboard-generated-reports-v1"],
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:1378:  "index_patterns": ["cowrie-ttylog-v1"],
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:1410:  "index_patterns": ["dashboard-workbench-runs-v1"],
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:1467:  "index_patterns": ["dashboard-workbench-recipes-v1"],
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:1504:  --data-binary '{"index_patterns":["dead-letter-honeypot*"],"priority":450,"template":{"settings":{"index.lifecycle.name":"dead-letter-6
+arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:1618:  --data-binary '{"index_patterns":["*","-arkime_sessions3-*","-arkime_history_v1-*"],"priority":1,"template":{"settings":{"index.number_
+arcane/home/honeypot-init/arkime/composable-templates.js:113:    index_patterns: [family.pattern],
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && sed -n '520,545p;1010,1025p' arcane/home/honeypot-init/analysis/elasticsearch-setup.sh
+# investigation that has the packets and not the metadata -- or the reverse --
+# is worse off than one missing both, because it can see that something
+# happened and not what. Zeek metadata runs roughly 1-2 GB/day against pcap's
+# ~13.8, so matching the window is cheap relative to what it protects.
+curl -fsS -X PUT "$es_url/_index_template/zeek-events" \
+  -H 'Content-Type: application/json' \
+  --data-binary @- <<'JSON'
+{
+  "index_patterns": [
+    "zeek-v1-*",
+    "zeek-proxy-v1-*"
+  ],
+  "priority": 470,
+  "template": {
+    "settings": {
+      "index.default_pipeline": "geoip-honeypot",
+      "index.lifecycle.name": "zeek-60d",
+      "index.number_of_replicas": 0,
+      "index.mapping.total_fields.limit": 500,
+      "index.mapping.ignore_malformed": true,
+      "index.refresh_interval": "5s"
+    },
+    "mappings": {
+      "properties": {
+        "zeek": {
+          "type": "flattened"
+  "yara-analysis-v1:yara"
+do
+  index_name=${spec%%:*}
+  ns=${spec#*:}
+  curl -fsS -X PUT "$es_url/_index_template/${index_name%-v1}" \
+    -H 'Content-Type: application/json' \
+    --data-binary "$(cat <<JSON
+{
+  "index_patterns": ["${index_name}"],
+  "priority": 460,
+  "template": {
+    "settings": {
+      "index.lifecycle.name": "analysis-results-180d",
+      "index.number_of_replicas": 0,
+      "index.mapping.total_fields.limit": 500,
+      "index.mapping.ignore_malformed": true,
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && python3 - <<'PY'
+import re
+p='arcane/home/honeypot-init/analysis/elasticsearch-setup.sh'
+s=open(p).read()
+pats=set()
+# index_patterns arrays (multi and single line)
+for m in re.finditer(r'"index_patterns":\s*\[(.*?)\]', s, re.S):
+    for x in re.findall(r'"([^"]+)"', m.group(1)):
+        pats.add(x)
+# loop-driven ones
+for m in re.finditer(r'for spec in (.*?); do', s, re.S):
+    body=m.group(1)
+    for x in re.findall(r'([a-z0-9-]+-v1(?::[a-z0-9-]+)?)', body):
+        pats.add(x)
+print('--- index patterns from init (%d) ---' % len(pats))
+for x in sorted(pats): print(' ', x)
+ilm=set(re.findall(r'"index.lifecycle.name":\s*"([^"]+)"', s))
+print('--- ILM policies referenced (%d) ---' % len(ilm))
+for x in sorted(ilm): print(' ', x)
+print('--- ILM policy definitions ---')
+for m in re.finditer(r'_ilm/policy/([a-z0-9-]+)', s): print(' ', m.group(1))
+PY
+--- index patterns from init (42) ---
+  ${index_name}
+  '
+  *
+  -arkime_history_v1-*
+  -arkime_sessions3-*
+  analysis-v1
+  cape-analysis-v1:cape
+  cowrie-ttylog-v1
+  dashboard-alert-state-v1
+  dashboard-backend-v1-*
+  dashboard-bff-v1-*
+  dashboard-config-v1
+  dashboard-generated-reports-v1
+  dashboard-payload-inventory-v1
+  dashboard-problem-reports-v1
+  dashboard-reports-definitions-v1
+  dashboard-static-analysis-v1
+  dashboard-users-v1
+  dashboard-workbench-recipes-v1
+  dashboard-workbench-runs-v1
+  dead-letter-honeypot*
+  definitions-v1
+  dionaea-incidents-v1-*
+  extracted-files-v1-*
+  ghidra-analysis-v1
+  ghidra-analysis-v1:ghidra
+  ghidra-report-artifacts-v1
+  github-analysis-v1:github
+  honeypot-v2-*
+  huginn-v1-*
+  portbridge-v2-*
+  revdeck-analysis-v1:revdeck
+  sandbox-analysis-v1
+  sandbox-analysis-v1:sandbox
+  sandbox-export-artifacts-v1
+  suricata-*
+  traefik-v1-*
+  workbench-runs-v1
+  workbench-runs-v1:workbench
+  yara-analysis-v1:yara
+  zeek-proxy-v1-*
+  zeek-v1-*
+--- ILM policies referenced (12) ---
+  analysis-results-180d
+  dashboard-app-30d
+  dead-letter-60d
+  dionaea-incidents-30d
+  extracted-files-30d
+  honeypot-30d
+  huginn-30d
+  portbridge-30d
+  suricata-7d
+  traefik-30d
+  zeek-60d
+  zeek-proxy-60d
+--- ILM policy definitions ---
+  honeypot-30d
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && sed -n '995,1015p' arcane/home/honeypot-init/analysis/elasticsearch-setup.sh && echo "=== ILM policy PUTs ===" && grep -n '_ilm/policy' arcane/home/honeypot-init/analysis/elasticsearch-setup.sh | cut -c1-140
+# ("short per-sensor values only, never hit this") -- found live (#1295,
+# 2026-08-12) that was wrong: a real MSSQL CLR-assembly RCE attempt landed
+# a multi-hundred-KB command string there, dead-lettering the whole
+# document. `honeypot` and dionaea-incidents' `data` both got the same
+# ignore_above:32000 guard added above/below once this was found.
+# ignore_above makes ES skip indexing (not storing) an overlong leaf
+# instead -- still present and returned in _source/the document view, just
+# not term-searchable.
+for spec in \
+  "ghidra-analysis-v1:ghidra" \
+  "sandbox-analysis-v1:sandbox" \
+  "github-analysis-v1:github_analysis" \
+  "workbench-runs-v1:workbench" \
+  "cape-analysis-v1:cape" \
+  "revdeck-analysis-v1:revdeck" \
+  "yara-analysis-v1:yara"
+do
+  index_name=${spec%%:*}
+  ns=${spec#*:}
+  curl -fsS -X PUT "$es_url/_index_template/${index_name%-v1}" \
+    -H 'Content-Type: application/json' \
+=== ILM policy PUTs ===
+58:  curl -fsS -X PUT "$es_url/_ilm/policy/$name" \
+85:curl -fsS -X PUT "$es_url/_ilm/policy/honeypot-30d" \
+> build · stealth
+Now let me compare the authoritative index list against PIPELINES.md's catalog:
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== PIPELINES.md index-family catalog ===" && grep -n -E '^\|' docs/PIPELINES.md | cut -c1-200 | head -60
+=== PIPELINES.md index-family catalog ===
+101:| Group | Sensors | Why | Fix |
+102:|---|---|---|---|
+103:| PROXY-aware | http, api-honeypot, multipot, tanner, dnp3, dicompot, citrix, rdp, endlessh, cisco-asa (WebVPN side), galah (proxied door, XFF), hellpot (proxied door, XFF) | the VPS-side portbrid
+104:| Tunnel-blind (joined) | cowrie, dionaea + its incident variant (#623), every conpot persona, dns-honeypot, cisco-asa (IKE side), elasticpot, mailoney, hellpot (raw door), beelzebub, sentrypeer, 
+146:| Path | Used by | Contract |
+147:|---|---|---|
+148:| ES query (PIT + `search_after`) | every historical view | 30s timeout, ≤10k window, `_shard_doc` tie-breaker |
+149:| Shared serviceJSON cache | all frontend server functions | 15s TTL in-process + Redis shared layer; ConcurrencyLimiter backpressure |
+150:| SSE `/api/v1/live` | live tail pages | resume carries the full sort tuple, so same-millisecond rows are neither dropped nor duplicated (#1979 closed by #2039) |
+151:| Bounded local-file tail | suricata + portbridge only | the two index families without a `honeypot-v2-*` mirror (#1103 Cat. 2); every other sensor is ES-only by design |
+192:| Loop | Reads | Writes | Cadence | Notes |
+193:|---|---|---|---|---|
+194:| attacker-identity | `honeypot-v2-*`, `*-analysis-v1` verdicts | `attackers-v1` | 15m | union of observed behavior + analysis verdicts per source IP; standalone Go worker stack |
+195:| correlator | raw events | `campaigns-v1`, `attacker-clusters-v1` | every cycle | pure aggregations, recomputed from scratch; groups ≥2 IPs sharing fingerprint/hash/ASN/provider-class |
+196:| agent-intrusion | raw events | `agent-intrusion-campaigns` | 300s | deterministic criticality rules escalate; LLM never gates escalation; deterministic sha256 campaign_id ⇒ upsert not duplicate 
+197:| zeek-proxy-attribution | zeek flows + portbridge log | flow docs | 120s | attributes relayed flows to attackers; ordering rule above applies here too |
+198:| dashboard-rollups (#2046) | raw event indices (default pattern) | `overview-rollup-v1`, `geo-rollup-v1`, `attack-rollup-v1` | `ROLLUP_RUN_INTERVAL_SECS`, default 300s | pure-ES derived overviews
+199:| ml-worker / llm-worker | payloads + events | anomaly scores + `dashboard-ml-anomaly-ack-v1` | continuous | scoring semantics tracked in #1969/#1974 |
+200:| payload-inventory | disk stores | `dashboard-payload-inventory-v1/-bytes-v1` | periodic scan | HEAD-exists fast path (#1221) |
+201:| es-results-importer | root-owned result spools | `*-analysis-v1` | continuous | read-only mirror, shard-partitionable |
+202:| vault-worker (#2290) | `*-analysis-v1`, `llm-analysis` | markdown notes under the knowledge-vault directory (#2289) | `VAULT_POLL_INTERVAL_SECONDS`, default 900s | one note per payload/session e
+258:| Index family | Written by | Read by |
+259:|---|---|---|
+260:| `honeypot-v2-*`, `suricata-v2-*`, `portbridge-v2-*` | Filebeat (+ ingest pipeline) | dashboard, all workers, Kibana, EveBox (`suricata-*`) |
+261:| `dead-letter-honeypot` | ES (rejected docs) | dead-letters page, source-health |
+262:| `attackers-v1` | attacker-identity-worker | backend-service (attackers, overview, graphs) |
+263:| `campaigns-v1`, `attacker-clusters-v1` | correlator-worker | backend-service (clusters, kill-chain, investigate) |
+264:| `agent-intrusion-campaigns` | backend-service agent_intrusion loop | agent-campaigns page |
+265:| `ghidra-analysis-v1`, `sandbox-analysis-v1`, `github-analysis-v1`, `cape-analysis-v1`, `revdeck-analysis-v1` | es-results-importer | identity worker, investigate/payload surfaces |
+266:| `yara-analysis-v1` | YARA join via inventory | backend-service charts + investigate |
+267:| `dashboard-payload-inventory-v1`, `-bytes-v1` | payload-inventory-worker | payloads page, charts |
+268:| `dashboard-canarytokens-v1` | canarytokens-adapter | canarytokens page + settings pane |
+269:| `cowrie-ttylog-v1` | Filebeat | tty-replay, recordings |
+270:| `mailoney-mail-v1` | Filebeat | sessions/mail views |
+271:| `reporter-metrics-v1` | reporter | settings stats pane |
+272:| `dashboard-alert-state-v1` | alert-notifier loop | alerts page |
+273:| `overview-rollup-v1`, `geo-rollup-v1`, `attack-rollup-v1` | dashboard-rollups loop (#2046) | overview/map/kill-chain dashboard reads |
+274:| anomaly score + ack indices | ml/llm workers | ml-anomalies page, composite score |
+275:| `dashboard-users-v1`, `dashboard-workbench-runs-v1`, report/problem-report indices | backend-service itself | their pages |
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== does init define a suricata index template pattern? ===" && sed -n '400,412p' arcane/home/honeypot-init/analysis/elasticsearch-setup.sh && echo "=== filebeat suricata index ===" && grep -rn 'suricata' arcane/home/honeypot-elk/analysis/filebeat.yml | grep -iE 'index|output.elasticsearch' | head
+=== does init define a suricata index template pattern? ===
+# text+.keyword mapping (`suricata.eve.tls.ja4.keyword`), which no template ever
+# declared. Same pair the honeypot and portbridge templates map, so one terms
+# agg correlates fingerprints across all three raw families.
+curl -fsS -X PUT "$es_url/_index_template/suricata-events" \
+  -H 'Content-Type: application/json' \
+  --data-binary @- <<'JSON'
+{
+  "index_patterns": ["suricata-*"],
+  "priority": 400,
+  "template": {
+    "settings": {
+      "index.default_pipeline": "geoip-honeypot",
+      "index.lifecycle.name": "suricata-7d",
+=== filebeat suricata index ===
+597:  # their own suricata-stats-* index, so they are shipped again. The
+598:  # suricata-* index template raises total_fields.limit to 5000.
+612:  # index prefix; the generic suricata-* data view still matches all of them.
+614:    - index: "suricata-v2-%{[suricata.eve.event_type]}-%{+yyyy.MM.dd}"
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== index-name literals in backend-service ===" && grep -rhoE '"[a-z0-9][a-z0-9-]*-v[0-9](\*|"|-[a-z0-9-]*)"|"[a-z0-9-]+-(campaigns|mail|metrics|canarytokens)[a-z0-9-]*"' arcane/home/honeypot-dashboard/backend-service/src/ | tr -d '"' | sort | uniq -c | sort -rn | head -50
+=== index-name literals in backend-service ===
+     11 dashboard-canarytokens-v1
+      6 mailoney-mail-v1
+      4 agent-intrusion-campaigns
+      3 reporter-metrics-v1
+      3 hp-mailoney
+      3 hp-canarytokens-switchboard
+      3 hp-canarytokens-http-router
+      3 hp-canarytokens-frontend
+      3 hp-canarytokens-adapter
+      2 ml-worker-metrics
+      2 hp-canarytokens-redis
+      2 honeypot-v2-cowrie
+      2 honeypot-mailoney
+      2 honeypot-canarytokens
+      1 zeek-v1-conn
+      1 suricata-v2-flow
+      1 agent-campaigns
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== index names: broader sweep across the whole arcane/home + workers ===" && grep -rhoE '\b(attackers|campaigns|attacker-clusters|agent-intrusion-campaigns|overview-rollup|geo-rollup|attack-rollup|dashboard-ml-anomaly-ack|dashboard-payload-inventory[a-z-]*|mailoney-mail|reporter-metrics|dashboard-canarytokens|workbench-runs|dashboard-workbench-runs)-v?[0-9]*\*?\b' --include='*.rs' --include='*.py' --include='*.go' --include='*.yml' arcane/ ml-worker/ llm-worker/ auth-events-worker/ 2>/dev/null | sort | uniq -c | sort -rn | head -40
+=== index names: broader sweep across the whole arcane/home + workers ===
+     40 attackers-v1
+     32 campaigns-v1
+     20 attacker-clusters-v1
+     17 dashboard-payload-inventory-v1
+     14 dashboard-canarytokens-v1
+      8 mailoney-mail-v1
+      6 reporter-metrics-v1
+      4 geo-rollup-v1
+      3 attackers-
+      2 overview-rollup-v1
+      2 dashboard-workbench-runs-v1
+      2 dashboard-ml-anomaly-ack-v1
+      2 attack-rollup-v1
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== payload-inventory-bytes ===" && grep -rn 'payload-inventory' --include='*.rs' --include='*.py' --include='*.yml' arcane/ | grep -oE 'dashboard-payload-inventory[a-z0-9-]*' | sort | uniq -c; echo "=== ml anomaly score index ==="; grep -rnoE 'ml-[a-z0-9-]*anomal[a-z0-9-]*|anomaly-score[a-z0-9-]*' --include='*.rs' --include='*.py' --include='*.yml' arcane/ ml-worker/ llm-worker/ 2>/dev/null | grep -oE '[a-z0-9-]*anomal[a-z0-9-]*' | sort | uniq -c | head
+=== payload-inventory-bytes ===
+     10 dashboard-payload-inventory-v1
+=== ml anomaly score index ===
+     33 ml-anomalies
+      1 ml-anomalies-retention
+      1 ml-anomaly
+      2 ml-anomaly-ack-v1
+      1 ml-anomaly-events
+      2 ml-anomaly-scores
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== 'ml-anomalies' index usage ===" && grep -rn 'ml-anomalies' --include='*.rs' --include='*.py' --include='*.yml' arcane/ ml-worker/ 2>/dev/null | cut -c1-170 | head -20; echo; echo "=== payload inventory bytes index: search for 'bytes-v1' ==="; grep -rn 'bytes-v1\|inventory_bytes\|payload_bytes' --include='*.rs' arcane/home/honeypot-dashboard/backend-service/src/ | cut -c1-170 | head -12
+=== 'ml-anomalies' index usage ===
+arcane/home/honeypot-dashboard/backend-service/src/charts.rs:686:/// model plus the composite (#1284), reshaped from ml-anomalies docs.
+arcane/home/honeypot-dashboard/backend-service/src/charts.rs:696:        .search_index(&["ml-anomalies"], body)
+arcane/home/honeypot-dashboard/backend-service/src/detail.rs:8://! - POST /api/v1/ml-anomalies/ack — ack state keyed by the anomaly doc
+arcane/home/honeypot-dashboard/backend-service/src/detail.rs:520:/// GET /api/v1/ml-anomalies/stats — #2396's exact all-time backlog numbers.
+arcane/home/honeypot-dashboard/backend-service/src/detail.rs:535:            &["ml-anomalies"],
+arcane/home/honeypot-dashboard/backend-service/src/detail.rs:543:            &["ml-anomalies"],
+arcane/home/honeypot-dashboard/backend-service/src/detail.rs:578:/// POST /api/v1/ml-anomalies/ack-all — #1566's bulk acknowledge, ported
+arcane/home/honeypot-dashboard/backend-service/src/detail.rs:596:            &["ml-anomalies"],
+arcane/home/honeypot-dashboard/backend-service/src/detail.rs:630:/// GET /api/v1/ml-anomalies/acks — key → ack record, merged client-side
+arcane/home/honeypot-dashboard/backend-service/src/detail.rs:661:/// POST /api/v1/ml-anomalies/disposition — #1968's operator verdict, written
+arcane/home/honeypot-dashboard/backend-service/src/detail.rs:662:/// ONTO the ml-anomalies document itself so the labelled corpus #1794/#1797
+arcane/home/honeypot-dashboard/backend-service/src/detail.rs:699:        .update_doc("ml-anomalies", &body.key, doc)
+arcane/home/honeypot-dashboard/backend-service/src/ics_severity.rs:14://! ml-anomalies and agent-campaigns already badge their own
+arcane/home/honeypot-dashboard/backend-service/src/main.rs:355:        .route("/api/v1/ml-anomalies/ack", post(detail::ml_anomaly_ack))
+arcane/home/honeypot-dashboard/backend-service/src/main.rs:356:        .route("/api/v1/ml-anomalies/ack-all", post(detail::ml_anomaly_ack_all))
+arcane/home/honeypot-dashboard/backend-service/src/main.rs:357:        .route("/api/v1/ml-anomalies/acks", get(detail::ml_anomaly_acks))
+arcane/home/honeypot-dashboard/backend-service/src/main.rs:358:        .route("/api/v1/ml-anomalies/stats", get(detail::ml_anomaly_stats))
+arcane/home/honeypot-dashboard/backend-service/src/main.rs:359:        .route("/api/v1/ml-anomalies/disposition", post(detail::ml_anomaly_disposition))
+arcane/home/honeypot-dashboard/backend-service/src/obs.rs:372:        assert_eq!(family_for_path("/api/v1/store/ml-anomalies?offset=0"), "store");
+arcane/home/honeypot-dashboard/backend-service/src/stores.rs:73:/// at all: ml-anomalies asked for "timestamp" where the worker writes
+
+=== payload inventory bytes index: search for 'bytes-v1' ===
+arcane/home/honeypot-dashboard/backend-service/src/main.rs:62:mod payload_bytes;
+arcane/home/honeypot-dashboard/backend-service/src/payload_bytes.rs:1://! On-demand payload-bytes mirror, ported from payload_bytes_es.go's
+arcane/home/honeypot-dashboard/backend-service/src/payload_bytes.rs:2://! mirrorOnePayloadBytes. dashboard-payload-bytes-v1 is normally kept warm
+arcane/home/honeypot-dashboard/backend-service/src/payload_bytes.rs:9://! as every other read this crate serves from dashboard-payload-bytes-v1
+arcane/home/honeypot-dashboard/backend-service/src/payload_bytes.rs:20:const PAYLOAD_BYTES_INDEX: &str = "dashboard-payload-bytes-v1";
+arcane/home/honeypot-dashboard/backend-service/src/payload_bytes.rs:26:/// Mirrors one payload's bytes into dashboard-payload-bytes-v1 if no
+arcane/home/honeypot-dashboard/backend-service/src/payload_detail.rs:3://! results, and a bounded hex preview from dashboard-payload-bytes-v1
+arcane/home/honeypot-dashboard/backend-service/src/payload_detail.rs:20:/// Matches Go's payloadBytesRawCap (payload_bytes_es.go) — the same
+arcane/home/honeypot-dashboard/backend-service/src/payload_detail.rs:21:/// dashboard-payload-bytes-v1 documents this crate's payload_bytes.rs
+arcane/home/honeypot-dashboard/backend-service/src/payload_detail.rs:77:            &["dashboard-payload-bytes-v1"],
+arcane/home/honeypot-dashboard/backend-service/src/payload_detail.rs:88:        crate::payload_bytes::ensure_mirrored(&state, &hash).await;
+arcane/home/honeypot-dashboard/backend-service/src/payload_detail.rs:91:            .search_index(&["dashboard-payload-bytes-v1"], json!({"size": 1, "query": {"term": {"h
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && wc -l docs/PIPELINES.md docs/OPERATIONS.md docs/STORAGE.md docs/TESTING.md docs/RECOVERY.md docs/KEYCLOAK-OPERATIONS.md docs/DASHBOARD-CUTOVER.md docs/STACK-REBUILD.md docs/ROCKY-10-MIGRATION.md docs/GEOIP-THREAT-INTEL.md
+278 docs/PIPELINES.md
+   274 docs/OPERATIONS.md
+   128 docs/STORAGE.md
+   202 docs/TESTING.md
+    95 docs/RECOVERY.md
+   388 docs/KEYCLOAK-OPERATIONS.md
+   201 docs/DASHBOARD-CUTOVER.md
+   254 docs/STACK-REBUILD.md
+   102 docs/ROCKY-10-MIGRATION.md
+    79 docs/GEOIP-THREAT-INTEL.md
+  2001 total
+> build · stealth
+[0m→ [0mRead docs/PIPELINES.md 
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== enrichment watch list ===" && sed -n '718,800p' arcane/home/honeypot-dashboard/compose.yml | grep -vE '^\s*#' | head -60
+=== enrichment watch list ===
+    container_name: hp-apiary-worker-enrichment
+    restart: unless-stopped
+    network_mode: none
+    environment:
+      - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
+      - APIARY_ALLOW_UNAUTH_DEV=${APIARY_ALLOW_UNAUTH_DEV:-}
+      - WORKER_LOOPS=ip-enrichment
+      - LOGS_DIR=/logs
+      - OUT_DIR=/logs/enriched
+      - STATE_DIR=/state/ip-enrichment-worker
+      - REFRESH_INTERVAL=2s
+      - PENDING_TIMEOUT=5s
+      - OUTPUT_MAX_BYTES=${JSON_STREAM_MAX_BYTES:-67108864}
+      - TZ=Europe/Berlin
+    volumes:
+      - /opt/stacks/apiary/logs:/logs:ro
+      - /opt/stacks/apiary/logs/enriched:/logs/enriched:rw
+      - /opt/stacks/apiary/state/ip-enrichment-worker:/state/ip-enrichment-worker:rw
+    group_add:
+      - "${DEPLOY_RUNNER_GID:-980}"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== watch list in the enrichment worker source ===" && grep -rn -E 'WATCH|watched' --include='*.rs' arcane/home/honeypot-dashboard/backend-service/src/ip_enrichment*.rs arcane/home/honeypot-dashboard/backend-service/src/*enrich* 2>/dev/null | head -20; echo "--- files ---"; ls arcane/home/honeypot-dashboard/backend-service/src/ | grep -iE 'enrich'
+=== watch list in the enrichment worker source ===
+arcane/home/honeypot-dashboard/backend-service/src/ip_enrichment/canonical.rs:12://! watched purely for field normalization. dns-honeypot and every conpot
+arcane/home/honeypot-dashboard/backend-service/src/ip_enrichment/canonical.rs:13://! persona are also watched but classify.go sets none of these fields for
+arcane/home/honeypot-dashboard/backend-service/src/ip_enrichment/mod.rs:132:    // attacker IP via PROXY protocol, watched solely so canonical.go's
+--- files ---
+ip_enrichment
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && sed -n '95,175p' arcane/home/honeypot-dashboard/backend-service/src/ip_enrichment/mod.rs
+/// Finds every input file this worker is responsible for — mirrors
+/// discoverSources exactly, including conpot's glob-by-persona-subdirectory
+/// discovery.
+fn discover_sources(logs_dir: &Path, out_dir: &Path, state_dir: &Path) -> Vec<Source> {
+    let mut sources = Vec::new();
+    let mut add = |name: &str, input: PathBuf, enrich: EnrichFn| {
+        sources.push(Source {
+            name: name.to_string(),
+            input,
+            output: out_dir.join(format!("{name}.json")),
+            state_path: state_dir.join(format!("{name}.offset")),
+            enrich,
+            stats: Arc::new(SourceStats::default()),
+        });
+    };
+
+    add("cowrie", logs_dir.join("cowrie").join("cowrie.json"), enrich_line);
+    add("dionaea", logs_dir.join("dionaea").join("dionaea.json"), enrich_line);
+    add("dns-honeypot", logs_dir.join("dns-honeypot").join("dns-honeypot.json"), enrich_line);
+    add("cisco-asa-honeypot", logs_dir.join("cisco-asa-honeypot").join("cisco-asa-honeypot.json"), enrich_line);
+    // #623: no top-level src_ip at all — needs its own enrich function.
+    add("dionaea-incident", logs_dir.join("dionaea").join("dionaea_incident.json"), enrich_dionaea_incident_line);
+    add("beelzebub", logs_dir.join("beelzebub").join("beelzebub.json"), enrich_beelzebub_line);
+    add("hellpot", logs_dir.join("hellpot").join("HellPot.log"), enrich_hellpot_line);
+    // elasticpot's native log shape already matches enrichLine's exactly
+    // (flat top-level src_ip/src_port, stable "sensor" literal via its own
+    // config) — no bespoke enrich function, no canonical.go promotion case
+    // either (it captures no credentials).
+    add("elasticpot", logs_dir.join("elasticpot").join("elasticpot.json"), enrich_line);
+    add("galah", logs_dir.join("galah").join("event_log.json"), enrich_galah_line);
+    add("sentrypeer", logs_dir.join("sentrypeer").join("sentrypeer.json"), enrich_sentrypeer_line);
+    // wordpot's own source left with its retirement (#2381): its stack,
+    // filebeat config and Traefik bridge no longer produce a wordpot.log.
+    // mailoney's own log shape already matches enrichLine's exactly.
+    add("mailoney", logs_dir.join("mailoney").join("mailoney.json"), enrich_line);
+
+    // #1217: field-normalization-only sources — already carry the real
+    // attacker IP via PROXY protocol, watched solely so canonical.go's
+    // per-sensor promotion runs on their lines too.
+    add("multipot", logs_dir.join("multipot").join("multipot.json"), enrich_line);
+    add("tanner", logs_dir.join("tanner").join("tanner_report.json"), enrich_line);
+    add("http-honeypot", logs_dir.join("http-honeypot").join("http.json"), enrich_line);
+    add("citrix-honeypot", logs_dir.join("citrix-honeypot").join("citrix-honeypot.json"), enrich_line);
+    add("rdp-honeypot", logs_dir.join("rdp-honeypot").join("rdp-honeypot.json"), enrich_line);
+    add("sonicwall-sma-honeypot", logs_dir.join("sonicwall-sma-honeypot").join("sonicwall-sma-honeypot.json"), enrich_line);
+
+    if let Ok(entries) = std::fs::read_dir(logs_dir) {
+        let mut personas: Vec<String> = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_dir())
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|name| {
+                (name == "conpot" || name.starts_with("conpot-"))
+                    && logs_dir.join(name).join("conpot.json").is_file()
+            })
+            .collect();
+        personas.sort(); // deterministic discovery order
+        for persona in personas {
+            let input = logs_dir.join(&persona).join("conpot.json");
+            add(&persona, input, enrich_line);
+        }
+    }
+
+    sources
+}
+
+async fn run_source(
+    mut source: Source,
+    vm: Arc<RwLock<ViaMap>>,
+    tftp_vm: Arc<RwLock<ViaMap>>,
+    refresh: Duration,
+    pending_timeout: Duration,
+) {
+    let mut writer = match OutputWriter::open(source.output.clone(), env_i64("OUTPUT_MAX_BYTES", 67_108_864) as u64) {
+        Ok(w) => w,
+        Err(error) => {
+            tracing::warn!(source = %source.name, path = %source.output.display(), %error, "ip-enrichment: open output failed");
+            return;
+        }
+    };
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== conpot log dir mounts per persona ===" && grep -n -E '^  conpot|logs/conpot|/logs' arcane/home/honeypot-conpot/compose.yml | cut -c1-150 && echo && echo "=== named source count (hardcoded add() calls) ===" && python3 -c "
+import re
+s=open('arcane/home/honeypot-dashboard/backend-service/src/ip_enrichment/mod.rs').read()
+# only the discover_sources body
+body=s.split('fn discover_sources')[1].split('async fn run_source')[0]
+adds=re.findall(r'add\(\"([a-z0-9-]+)\"', body)
+print(len(adds), adds)
+"
+=== conpot log dir mounts per persona ===
+47:# are unchanged (/opt/stacks/apiary/logs/conpot*) so Filebeat needs no
+62:  conpot:
+101:      - /opt/stacks/apiary/logs/conpot:/var/log/conpot
+152:  conpot-s7-1200:
+183:      - /opt/stacks/apiary/logs/conpot-s7-1200:/var/log/conpot
+216:  conpot-s7-1500:
+247:      - /opt/stacks/apiary/logs/conpot-s7-1500:/var/log/conpot
+271:  conpot-iec104:
+300:      - /opt/stacks/apiary/logs/conpot-iec104:/var/log/conpot
+325:  conpot-guardian:
+354:      - /opt/stacks/apiary/logs/conpot-guardian:/var/log/conpot
+386:  conpot-kamstrup:
+417:      - /opt/stacks/apiary/logs/conpot-kamstrup:/var/log/conpot
+444:  conpot_net:
+446:  conpot_s7_1200_net:
+448:  conpot_s7_1500_net:
+450:  conpot_iec104_net:
+452:  conpot_guardian_net:
+454:  conpot_kamstrup_net:
+
+=== named source count (hardcoded add() calls) ===
+17 ['cowrie', 'dionaea', 'dns-honeypot', 'cisco-asa-honeypot', 'dionaea-incident', 'beelzebub', 'hellpot', 'elasticpot', 'galah', 'sentrypeer', 'mailoney', 'multipot', 'tanner', 'http-honeypot', 'citrix-honeypot', 'rdp-honeypot', 'sonicwall-sma-honeypot']
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== portbridge rules: name -> port, pp flag ===" && grep -rn -E 'sonicwall|sm[a-z]*8543|8543' vps/ --include='*.yml' --include='*.yaml' --include='*.toml' --include='*.sh' | cut -c1-190 | head -20
+=== portbridge rules: name -> port, pp flag ===
+vps/docker-compose.yml:577:      - "RULES=tcp:22:10.8.0.2:19022 tcp:23:10.8.0.2:19023 tcp:25:10.8.0.2:25 tcp:5432:10.8.0.2:5432:pp tcp:5900:10.8.0.2:5900:pp tcp:6379:10.8.0.2:6379:pp tcp:920
+vps/honeypot-firewall.sh:41:TCP_PORTS="21 22 23 25 102 110 135 143 389 445 502 1025 1080 1102 1433 1502 1723 1883 2022 2102 2200 2375 2404 2502 2575 3306 3389 4443 5060 5070 5432 5555 5900 6
+> build · stealth
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && sed -n '577p' vps/docker-compose.yml | tr ' ' '\n' | grep -E ':pp$' | sed 's/:pp//' | sort -t: -k2 -n && echo "=== non-pp rules ===" && sed -n '577p' vps/docker-compose.yml | tr ' ' '\n' | grep -E '^tcp:|^udp:' | grep -v ':pp$' | sort -t: -k2 -n
+tcp:102:10.8.0.2:102
+tcp:110:10.8.0.2:110
+tcp:143:10.8.0.2:143
+tcp:502:10.8.0.2:502
+tcp:1025:10.8.0.2:1025
+tcp:1080:10.8.0.2:1080
+tcp:1102:10.8.0.2:1102
+tcp:1502:10.8.0.2:1502
+tcp:2022:10.8.0.2:19024
+tcp:2102:10.8.0.2:2102
+tcp:2375:10.8.0.2:2375
+tcp:2404:10.8.0.2:2404
+tcp:2502:10.8.0.2:2502
+tcp:2575:10.8.0.2:2575
+tcp:3389:10.8.0.2:3389
+tcp:4443:10.8.0.2:443
+tcp:5432:10.8.0.2:5432
+tcp:5555:10.8.0.2:5555
+tcp:5900:10.8.0.2:5900
+tcp:6379:10.8.0.2:6379
+tcp:8081:10.8.0.2:19081
+tcp:8443:10.8.0.2:8443
+tcp:8543:10.8.0.2:8543
+tcp:8888:10.8.0.2:18083
+tcp:9200:10.8.0.2:9200
+tcp:10001:10.8.0.2:10001
+tcp:11112:10.8.0.2:11112
+tcp:20000:10.8.0.2:20000
+tcp:44818:10.8.0.2:44818
+tcp:50100:10.8.0.2:50100
+=== non-pp rules ===
+tcp:21:10.8.0.2:21
+tcp:23:10.8.0.2:19023
+tcp:25:10.8.0.2:25
+udp:53:10.8.0.2:53
+udp:69:10.8.0.2:1069
+tcp:135:10.8.0.2:135
+udp:161:10.8.0.2:19161
+tcp:389:10.8.0.2:389
+tcp:445:10.8.0.2:445
+udp:500:10.8.0.2:500"
+udp:623:10.8.0.2:623
+tcp:1433:10.8.0.2:1433
+tcp:1723:10.8.0.2:1723
+tcp:1883:10.8.0.2:1883
+udp:1900:10.8.0.2:1900
+tcp:2200:10.8.0.2:2200
+tcp:3306:10.8.0.2:3306
+tcp:5060:10.8.0.2:5060
+udp:5060:10.8.0.2:5060
+tcp:5070:10.8.0.2:5070
+udp:5070:10.8.0.2:5070
+tcp:8000:10.8.0.2:8000
+tcp:8080:10.8.0.2:8080
+tcp:8880:10.8.0.2:8880
+tcp:8889:10.8.0.2:8888
+tcp:9100:10.8.0.2:9100
+tcp:9201:10.8.0.2:9201
+tcp:11211:10.8.0.2:11211
+tcp:27017:10.8.0.2:27017
+udp:47808:10.8.0.2:47808
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== conpot proxy-protocol support ===" && grep -rniE 'proxy_protocol|proxyprotocol|proxy protocol|HAProxy' arcane/home/honeypot-conpot/ 2>/dev/null | grep -v Binary | cut -c1-190 | head -20
+=== conpot proxy-protocol support ===
+arcane/home/honeypot-conpot/compose.yml:89:      - CONPOT_PROXY_PROTOCOL=1
+arcane/home/honeypot-conpot/compose.yml:176:      - CONPOT_PROXY_PROTOCOL=1
+arcane/home/honeypot-conpot/compose.yml:240:      - CONPOT_PROXY_PROTOCOL=1
+arcane/home/honeypot-conpot/compose.yml:295:      - CONPOT_PROXY_PROTOCOL=1
+arcane/home/honeypot-conpot/compose.yml:349:      - CONPOT_PROXY_PROTOCOL=1
+arcane/home/honeypot-conpot/compose.yml:410:      - CONPOT_PROXY_PROTOCOL=1
+arcane/home/honeypot-conpot/conpot/proxy_patch.py:2:"""Append a HAProxy PROXY-protocol v1 shim to the installed Conpot package.
+arcane/home/honeypot-conpot/conpot/proxy_patch.py:6:gevent's StreamServer.do_handle: when CONPOT_PROXY_PROTOCOL=1 is set, each TCP
+arcane/home/honeypot-conpot/conpot/proxy_patch.py:37:MARKER = "CONPOT_PROXY_PROTOCOL"
+arcane/home/honeypot-conpot/conpot/proxy_patch.py:42:# --- honeypot-stack: PROXY protocol v1 shim (conpot/proxy_patch.py) ---
+arcane/home/honeypot-conpot/conpot/proxy_patch.py:43:# Active only with CONPOT_PROXY_PROTOCOL=1 in the container environment.
+arcane/home/honeypot-conpot/conpot/proxy_patch.py:46:if _proxy_os.environ.get("CONPOT_PROXY_PROTOCOL", "0") == "1":
+arcane/home/honeypot-conpot/conpot/tests/test_proxy_patch.py:125:    had_env = "CONPOT_PROXY_PROTOCOL" in os.environ
+arcane/home/honeypot-conpot/conpot/tests/test_proxy_patch.py:126:    prev_env = os.environ.get("CONPOT_PROXY_PROTOCOL")
+arcane/home/honeypot-conpot/conpot/tests/test_proxy_patch.py:127:    os.environ["CONPOT_PROXY_PROTOCOL"] = "1"
+arcane/home/honeypot-conpot/conpot/tests/test_proxy_patch.py:133:            os.environ["CONPOT_PROXY_PROTOCOL"] = prev_env
+arcane/home/honeypot-conpot/conpot/tests/test_proxy_patch.py:135:            del os.environ["CONPOT_PROXY_PROTOCOL"]
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== attacker-identity-worker language ===" && ls arcane/home/honeypot-attacker-identity-worker/ && grep -nE 'image:|build:|context:|dockerfile:' arcane/home/honeypot-attacker-identity-worker/compose.yml | head && echo && echo "=== correlator-worker ===" && grep -nE 'image:|build:|context:|dockerfile:' arcane/home/honeypot-correlator-worker/compose.yml | head && echo "=== payload-inventory-worker ===" && grep -nE 'image:|build:|context:|dockerfile:' arcane/home/honeypot-payload-inventory-worker/compose.yml | head && echo "=== agent-intrusion-worker ===" && grep -nE 'image:|build:|context:|dockerfile:' arcane/home/honeypot-agent-intrusion-worker/compose.yml | head
+=== attacker-identity-worker language ===
+attacker-identity-worker
+compose.yml
+34:    build: ./attacker-identity-worker
+
+=== correlator-worker ===
+49:    build: ./correlator-worker
+=== payload-inventory-worker ===
+41:    build: ./payload-inventory-worker
+=== agent-intrusion-worker ===
+46:    # (build: ./analysis/yara). There is no /opt/stacks/apiary/... shared
+48:    build: ./analysis/agent-intrusion-corpus
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && for d in attacker-identity-worker correlator-worker payload-inventory-worker; do echo "=== $d ==="; ls arcane/home/honeypot-$d/$d/ 2>/dev/null | head -8; done; echo; echo "=== agent-intrusion corpus stack contents ==="; ls arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/ 2>/dev/null | head
+=== attacker-identity-worker ===
+Dockerfile
+esconsume.go
+esconsume_test.go
+es.go
+es_test.go
+fetch_boundary_test.go
+fetch.go
+fetch_test.go
+=== correlator-worker ===
+correlate.go
+correlate_test.go
+Dockerfile
+es.go
+es_test.go
+fetch.go
+fetch_test.go
+go.mod
+=== payload-inventory-worker ===
+Dockerfile
+es.go
+es_test.go
+go.mod
+main.go
+payload_kind.go
+payload_kind_test.go
+runloop.go
+
+=== agent-intrusion corpus stack contents ===
+campaign_correlator.py
+corpus.jsonl
+criticality_rules.py
+decode_correlate.py
+Dockerfile
+README.md
+requirements.txt
+schema.json
+tests
+validate_corpus.py
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && sed -n '1,60p' arcane/home/honeypot-agent-intrusion-worker/compose.yml
+# agent-intrusion-worker — #154 phase 5: reads real sensor events from
+# Elasticsearch, correlates them into campaigns, scores each campaign
+# against the deterministic criticality rules, and writes provenance-rich
+# verdicts to the agent-intrusion-campaigns index that backend-service
+# reads (/api/v1/campaigns -- stores.rs's generic index store).
+#
+# Own stack, same reasoning as ml-worker/docker-compose.yml's own header:
+# this has to read Elasticsearch continuously, so it joins honeynet as an
+# external network -- arcane/home/honeypot-init/compose.yml's own established pattern
+# for reaching elasticsearch from a separate stack (#111).
+#
+# Deploy: not by deploy.yml -- since #1502's Arcane transition its
+# per-stack "Synchronize ..." copy steps are gone (deploy.yml's own
+# comment lists this stack among them), and the whole arcane/home/
+# honeypot-agent-intrusion-worker/ directory ships as an Arcane-managed,
+# directory-aware Git sync instead (arcane/manifests/home-production.json:
+# syncName honeypot-agent-intrusion-worker, syncDirectory), same as every
+# other #258/#560 split stack that migrated under arcane/home/.
+#
+# Retired (#1649 follow-through): backend-service's agent_intrusion.rs
+# (its own doc comment: "agent-intrusion-worker port (#1610 worker
+# migration -- 'campaign correlator'), worker.py half") is the Rust
+# port of this exact worker -- same agent-intrusion-campaigns index,
+# same POLL_INTERVAL/FETCH_WINDOW_DAYS/MAX_EVENTS_PER_SOURCE shape
+# (AGENT_INTRUSION_-prefixed on backend-worker). Wired live as
+# WORKER_LOOPS=agent-intrusion since #1610 -- this had been dual-
+# writing the same index for as long as backend-worker's been up.
+# Missed in #1649's first pass (wrongly assumed unrelated to the #154
+# CI jobs, which actually validate this same Rust port). Confirmed live
+# before retiring: 14 clean cycles / zero errors over 5h, fresh
+# agent-intrusion-campaigns writes. profiles: ["legacy"] keeps this
+# container defined for rollback without Arcane's routine gitops-sync
+# trying to restart it -- same reasoning as every other retirement in
+# this series.
+
+name: honeypot-agent-intrusion-worker
+
+services:
+  agent-intrusion-worker:
+    # Relative context, and that is deliberate: the corpus sources are
+    # vendored inside this stack directory (analysis/agent-intrusion-corpus/,
+    # carried along when #1502 moved the stack under arcane/home/), and the
+    # Arcane directory sync materializes that whole subtree on the host --
+    # compose resolves ./analysis/agent-intrusion-corpus exactly as
+    # committed, same shape as payload-analysis's yara sidecar
+    # (build: ./analysis/yara). There is no /opt/stacks/apiary/... shared
+    # checkout to point an absolute path at.
+    build: ./analysis/agent-intrusion-corpus
+    container_name: hp-agent-intrusion-worker
+    restart: unless-stopped
+    profiles: ["legacy"]
+    networks:
+      - honeynet
+    environment:
+      ES_HOST: http://elasticsearch:9200
+      POLL_INTERVAL: "300"
+      FETCH_WINDOW_DAYS: "10"
+      # The 10-day live window contains tens of millions of events. Bound
+      # each source pattern so one cycle completes instead of exhausting the
+      # container while retaining the newest evidence from both sources.
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== agent-campaigns routes ===" && grep -n 'agent-campaigns\|agent_intrusion' arcane/home/honeypot-dashboard/backend-service/src/main.rs | cut -c1-160 && echo && echo "=== does frontend have /agent-campaigns page? ===" && git ls-files 'arcane/home/honeypot-dashboard/frontend-next/*' | grep -i 'agent-campaign' | head
+=== agent-campaigns routes ===
+30:mod agent_intrusion;
+
+=== does frontend have /agent-campaigns page? ===
+arcane/home/honeypot-dashboard/frontend-next/src/routes/agent-campaigns.tsx
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== how the agent-campaigns page reads data ===" && grep -nE 'serviceJSON|serviceFetch|BACKEND|api/v1' arcane/home/honeypot-dashboard/frontend-next/src/routes/agent-campaigns.tsx | head -10 && echo && echo "=== stores.rs index store route ===" && grep -n 'agent-intrusion-campaigns' arcane/home/honeypot-dashboard/backend-service/src/stores.rs | head
+=== how the agent-campaigns page reads data ===
+54:    const { serviceJSON } = await import('../lib/backend.server')
+55:    return serviceJSON<StorePage<AgentCampaignRow>>(`/api/v1/store/agent-campaigns?offset=${data.offset}&size=25`)
+
+=== stores.rs index store route ===
+375:        "agent-campaigns" => ("agent-intrusion-campaigns", "@timestamp", "date", &[]),
+> build · stealth
+Now let me fix PIPELINES.md. First the source count and the PROXY classification:
+[0m← [0mEdit docs/PIPELINES.md
+Index: docs/PIPELINES.md
+===================================================================
+--- docs/PIPELINES.md
++++ docs/PIPELINES.md
+@@ -89,11 +89,13 @@
+    restart-safe registry offsets.
+ 2. **The enrichment worker** rewrites watched sensors' files into
+    `logs/enriched/` before Filebeat sees them. That watch list began as
+    the five sensor families of #37/#38 (cowrie, dionaea, the conpot
+-   personas, dns-honeypot, cisco-asa-honeypot) and has grown to 16 named
++   personas, dns-honeypot, cisco-asa-honeypot) and has grown to 17 named
+    sources plus every conpot persona discovered on disk (six live,
+-   2026-08-27) — 22 sources in all.
++   2026-08-27) — 23 sources in all. The list is
++   `discover_sources` in
++   `arcane/home/honeypot-dashboard/backend-service/src/ip_enrichment/mod.rs`;
+ 
+ Which sensors the worker watches, and whether their files need rewriting
+ at all, follows one question per sensor: **does the sensor see the
+ attacker's real IP?**
+
+> build · stealth
+[0m← [0mEdit docs/PIPELINES.md
+Index: docs/PIPELINES.md
+===================================================================
+--- docs/PIPELINES.md
++++ docs/PIPELINES.md
+@@ -101,10 +101,10 @@
+ attacker's real IP?**
+ 
+ | Group | Sensors | Why | Fix |
+ |---|---|---|---|
+-| PROXY-aware | http, api-honeypot, multipot, tanner, dnp3, dicompot, citrix, rdp, endlessh, cisco-asa (WebVPN side), galah (proxied door, XFF), hellpot (proxied door, XFF) | the VPS-side portbridge (`vps/portbridge`) speaks HAProxy PROXY v1, or Traefik sets XFF in-band | none for attribution. Five of them (multipot, tanner, http-honeypot, citrix-honeypot, rdp-honeypot) are watched anyway, solely so canonical-field promotion (#1217) runs on their lines |
+-| Tunnel-blind (joined) | cowrie, dionaea + its incident variant (#623), every conpot persona, dns-honeypot, cisco-asa (IKE side), elasticpot, mailoney, hellpot (raw door), beelzebub, sentrypeer, galah (raw door) | raw TCP relay; the log records the WireGuard peer (`10.8.0.1`, the VPS-side tunnel address) | `via_port` join against the portbridge connection log — the generic join for flat `src_ip`/`src_port` shapes (cowrie, dionaea, the conpot personas, dns-honeypot, cisco-asa IKE, elasticpot, mailoney); bespoke join paths for the rest (dionaea-incident's nested rewrite; beelzebub and sentrypeer derive their own address field, then join; hellpot and galah's raw door is joined and adjudicated against their forwarded-header claim) |
++| PROXY-aware | http, api-honeypot, multipot, tanner, dnp3, dicompot, citrix, rdp, endlessh, cisco-asa (WebVPN side), sonicwall-sma, conpot (its TCP personas — every one of the six sets `CONPOT_PROXY_PROTOCOL=1` and portbridge carries the `pp` flag on their TCP rules), galah (proxied door, XFF), hellpot (proxied door, XFF) | the VPS-side portbridge (`vps/portbridge`) speaks HAProxy PROXY v1, or Traefik sets XFF in-band | none for attribution. Six of them (multipot, tanner, http-honeypot, citrix-honeypot, rdp-honeypot, sonicwall-sma-honeypot) are watched anyway, solely so canonical-field promotion (#1217) runs on their lines |
++| Tunnel-blind (joined) | cowrie, dionaea + its incident variant (#623), conpot's UDP personas only (SNMP 161, BACnet 47808, IPMI 623 — PROXY v1 has no UDP form, so those three listeners get no prefix), dns-honeypot, cisco-asa (IKE side), elasticpot, mailoney, hellpot (raw door), beelzebub, sentrypeer, galah (raw door) | raw TCP relay; the log records the WireGuard peer (`10.8.0.1`, the VPS-side tunnel address) | `via_port` join against the portbridge connection log — the generic join for flat `src_ip`/`src_port` shapes (cowrie, dionaea, the conpot personas, dns-honeypot, cisco-asa IKE, elasticpot, mailoney); bespoke join paths for the rest (dionaea-incident's nested rewrite; beelzebub and sentrypeer derive their own address field, then join; hellpot and galah's raw door is joined and adjudicated against their forwarded-header claim) |
+ 
+ The join runs **at ingest time, not read time** (#37/#38): the networkless
+ `backend-worker-enrichment` container reads both files off disk and writes
+ an already-correct copy to `logs/enriched/*.json`. Filebeat tails the
+
+> build · stealth
+[0m← [0mEdit docs/PIPELINES.md
+Index: docs/PIPELINES.md
+===================================================================
+--- docs/PIPELINES.md
++++ docs/PIPELINES.md
+@@ -198,9 +198,9 @@
+ | agent-intrusion | raw events | `agent-intrusion-campaigns` | 300s | deterministic criticality rules escalate; LLM never gates escalation; deterministic sha256 campaign_id ⇒ upsert not duplicate |
+ | zeek-proxy-attribution | zeek flows + portbridge log | flow docs | 120s | attributes relayed flows to attackers; ordering rule above applies here too |
+ | dashboard-rollups (#2046) | raw event indices (default pattern) | `overview-rollup-v1`, `geo-rollup-v1`, `attack-rollup-v1` | `ROLLUP_RUN_INTERVAL_SECS`, default 300s | pure-ES derived overviews the dashboard's overview/map/kill-chain reads slice cheaply instead of re-aggregating raw events per request |
+ | ml-worker / llm-worker | payloads + events | anomaly scores + `dashboard-ml-anomaly-ack-v1` | continuous | scoring semantics tracked in #1969/#1974 |
+-| payload-inventory | disk stores | `dashboard-payload-inventory-v1/-bytes-v1` | periodic scan | HEAD-exists fast path (#1221) |
++| payload-inventory | disk stores | `dashboard-payload-inventory-v1`, `dashboard-payload-bytes-v1` | periodic scan | HEAD-exists fast path (#1221) |
+ | es-results-importer | root-owned result spools | `*-analysis-v1` | continuous | read-only mirror, shard-partitionable |
+ | vault-worker (#2290) | `*-analysis-v1`, `llm-analysis` | markdown notes under the knowledge-vault directory (#2289) | `VAULT_POLL_INTERVAL_SECONDS`, default 900s | one note per payload/session entity, sha256-keyed filename ⇒ upsert not duplicate; checkpointed via `knowledge-vault-state-v1`, batch-run so a capture flood can't swamp the vault |
+ 
+ Operational caveat from #1980 — worker panics used to kill the whole
+
+> build · stealth
+[0m← [0mEdit docs/PIPELINES.md
+Index: docs/PIPELINES.md
+===================================================================
+--- docs/PIPELINES.md
++++ docs/PIPELINES.md
+@@ -224,9 +224,9 @@
+   store & store2 & store3 --> dedupe["payload-dedupe<br/>SHA-256 + same-FS hard links"]
+   store & store2 & store3 --> yara["YARA scanner<br/>networkless · read-only"]
+   yara --> yout[("yara-results/results.json")]
+ 
+-  store & store2 & store3 & yout --> inv["inventory worker"] --> ix[("dashboard-payload-inventory-v1<br/>+ -bytes-v1")]
++  store & store2 & store3 & yout --> inv["inventory worker"] --> ix[("dashboard-payload-inventory-v1<br/>dashboard-payload-bytes-v1")]
+ 
+   ix --> wb{"Analyst dispatch:<br/>payload workbench"}
+   wb -->|"hash-only .request markers"| spools["analysis spools:<br/>ghidra · linux sandbox · windows sandbox<br/>GHOSTS · revdeck · CAPE"]
+   spools --> results["result dirs (root-owned)"] --> importer["es-results-importer"] --> aix[("*-analysis-v1")]
+
+> build · stealth
+[0m← [0mEdit docs/PIPELINES.md
+Index: docs/PIPELINES.md
+===================================================================
+--- docs/PIPELINES.md
++++ docs/PIPELINES.md
+@@ -263,11 +263,11 @@
+ | `dead-letter-honeypot` | ES (rejected docs) | dead-letters page, source-health |
+ | `attackers-v1` | attacker-identity-worker | backend-service (attackers, overview, graphs) |
+ | `campaigns-v1`, `attacker-clusters-v1` | correlator-worker | backend-service (clusters, kill-chain, investigate) |
+ | `agent-intrusion-campaigns` | backend-service agent_intrusion loop | agent-campaigns page |
+-| `ghidra-analysis-v1`, `sandbox-analysis-v1`, `github-analysis-v1`, `cape-analysis-v1`, `revdeck-analysis-v1` | es-results-importer | identity worker, investigate/payload surfaces |
++| `ghidra-analysis-v1`, `sandbox-analysis-v1`, `github-analysis-v1`, `workbench-runs-v1`, `cape-analysis-v1`, `revdeck-analysis-v1` | es-results-importer | identity worker, investigate/payload surfaces |
+ | `yara-analysis-v1` | YARA join via inventory | backend-service charts + investigate |
+-| `dashboard-payload-inventory-v1`, `-bytes-v1` | payload-inventory-worker | payloads page, charts |
++| `dashboard-payload-inventory-v1`, `dashboard-payload-bytes-v1` | payload-inventory-worker | payloads page, charts |
+ | `dashboard-canarytokens-v1` | canarytokens-adapter | canarytokens page + settings pane |
+ | `cowrie-ttylog-v1` | Filebeat | tty-replay, recordings |
+ | `mailoney-mail-v1` | Filebeat | sessions/mail views |
+ | `reporter-metrics-v1` | reporter | settings stats pane |
+
+> build · stealth
+[0m← [0mEdit docs/PIPELINES.md
+Index: docs/PIPELINES.md
+===================================================================
+--- docs/PIPELINES.md
++++ docs/PIPELINES.md
+@@ -272,9 +272,9 @@
+ | `mailoney-mail-v1` | Filebeat | sessions/mail views |
+ | `reporter-metrics-v1` | reporter | settings stats pane |
+ | `dashboard-alert-state-v1` | alert-notifier loop | alerts page |
+ | `overview-rollup-v1`, `geo-rollup-v1`, `attack-rollup-v1` | dashboard-rollups loop (#2046) | overview/map/kill-chain dashboard reads |
+-| anomaly score + ack indices | ml/llm workers | ml-anomalies page, composite score |
++| `ml-anomalies`, `dashboard-ml-anomaly-ack-v1` | ml/llm workers | ml-anomalies page, composite score |
+ | `dashboard-users-v1`, `dashboard-workbench-runs-v1`, report/problem-report indices | backend-service itself | their pages |
+ 
+ Retention specifics (ILM, pcap ceilings, snapshots) live in
+ [STORAGE.md](STORAGE.md#retention-and-lifecycle).
+
+> build · stealth
+[0m← [0mEdit docs/PIPELINES.md
+Index: docs/PIPELINES.md
+===================================================================
+--- docs/PIPELINES.md
++++ docs/PIPELINES.md
+@@ -197,9 +197,9 @@
+ | correlator | raw events | `campaigns-v1`, `attacker-clusters-v1` | every cycle | pure aggregations, recomputed from scratch; groups ≥2 IPs sharing fingerprint/hash/ASN/provider-class |
+ | agent-intrusion | raw events | `agent-intrusion-campaigns` | 300s | deterministic criticality rules escalate; LLM never gates escalation; deterministic sha256 campaign_id ⇒ upsert not duplicate |
+ | zeek-proxy-attribution | zeek flows + portbridge log | flow docs | 120s | attributes relayed flows to attackers; ordering rule above applies here too |
+ | dashboard-rollups (#2046) | raw event indices (default pattern) | `overview-rollup-v1`, `geo-rollup-v1`, `attack-rollup-v1` | `ROLLUP_RUN_INTERVAL_SECS`, default 300s | pure-ES derived overviews the dashboard's overview/map/kill-chain reads slice cheaply instead of re-aggregating raw events per request |
+-| ml-worker / llm-worker | payloads + events | anomaly scores + `dashboard-ml-anomaly-ack-v1` | continuous | scoring semantics tracked in #1969/#1974 |
++| ml-worker / llm-worker | payloads + events | `ml-anomalies` + `dashboard-ml-anomaly-ack-v1` | continuous | scoring semantics tracked in #1969/#1974 |
+ | payload-inventory | disk stores | `dashboard-payload-inventory-v1`, `dashboard-payload-bytes-v1` | periodic scan | HEAD-exists fast path (#1221) |
+ | es-results-importer | root-owned result spools | `*-analysis-v1` | continuous | read-only mirror, shard-partitionable |
+ | vault-worker (#2290) | `*-analysis-v1`, `llm-analysis` | markdown notes under the knowledge-vault directory (#2289) | `VAULT_POLL_INTERVAL_SECONDS`, default 900s | one note per payload/session entity, sha256-keyed filename ⇒ upsert not duplicate; checkpointed via `knowledge-vault-state-v1`, batch-run so a capture flood can't swamp the vault |
+ 
+
+> build · stealth
+Now the README's stale agent-intrusion-worker description:
+[0m← [0mEdit README.md
+Index: README.md
+===================================================================
+--- README.md
++++ README.md
+@@ -41,9 +41,9 @@
+ | `honeypot-dicompot`, `honeypot-dns-honeypot`, `honeypot-citrix`, `honeypot-cisco-asa`, `honeypot-sonicwall-sma`, `honeypot-rdp`, `honeypot-endlessh`, `honeypot-beelzebub`, `honeypot-hellpot`, `honeypot-elasticpot`, `honeypot-galah`, `honeypot-sentrypeer`, `honeypot-mailoney` (`arcane/home/honeypot-<name>/compose.yml`, one directory each) | **home** | more sensors: DICOM medical-imaging decoy, DNS UDP reflection bait (response-capped, never a real amplification vector), Citrix ADC/NetScaler Gateway decoy (CVE-2019-19781), Cisco ASA WebVPN+IKE decoy (CVE-2018-0101), SonicWall SMA1000 Work Place/AMC decoy (CVE-2026-83548 Work Place SSRF), RDP decoy, SSH pre-auth tarpit, vendored multi-protocol deception runtime (SSH/LDAP/MCP/HTTP, #1418), vendored HTTP bot tarpit (#1419), vendored Elasticsearch decoy distinct from multipot's own (#1423), vendored LLM-powered HTTP honeypot behind its own broker-guarded bridge onto the shared Ollama instance (#1420), vendored SIP/VoIP fraud-detection honeypot (#1424), vendored SMTP honeypot taking over port 25 from multipot's own retired handler (#1422) — the row's `honeypot-wordpot` / WordPress/CMS decoy slot was removed when wordpot retired (#2381) |
+ | `honeypot-canarytokens` ([arcane/home/honeypot-canarytokens/compose.yml](arcane/home/honeypot-canarytokens/compose.yml)) | **home** | self-hosted honeytoken platform (#1426) -- planted-artifact deception, not a listening protocol decoy; `canarytokens-adapter` translates its webhook alerts into this repo's shared JSON event shape. The dashboard's Settings > Canarytokens pane (#1487) creates PDF/Word/Excel/custom-image/Windows-Folder/QR tokens on demand for use *outside* this honeypot (#1662 dropped the stale design doc that described the pre-cutover plan; the shipped pane is authoritative) |
+ | `honeypot-tanner` ([arcane/home/honeypot-tanner/compose.yml](arcane/home/honeypot-tanner/compose.yml)) | **home** | SNARE + TANNER application-emulation boundary |
+ | `honeypot-elk` ([arcane/home/honeypot-elk/compose.yml](arcane/home/honeypot-elk/compose.yml)) | **home** | Filebeat, Elasticsearch, Kibana, EveBox, Arkime |
+-| `honeypot-agent-intrusion-worker` ([arcane/home/honeypot-agent-intrusion-worker/compose.yml](arcane/home/honeypot-agent-intrusion-worker/compose.yml)) | **home** | correlates sensor/Suricata events into campaigns, scores them against deterministic criticality rules, writes the `agent-intrusion-campaigns` index the dashboard's `/agent-campaigns` route reads |
++| `honeypot-agent-intrusion-worker` ([arcane/home/honeypot-agent-intrusion-worker/compose.yml](arcane/home/honeypot-agent-intrusion-worker/compose.yml)) | **home** | the labelled corpus plus the Tier 1 contract benchmark. The worker itself was ported to Rust in #1610 and now runs as `WORKER_LOOPS=agent-intrusion` inside `honeypot-dashboard`'s `backend-worker`; the Python stack is retained under the `legacy` profile for rollback only, and the live `agent-intrusion-campaigns` index is written by the Rust loop |
+ | `honeypot-attacker-identity-worker`, `honeypot-correlator-worker`, `honeypot-payload-inventory-worker` (`arcane/home/honeypot-<name>/compose.yml`, one directory each) | **home** | three more workers that had their own top-level compose file but had drifted out of the deploy/installer inventory before #1502's audit caught it (same class of gap #560 and #891 each fixed once before) -- attacker-identity correlation, cross-sensor campaign correlation, and payload inventory tracking |
+ | `honeypot-dashboard` ([arcane/home/honeypot-dashboard/compose.yml](arcane/home/honeypot-dashboard/compose.yml)) | **home** | the live investigation dashboard: TanStack Start frontend (`dashboard-next`) in front of the Rust axum `backend-service` API tier, plus its worker containers (importer, networkless enrichment, the `WORKER_LOOPS` aggregation loops) and the services-adapter Docker control surface. Live since #1628's cutover completed 2026-08-22 -- the Go dashboard is deleted; see [docs/DASHBOARD-CUTOVER.md](docs/DASHBOARD-CUTOVER.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+ | `honeypot-dashboard-backend` ([arcane/home/honeypot-dashboard-backend/compose.yml](arcane/home/honeypot-dashboard-backend/compose.yml)) | **home** | the unprivileged read-only `backend-service` API tier (:8081), split out from `honeypot-dashboard` by #1622 so Arcane can redeploy the API tier without touching `dashboard-next`; the write-capable, host-spool-mounted instance is `backend-service-mounted` (:8082), which stayed in `honeypot-dashboard` |
+ | `honeypot-payload-analysis` ([arcane/home/honeypot-payload-analysis/compose.yml](arcane/home/honeypot-payload-analysis/compose.yml)) | **home** | payload dedup + YARA scanning |
+
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== links/paths/stale/reachable ===" && python3 scripts/check-doc-links.py 2>&1|tail -2 && python3 scripts/check-doc-paths-exist.py 2>&1|tail -2 && python3 scripts/check-doc-stale-paths.py 2>&1|tail -2 && python3 scripts/check-docs-reachable.py 2>&1|tail -2 && node scripts/check-mermaid.mjs 2>&1|tail -3
+=== links/paths/stale/reachable ===
+OK — 390 local refs in 155 files all resolve
+doc path existence check passed (121 files, 462 tokens, 41 allowlisted)
+doc stale-path check passed
+docs reachability check passed (85 reachable, 35 in exempt record trees)
+OK — 40 mermaid blocks in 155 files parse cleanly
+> build · stealth

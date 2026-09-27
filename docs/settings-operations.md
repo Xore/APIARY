@@ -115,9 +115,12 @@ If the settings subsystem itself misbehaves:
   to force this state; if you need a deliberate outage, block network access
   from the dashboard to Elasticsearch instead of touching a file.
 - **Per-user preferences:** same posture as configuration above.
-- **Admin configuration API:** revoke the admin role in auth-backend; the
-  admin panes and endpoints are gated server-side on live introspection, so
-  access ends on the next request.
+- **Admin configuration API:** revoke the `apiary-admin` role in Keycloak
+  (realm `apiary`, roles defined in
+  [`arcane/home/honeypot-keycloak/keycloak/realm/apiary-realm.json`](../arcane/home/honeypot-keycloak/keycloak/realm/apiary-realm.json));
+  the admin panes and endpoints are gated server-side on live
+  introspection, so access ends on the next request. `Xore/auth-backend`
+  was the pre-Keycloak home for those roles and is retired.
 - **Orphan retention:** `DASHBOARD_USER_RETENTION_DAYS` (default 90) controls
   the sweep; it cannot fully disable live-introspection revocation, which is
   always immediate.
