@@ -348,6 +348,47 @@ jobs:
             echo "from=type=gha,scope=${{ matrix.image }}" >> "$GITHUB_OUTPUT"
             echo "to=type=gha,mode=max,scope=${{ matrix.image }}" >> "$GITHUB_OUTPUT"
           fi
+      # #3316: build the label list HERE, in a shell, because the newline has
+      # to be real. This used to be a single `labels:` expression:
+      #
+      #   ${{ steps.metadata.outputs.labels }}${{ ... && format('\napiary.ci.build-row={0}-{1}-{2}', ...) || '' }}
+      #
+      # and GitHub's format() does not interpret \n -- it emits two literal
+      # characters, backslash and n. So the text was appended to the END of
+      # the previous label's value and apiary.ci.build-row never existed as
+      # its own key. The run log shows it exactly as it reached buildkit:
+      #
+      #   "label:org.opencontainers.image.version": "sha-047a7a3\\napiary.ci.build-row=dashboard-next-36338870116-1"
+      #
+      # which made the `--filter "label=apiary.ci.build-row=..."` lookup in
+      # the boot-smoke step below unmatchable -- every pull_request run
+      # failed here, and only the push path ever looked, which is why it
+      # went unnoticed. printf %s\n is the only place in this file that can
+      # produce an actual line break; an expression cannot.
+      #
+      # Everything interpolated arrives through env:, never pasted into this
+      # run block, for the same zizmor template-injection reason the
+      # boot-smoke step below uses.
+      - name: Append the boot-smoke build-row label
+        id: buildrow
+        if: matrix.boot_smoke == true
+        env:
+          BASE_LABELS: ${{ steps.metadata.outputs.labels }}
+          ROW: ${{ matrix.image }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          # The `<<EOF` delimiter form, not a bare printf of `k=v` lines: a
+          # bare `key=value` line becomes its OWN step output, so the whole
+          # list would arrive as outputs named `org.opencontainers....` and
+          # the `labels` key the build-push-action input reads would be
+          # absent. The heredoc delimiter is what carries the real newline
+          # through into a single multi-line output value.
+          {
+            echo 'labels<<EOF'
+            printf '%s\n' "$BASE_LABELS"
+            printf 'apiary.ci.build-row=%s\n' "$ROW"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         # id: build -- #3321 reads steps.build.outputs.digest, the pushed
         # manifest digest, to key the dashboard rows' SBOM to the exact image
@@ -376,8 +417,12 @@ jobs:
           # neighbour's build. A per-row, per-attempt label is the only
           # handle that is unique to *this* build. Appended only for the two
           # boot-smoke rows: on a push it is redundant (the digest names the
-          # image) and the manifest should not carry a CI run id.
-          labels: ${{ steps.metadata.outputs.labels }}${{ matrix.boot_smoke == true && format('\napiary.ci.build-row={0}-{1}-{2}', matrix.image, github.run_id, github.run_attempt) || '' }}
+          # image) and the manifest should not carry a CI run id. The
+          # `steps.buildrow.outputs.labels ||` is what keeps the other
+          # sixteen rows byte-identical: that step is skipped for them, so
+          # the output is empty and this falls back to exactly the
+          # metadata-action list they have always built with.
+          labels: ${{ steps.buildrow.outputs.labels || steps.metadata.outputs.labels }}
           # #3315: the revision this image is built from, for the two rows
           # whose Dockerfile declares `ARG GIT_SHA` (matrix.stamp). It has to
           # be a build arg and not only a label: backend-service compiles it
@@ -450,10 +495,14 @@ jobs:
           # First tag only: metadata-action emits one per ref, and only one
           # of them is the branch build this smoke is about.
           IMAGE_TAG: ${{ steps.metadata.outputs.tags }}
-          # Empty exactly when nothing was pushed, which is the
-          # pull_request case -- there the build loaded the image locally
-          # (see the `load:` input) and there is no digest to pull.
-          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          # Only meaningful when a push actually happened. build-push-action
+          # emits a digest even with `push: false`, where it describes the
+          # locally built image and names nothing in the registry -- so
+          # testing this for non-empty sent every pull_request down the
+          # docker-pull path against a tag that was never pushed (#3316).
+          # On a pull_request the build loaded the image locally (see the
+          # `load:` input), which is the else branch below.
+          IMAGE_DIGEST: ${{ github.event_name != 'pull_request' && steps.build.outputs.digest || '' }}
           BUILD_ROW: ${{ matrix.image }}-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
@@ -484,7 +533,12 @@ jobs:
             # the label the build step stamped on it -- unique to this
             # matrix row and this run attempt, which matters because the
             # executor's docker daemon is shared.
-            image_id=$(docker image ls --no-trunc \
+            # `--all` is required, not cosmetic: the docker exporter drops
+            # the tag, so this image is dangling, and `docker image ls`
+            # applies the label filter only to tagged images. Without it
+            # the filter silently matched nothing and the step failed on a
+            # build that had loaded correctly (#3316).
+            image_id=$(docker image ls --all --no-trunc \
               --filter "label=apiary.ci.build-row=$BUILD_ROW" \
               --format '{{.ID}}' | head -1)
             [ -n "$image_id" ] || {
