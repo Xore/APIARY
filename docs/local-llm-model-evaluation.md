@@ -2,6 +2,55 @@
 
 Status: completed for [issue #144](https://github.com/Xore/APIARY/issues/144) and requalified under [issue #158](https://github.com/Xore/APIARY/issues/158), 2026-08-01. Re-evaluated and re-approved under [issue #568](https://github.com/Xore/APIARY/issues/568), 2026-08-05 — see [§ Issue #568 re-evaluation](#issue-568-re-evaluation-real-20gb-card) below; that section is now the current approved state, superseding the v2 table immediately above it.
 
+> **Reconciled 2026-09-27 against `docs/benchmarks/runs/` and
+> `docs/benchmarks/matrices/`.** No score in this file was changed. What the
+> repository can and cannot confirm:
+>
+> - **Confirmed exactly.** The round-7 cold baseline reconciles cell for cell
+>   against `round7-cold-baseline.json`: 91 models, 182 cells, 367 records, 179
+>   reproduced, the same 3 escalated cells with the same third-run values, 11
+>   zero-scored tags, and every anchor — `qwen3:14b` 85.5 B / 83.1 A, `qwen3:8b`
+>   84.3 B / 81.9 A, `qwen2.5:14b-instruct-q4_K_M` 88.0 A, `Trendyol-32B` 95.2 A,
+>   `Ornith-1.0-35B` 92.8 B, and the 12.1 / 7.3 point gaps. The cold-cohort
+>   table reconciles against `1947-cohort-cold-protocol.json` (means, ±0 spreads,
+>   B−A deltas, `min/run B`, Ornith's injection FAIL). The twelve-model survey
+>   reconciles against `1805c-ghidra-slot-matrix.json`.
+> - **The archived runs cannot check the Ghidra column at all.** All 62 stored
+>   runs — 1498 records — are `revdeck` or `sessions`; there is **no
+>   `ghidra`-slot record in the repository**, and no transcript field carries
+>   VRAM or a context-probe result. The Ghidra, 16k-probe and VRAM columns in
+>   the #144 and #568 tables are therefore **undetermined from the repo**, not
+>   confirmed and not contradicted. The approved `qwen3:14b@bdbd181c33f2…` and
+>   `context_tokens: 32768` of the #568 Decision *are* confirmed against
+>   `analysis/ghidra/models/approved-models.json`.
+> - **The archive is a different vintage from #568.** The stored runs are the
+>   2026-08-25→29 #1795b / #1947-wave2 / #1805c / #1947seq rounds; #568 was
+>   measured 2026-08-05. Where the two overlap they differ (`qwen3:8b` sessions
+>   94.0 in the archive vs 92.5 here; `qwen2.5:14b-instruct-q4_K_M` 100.0 vs
+>   97.0). Those are re-measurements, not errors, and no figure was "corrected"
+>   to match them.
+> - **Part 1's sessions column is one point low on three of eleven rows under
+>   the current scorer**, reproducibly across all three repeats:
+>   `Foundation-Sec-1.1-8B-Instruct-i1` 56→**57** (83.6→85.1%),
+>   `Huihui-Qwen3.6-35B-A3B-abliterated` 66→**67** and stock `qwen3.8:27b`
+>   66→**67** (both 98.5→100.0%). The part-1 pins already declare a pre-#2265
+>   scorer, so this is a vintage delta — but the part-1 Decision names only two
+>   rows above the incumbent, and two more reach 67/67 on the current scorer.
+>   The part-1/part-2 `revdeck` denominator is likewise /16 as printed against
+>   /19 under the current inline `REV_CASES`.
+> - **Seven archived runs are not re-scorable as stored.** They report
+>   `outcome: ok` with non-zero `output_tokens` and an empty `raw`: four
+>   `qwen3:14b` runs on 2026-08-25 (51 records) and three gpt-oss-family runs on
+>   2026-08-26 (45 records). Re-scoring the archive naively yields 14–18/69 for
+>   `qwen3:14b` from those four, against the authoritative 60–62/69. Exclude
+>   them before recomputing anything.
+> - **Undetermined:** the round-7 injection figure "only 14 of 91 models fully
+>   resist (5/5)" — `round7-cold-baseline.json` stores score and percent only,
+>   with no per-case injection split, so the 5/5 counts have no in-repo source.
+> - Method check: re-deriving the 14-case corpus from the stored transcripts
+>   with `rev_cases_v2_rubric.json` + `polarity.forbidden_hit` reproduces
+>   `1805c-ghidra-slot-matrix.json` exactly, all 12 models at both tiers.
+
 This is a task-specific decision record for the three independent local-model
 slots in this repository. It does not assume that a model named in an earlier
 plan is suitable, or that one model should serve all three jobs.
@@ -1375,7 +1424,13 @@ Tier A — the incumbent sits 7-12 points under the security-specialized
 leaders (12.1 points Tier A vs `Trendyol-32B`'s 95.2%, 7.3 points Tier B vs
 `llmfan46/Ornith-1.0-35B`'s 92.8%). Top band by run-pooled mean total_score
 (mean across all 4 runs per model — 2 Tier A + 2 Tier B; not the same scale
-as the percentages above): `phi4:14b` 77.0, `Trendyol-32B` Q8_0 76.5,
+as the percentages above), **excluding the three entries whose Tier B cell was
+escalated to a third run and so has a 5-run, not 4-run, denominator** —
+`gemma-4-26B-A4B-it-ultra-uncensored-heretic` `Q4_K_M` 90.75,
+`Foundation-Sec-1.1-8B-Instruct` `Q8_0` 87.25 and
+`XORTRON.CriminalComputing.LARGE.2026.3` `i1-IQ2_XXS` 83.25, all three above
+everything listed here:
+`phi4:14b` 77.0, `Trendyol-32B` Q8_0 76.5,
 `VulnLLM-R-7B` i1-Q4_K_M 76.5, `Huihui-CyberStrike-OffSec-35B` q6_k 75.5,
 philbert440 `Qwen3.8-27B-Cyber` 75.5, protoLabsAI
 `ThinkingCap-Qwen3.6-27B-MTP` `latest` 75.5 (the successfully-pulled
