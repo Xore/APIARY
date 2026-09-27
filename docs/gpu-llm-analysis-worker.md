@@ -86,9 +86,18 @@ worker milestones.
 **Settled by [#602](https://github.com/Xore/APIARY/issues/602)** — an
 earlier draft of this table (before #602) named the card as a Quadro RTX
 4000 at compute capability 7.5/Turing; that card was never on this host.
-`lspci` shows a single AD104GL controller and containers enumerate exactly
-one device. Also pinned as the runtime-governance authority in
+`lspci` showed a single AD104GL controller and containers enumerated one
+compute device. Also pinned as the runtime-governance authority in
 `analysis/ghidra/models/approved-models.json`.
+
+> **A second card arrived after #602.** #1539 recorded that the box also
+> carries a **Quadro P2200**, reserved for the Windows sandbox VM's
+> passthrough. Every VRAM budget in this document is still correct — they
+> are budgets against the Ada, and the P2200 is not part of the compute
+> pool — but the host is no longer single-GPU, so "containers enumerate one
+> device" no longer describes the machine. It is why the Ollama reservation
+> in `analysis/ghidra/docker-compose.ghidra.gpu.yml` pins `device_ids` to
+> the Ada's UUID rather than using `count: all`.
 
 | Fact | Value | Verify with |
 |---|---|---|
@@ -98,8 +107,8 @@ one device. Also pinned as the runtime-governance authority in
 | Driver / CUDA | 580.173.02 / CUDA 13.0 | `nvidia-smi` |
 | Container GPU passthrough | nvidia-container-toolkit 1.19.1, `nvidia` runtime registered | `docker info \| grep -i runtime` |
 | End-to-end container test | `docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi -L` lists the GPU | run it |
-| Host RAM / CPU | 91 GiB / 16 logical CPUs | `free -h`, `nproc` |
-| Stack deployment | Dockge stack at `/opt/stacks/apiary/compose.yml`, containers `hp-*` | `docker ps` |
+| Host RAM / CPU | 92 GiB / 48 logical CPUs | `free -h`, `nproc` |
+| Stack deployment | Arcane gitops, on disk under `/var/dockge/stacks/<syncName>/`, containers `hp-*` | `docker ps` |
 | Internal network | `honeynet` (Elasticsearch and all sensors live here) | `docker network ls` |
 | Elasticsearch | 8.13.4 single-node, `xpack.security.enabled=false`, reachable as `http://elasticsearch:9200` inside `honeynet` | compose file |
 
@@ -269,6 +278,12 @@ design sketch retained for context and must not be copied into production:
   — bounded U1-only production acceptance with no payload mounts;
 - [`../llm-worker/docker-compose.captured-data.yml`](../llm-worker/docker-compose.captured-data.yml)
   — separately authorized #83 network and read-only volume grant;
+- [`../llm-worker/docker-compose.captured-data-deploy.yml`](../llm-worker/docker-compose.captured-data-deploy.yml)
+  — the **deployed** entrypoint: this is `dockerComposePath` for the
+  `llm-worker` entry in `arcane/manifests/home-production.json`, and it is
+  what a bare `docker-compose.yml` bring-up is missing (#2234). A local
+  `docker compose up` against `llm-worker/docker-compose.yml` alone will
+  not reproduce the live worker.
 - [`../analysis/ghidra/docker-compose.ghidra.yml`](../analysis/ghidra/docker-compose.ghidra.yml)
   — the pinned shared Ollama service and narrow `honeypot-llm` network.
 
@@ -303,8 +318,12 @@ docker compose \
   config --quiet
 ```
 
-The live stack is managed by Dockge under `/opt/stacks`. Deploy only from a
-reviewed merged revision; do not maintain a second hand-edited Compose copy.
+The live stack is managed by Arcane gitops from
+`arcane/manifests/home-production.json`, not by Dockge. (`/opt/stacks` still
+exists on the host, but only as a compatibility symlink to
+`/var/dockge/stacks`, added 2026-09-04 — nothing is managed there.)
+Deploy only from a reviewed merged revision; do not maintain a second
+hand-edited Compose copy.
 Model pulling stays an explicit operator action in the Ghidra/Ollama stack.
 
 ---
@@ -477,21 +496,31 @@ Retention: ILM 90 days is sufficient — derived data, recreatable from raw.
 Mirrors the pattern `ml-anomalies` already established
 ([`ml-worker-plan.md` §8–9](ml-worker-plan.md)):
 
-- **Delivered (#150):** `GET /api/llm/analysis?doc_type=&severity=&since=&limit=`
+- **Delivered (#150):** `GET /api/v1/store/llm-analysis` (paged via `offset`/`size`)
   → documents from `llm-analysis`, newest first, polled on the dashboard's
   existing 1-minute ES ticker (same transport decision as `ml-anomalies`,
   no new broker). `/llm-analysis` page: session summaries and payload
   triage in one filterable table, every row labelled "AI-generated" and
   showing severity/confidence, with an evidence link back to the
-  originating session or payload where one exists (`dashboard/llm_analysis.go`).
+  originating session or payload where one exists
+  (`frontend-next/src/routes/llm-analysis.tsx`, backed by the generic store
+  route at `main.rs:438` rather than a route of its own).
 - **Deferred:** `GET /api/llm/analysis/stream` (SSE via redis channel
   `llm-analysis-events`) -- optional per this section's original scope
   ("any SSE/Redis wake-up path remains optional and non-authoritative");
   polling has not been shown insufficient yet.
-- **Deferred:** semantic search over sessions using `nomic-embed-text`
-  embeddings stored as a `dense_vector` (384-dim) field on `llm-analysis`
-  docs, queried with ES kNN search. Still waiting on U1–U3 being stable,
-  per this section's original scope.
+- **Delivered:** semantic search over sessions using `nomic-embed-text`
+  embeddings stored as a `dense_vector` (768-dim) field on `llm-analysis`
+  docs, queried with ES kNN search — `GET /api/v1/llm-search`
+  (`main.rs:341`, `llm_search.rs`, over the `llm-analysis` index's
+  `doc_type: session` documents). The dimensionality is 768, not the 384
+  this document originally stated: #151 confirmed the model's real native
+  output live against `POST /api/embed` and `llm-worker/worker.py` pins
+  `EMBEDDING_DIMS = 768`, rejecting a response of any other width outright
+  rather than indexing it into a mapping it cannot satisfy. This section
+  originally deferred it
+  pending U1–U3 stability; it has since shipped, so the list above is not
+  a statement of current scope.
 
 ---
 

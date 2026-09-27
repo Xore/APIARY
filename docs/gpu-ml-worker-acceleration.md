@@ -73,9 +73,10 @@ parts, and it does not make the models more accurate.
 ## 3. Hardware & Compatibility Contract
 
 **Settled by [#602](https://github.com/Xore/APIARY/issues/602)** (verbatim
-host evidence: `lspci` shows a single AD104GL controller, containers
-enumerate exactly one device — the earlier two-card / Turing-plus-Ada
-hypothesis is refuted) and pinned as the runtime-governance authority in
+host evidence: `lspci` showed a single AD104GL controller and containers
+enumerated one compute device — the earlier two-card *Turing-plus-Ada*
+compute hypothesis is refuted) and pinned as the runtime-governance
+authority in
 `analysis/ghidra/models/approved-models.json`, which
 `model-governance.py check-runtime` diffs live `nvidia-smi` against every
 5 minutes:
@@ -84,6 +85,14 @@ hypothesis is refuted) and pinned as the runtime-governance authority in
   capability 8.9.** (An earlier draft of this document, before #602,
   mis-recorded this as a Quadro RTX 4000 at compute capability 7.5/Turing —
   that card was never on this host; see #602 for the full correction.)
+- **One more card arrived later, and it is not for this workload.** #1539
+  recorded that the box also carries a **Quadro P2200**, reserved for the
+  Windows sandbox VM's passthrough. So the "one device" finding above is
+  still true of the *compute* pool this guide budgets VRAM against, but the
+  host is no longer single-GPU, and this matters concretely in §4.4: a
+  `count: 1` reservation picks an arbitrary card, which is the same class of
+  bug `count: all` caused. Pin `device_ids` to the Ada's UUID, as
+  `analysis/ghidra/docker-compose.ghidra.gpu.yml` already does.
 - Driver 580.173.02 (CUDA 13.0) — backward-compatible with CUDA 12.x
   runtime wheels.
 - nvidia-container-toolkit 1.19.1 present; `docker run --rm --gpus all
@@ -118,17 +127,18 @@ Replace the CPU wheel lines:
 
 ```diff
 -# Deep learning (CPU-only PyTorch)
--torch==2.13.0+cpu
+-torch==2.14.0+cpu
 ---extra-index-url https://download.pytorch.org/whl/cpu
 +# Deep learning (CUDA PyTorch — see docs/gpu-ml-worker-acceleration.md §3)
-+torch==2.13.0+cu126
++torch==2.14.0+cu126
 +--extra-index-url https://download.pytorch.org/whl/cu126
 +
 +# Embeddings (§6)
 +sentence-transformers==3.0.1
 
- # Outlier detection (HBOS)
- pyod==3.6.2
+ # Outlier detection (HBOS). Pulls in numba+llvmlite -- see the numpy pin
+ # above; this is the version set actually verified to install together.
+ pyod==3.6.6
 ```
 
 > **Verified pin (2026-08-01, #82):** `torch==2.13.0+cu124` does not exist;
@@ -141,7 +151,10 @@ Replace the CPU wheel lines:
 > including both `sm_75` and `sm_89`, so the wheel's `sm_75` inclusion says
 > nothing about which kernel the live card actually used; the underlying
 > install-and-tensor-check result stands, only the architecture label was
-> wrong.) Never silently fall back to the `+cpu` wheel; a CPU wheel in a GPU
+> wrong.) **The tree has since moved on: `ml-worker/requirements.txt` now
+pins `torch==2.14.0+cpu` and `pyod==3.6.6`, so the +cu126 install above was
+verified at 2.13.0 only and has not been re-checked at 2.14.0. G2 applies to
+whatever version is current when this deploys.** Never silently fall back to the `+cpu` wheel; a CPU wheel in a GPU
 > deployment must fail the acceptance test T2, not pass unnoticed.
 
 ### 4.2 `ml-worker/Dockerfile`
@@ -199,6 +212,12 @@ Rules:
 +      ML_DEVICE: auto            # auto | cpu — 'cpu' forces CPU for debugging
 ```
 
+**Pin `device_ids`, not `count: 1`.** The host carries two cards (§3), so
+`count: 1` selects an arbitrary one and can hand `ml-worker` the Quadro
+P2200 the Windows sandbox VM needs. Use the Ada's UUID exactly as
+`analysis/ghidra/docker-compose.ghidra.gpu.yml` does:
+`device_ids: ["GPU-18a00c7e-670a-c305-a2aa-20e3a71917a3"]`.
+
 Keep the existing `mem_limit: 2g` / `cpus: "2.0"`; GPU memory is governed
 by §5, not by `mem_limit`.
 
@@ -224,7 +243,8 @@ the original 6.1 GiB `qwen3.5:9b` estimate):
   smaller safety margin instead of full separation.** Worst case — the
   ghidra slot's model loaded at its 32k context (~14.1 GiB) plus a retrain
   (~2 GiB) plus the embedder's own inference (~1 GiB) — totals ~17.1 GiB
-  against the real 20475 MiB budget: about 3.3 GiB of headroom, not the
+  against the real 20475 MiB budget (19.995 GiB): about 2.9 GiB of headroom,
+  not the
   "comfortable" double-digit margin a naive 6.1 GiB-chat-model estimate
   would suggest. That is enough to not require full separation, but not
   enough to treat as a non-issue either. This already assumes the ghidra
@@ -240,7 +260,7 @@ the original 6.1 GiB `qwen3.5:9b` estimate):
   best-effort headroom management.
 - If a future model re-evaluation (#568's process, re-run) picks something
   materially larger than `qwen3:14b` for the ghidra slot, re-check this
-  margin before assuming it still holds — the 3.3 GiB headroom above was
+  margin before assuming it still holds — the 2.9 GiB headroom above was
   computed for this specific model at its current context ceiling, not as a
   permanent property of the 20 GB card.
 - **On CUDA OOM, do not crash:** wrap train/infer calls, catch
