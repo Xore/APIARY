@@ -23,7 +23,22 @@ authenticated with an empty event history. See
 and the sizes behind it.
 
 Recovery is intentionally not automatic because overwriting live volumes is
-destructive. On a replacement host:
+destructive.
+
+**Which archive the steps below apply to**: an `analysis/backup-honeypot.sh`
+directory — that script's on-host layout of `SHA256SUMS`,
+`stack-config-state.tar.gz`, `keycloak.sql.gz` and `volumes/<name>.tar.gz`.
+Those names resolve nowhere else, and that archive only exists if the
+homeserver itself survived. A restore driven by the archive that actually
+survives a dead homeserver — `scripts/backup-essentials.sh`'s
+`apiary-essentials-<stamp>.tar.gz.gpg`, a different layout under
+`homeserver/`, `vps/` and `repo/` — has its own procedure, and one
+prerequisite the steps below do not cover: put
+`homeserver/installer/*-install-homeserver.conf` back in place first, because
+`scripts/install-homeserver.sh` will not run without it. See
+[`docs/BACKUP-ESSENTIALS.md`](../BACKUP-ESSENTIALS.md).
+
+On a replacement host:
 
 1. Verify `SHA256SUMS`, unpack `stack-config-state.tar.gz` into a new empty stack
    directory, and inspect `.env` permissions and values.

@@ -1,5 +1,33 @@
 # Rocky Linux 10 support in `install-homeserver.sh`
 
+> **Status (2026-09-27): the move is done — the homeserver now runs Rocky Linux
+> 10.2.** The RHEL path below is no longer a smoke-test target or a rehearsal
+> for a future migration: the host was re-provisioned onto Rocky 10.2
+> (2026-09-03, Anaconda) with a different disk layout, so the `rhel` branches in
+> `install-homeserver.sh` are the production path and `debian` is the fallback
+> that only a rebuild would exercise. Re-measured read-only over
+> `ssh homeserver` on 2026-09-27: `/etc/os-release` reports `ID=rocky` and
+> `VERSION="10.2 (Red Quartz)"`, and both conditions in
+> "Two things Rocky does that Ubuntu did not" are live — SELinux is `Enforcing`
+> and firewalld is `active`.
+>
+> The two things that stay open are unchanged and are the ones to read first:
+> the base OS is still installed by hand (there is still no kickstart artifact
+> in the tree), and the `:z`/`:Z` label gap below is still real — none of the
+> 35 compose files tracked under `arcane/home/` carries an SELinux relabel (34
+> stack-level `compose.yml` files, plus the decoy honeyfs compose nested inside
+> `arcane/home/honeypot-cowrie/cowrie/`, which is an attacker-facing artifact
+> rather than a deployed stack).
+>
+> Everything else in this document was re-checked against
+> `scripts/install-homeserver.sh` and `scripts/lib/install-common.sh` on
+> 2026-09-27 and still matches: the `pkg_update`/`pkg_install` shims, the
+> once-at-source-time `$DISTRO_FAMILY` resolution, the full package-name
+> table, the verbatim Docker `centos` repofile, the `cuda-rhel10` repo, the
+> `container_use_devices` boolean, and the non-fatal
+> `step_preflight_rhel_platform`. For the current disk layout see
+> [`HOMESERVER-DISK-LAYOUT.md`](HOMESERVER-DISK-LAYOUT.md).
+
 The homeserver is moving from Ubuntu to Rocky Linux 10. `scripts/install-homeserver.sh`
 now runs on both, so the reinstall smoke test in #1609 has a working installer.
 

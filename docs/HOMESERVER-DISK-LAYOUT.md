@@ -3,13 +3,22 @@
 This documents the physical disk layout of the honeypot homeserver
 (`supermicro`) as it actually exists today, and a generated Ubuntu
 **autoinstall** config (the Ubuntu/subiquity equivalent of Windows'
-`autounattend.xml`) to reproduce that layout on a reinstall or a second
-build server. Captured 2026-08-04 as part of the #518 smoke-test research.
+`autounattend.xml`) that reproduces the layout the box had at the time of
+the #518 smoke-test research.
 
-Ubuntu Server's installer (`subiquity`) is driven by `curtin` under the
-hood — the fstab comments on this box literally say "was on /dev/sdX
-during curtin installation", confirming this machine was already installed
-this way rather than by hand.
+> **The autoinstall config below no longer describes this host.** The
+> physical table and the provisioning steps were re-measured read-only on
+> 2026-09-27. `supermicro` has since been reinstalled as **Rocky Linux
+> 10.2** and no longer runs the Ubuntu/`curtin` layout: it uses LVM (the
+> original notes recorded "no LVM"), `/var` sits on a *partition* of the
+> RAID LUN rather than the whole disk, and swap is a 32G LVM logical
+> volume rather than a swapfile. The original capture was 2026-08-04, when
+> the fstab comments did literally say "was on /dev/sdX during curtin
+> installation" — that evidence was sound for the Ubuntu install, which
+> has since been replaced. Keep the autoinstall file as the record of the
+> Ubuntu layout; do not use it as a rebuild target for the current host.
+> See `docs/HOST-TUNING.md` for the tuning that *does* apply to the Rocky
+> install.
 
 ## Why this layout, not one big disk
 
@@ -22,24 +31,36 @@ reinstall of the OS disk alone doesn't touch captured evidence.
 
 ## Physical layout (as installed)
 
+Re-measured read-only on 2026-09-27 via `lsblk`/`lvs`/`findmnt`/`df`.
+
 | Device | Model | Size | Partition table | Filesystem | Mount | Role |
 |---|---|---|---|---|---|---|
-| `nvme0n1` | Samsung MZVLW256HEHP | 238.5G | GPT | vfat (p1) / ext4 (p2) | `/boot/efi`, `/` | OS + EFI, boot disk |
-| `sdb` | AVAGO MR9440-8i (RAID LUN) | — | whole-disk (no partition table) | xfs | `/var` | Docker root, Arcane-managed stacks, container state (`/var/lib/docker`, `/var/dockge`) — now also `benchmarks/`, `training/`, `hf-cache/`, `buildx-cache/`, `ci-registry-mirror/`, `image-sbom/`, the former `/mnt-1` workload |
-| `sda` | Intel SSDSC2KB480G8L | 447.1G | GPT, 1 partition | xfs | `/mnt-2` | Reserved bulk storage (currently empty) |
-| `sr0` | ATAPI optical | — | — | — | — | Unused |
+| `nvme0n1` | PC401 NVMe SK hynix 1TB | 953.9G | GPT, 3 partitions | vfat (p1, 600M) / xfs (p2, 2G) / LVM2_member (p3, 951.3G) | `/boot/efi`, `/boot`, — | OS boot disk |
+| └ `rl-root` | (LVM on `nvme0n1p3`) | 70G | — | xfs | `/` | OS root |
+| └ `rl-swap` | (LVM on `nvme0n1p3`) | 32G | — | swap | `[SWAP]` | Swap |
+| └ `rl-home` | (LVM on `nvme0n1p3`) | 849.3G | — | xfs | `/home` | Home |
+| `sdb` | AVAGO MR9440-8i (RAID LUN) | 8.7T | GPT, 1 partition (`sdb1`, whole remaining size) | xfs | `/var` | Docker root, Arcane-managed stacks, container state (`/var/lib/docker`, `/var/dockge`) — now also `benchmarks/`, `training/`, `hf-cache/`, `buildx-cache/`, `ci-registry-mirror/`, the former `/mnt-1` workload |
+| `sda` | PSSD T7 (**USB-attached**) | 465.8G | GPT, 1 partition (`sda1`) | ext4 | `/mnt/usb-recovery` | USB recovery disk, not local bulk storage |
 
-**`/mnt-1` is decommissioned.** Its RAID VD (formerly `sdc`) suffered a
-two-drive fault on 2026-09-09 (#3158) and no longer enumerates as a block
-device at all; the mount was unwired (#3159, PR #3159) and everything that
-lived under it moved to `/var`. `/mnt-1` itself survives on the host only as
-a directory of compatibility symlinks into `/var` (`benchmarks`, `training`,
-`hf-cache`, `buildx-cache`, `ci-registry-mirror`) so any script still hard-
-coding the old path keeps resolving — new code should target `/var/*`
-directly. See #3158/#3159 for the incident and decommission detail; this
-table's `sdb` size is left unstated above rather than guessed, since the
-volume backing `/var` changed as part of that recovery and hasn't been
-re-measured for this doc.
+Three of the four rows changed since the 2026-08-04 capture, and none of
+the change is cosmetic. The OS disk is a different, 4x-larger NVMe; the
+former `sda` bulk-storage disk (`/mnt-2`) is now a USB-attached portable
+SSD mounted at `/mnt/usb-recovery`; and the boot disk is now LVM-backed
+with a separate `/home`. The old `sr0` ATAPI optical drive is no longer
+enumerated at all.
+
+**`/mnt-1` and `/mnt-2` are both decommissioned.** `/mnt-1`'s RAID VD
+(formerly `sdc`) suffered a two-drive fault on 2026-09-09 (#3158) and no
+longer enumerates as a block device at all; the mount was unwired (#3159,
+PR #3159) and everything that lived under it moved to `/var`. `/mnt-1`
+itself survives on the host only as a directory of compatibility
+symlinks into `/var` (`benchmarks`, `training`, `hf-cache`,
+`buildx-cache`, `ci-registry-mirror`) so any script still hard-coding the
+old path keeps resolving — new code should target `/var/*` directly. See
+#3158/#3159 for the incident and decommission detail. `/mnt-2` is gone for
+a different reason: its disk is the USB `PSSD T7` above, remounted at
+`/mnt/usb-recovery`, so it is no longer local bulk storage and must not be
+relied on for a rebuild.
 
 `sdb` sits behind an AVAGO/LSI MR9440-8i hardware RAID controller and
 appears to the OS as a SCSI LUN, not a raw disk — the controller's own
@@ -49,17 +70,21 @@ the controller's own tooling (`storcli`/`perccli` or vendor equivalent) if
 the RAID config itself needs to be reproducible, not just the OS
 partitioning on top of it.
 
-`/var` on its own disk is the key decision: `/var/lib/docker` is 103G and
-`/var/dockge` (bind-mounted stack data for all 23 Arcane-managed stacks, including
+`/var` on its own disk is the key decision, and it has only become more
+load-bearing: `/var/lib/docker` is **2.9T** and `/var/dockge` (stack data
+for the 45 directories under `/var/dockge/stacks/`, including
 Elasticsearch indices, Cowrie logs, payload captures, sandbox disks) is
-229G — 332G combined, well past what the 238G OS disk could hold even
-before accounting for the OS itself. Putting `/var` on the 1.7T `sdb`
-disk instead of growing the root filesystem was the right call and should
-be preserved on any rebuild.
+**350G**. `/var` is 70% full (6.1T of 8.8T) with 2.7T free. The manifest
+still declares 39 sync entries, 33 of which name one of the 34 directories
+under `arcane/home/`; `rex86-eval` is present on disk but **not** in the
+manifest (the other 6 manifest entries are root-level stacks). Putting `/var` on the RAID LUN instead of growing the root
+filesystem remains the right call and should be preserved on any rebuild.
 
-Swap is an **8G swapfile** at `/swap.img` on the root filesystem, not a
-dedicated partition — simpler to resize than a swap partition and fine at
-this scale (91G RAM, swap is a safety margin not a working set).
+Swap is a **32G LVM logical volume** (`rl-swap`) in the `rl` volume group,
+not a dedicated partition and not a swapfile — the 8G `/swap.img`
+swapfile described in the 2026-08-04 capture no longer exists. 92G of RAM
+means swap is a safety margin rather than a working set, though it was
+under real pressure at measurement time (14.6G in use, priority -2).
 
 `/var` also carries the two CI-created directories, both of which the
 workflows cannot create for themselves (`/var` is `root:root 0755`, so a
@@ -117,11 +142,16 @@ with `homeserver-user-data.yaml` renamed to `user-data` alongside an empty
 - SSH (key-only, no password auth) and the `xfsprogs`/`nvme-cli` packages
   the manual partitioning step below needs.
 
-**What has to be done by hand, at the storage screen, using the physical
-layout table above as the target:** 3-disk layout (NVMe boot/OS: GPT,
-EFI + ext4 root; `/var`: whole-disk xfs, no partition table; `/mnt-2`:
+**What has to be done by hand, at the storage screen.** For reproducing
+the **former Ubuntu layout** (the one this template was written against,
+and the one the 2026-08-04 capture recorded): 3-disk layout (NVMe boot/OS:
+GPT, EFI + ext4 root; `/var`: whole-disk xfs, no partition table; `/mnt-2`:
 GPT + single xfs partition), no LVM, 8G swapfile instead of a swap
-partition. `/mnt-1` is no longer part of the target layout (decommissioned,
+partition. That is **not** the live layout any more — the box now uses LVM
+with a separate `/home`, `/var` on a partition, and a 32G swap LV, and its
+disks have all been replaced (see the table above). Do not use this
+paragraph as a partition plan for the current host; it is a record of what
+the autoinstall flow produced. `/mnt-1` is no longer part of the target layout (decommissioned,
 see above) — do not recreate it on a rebuild. The template does **not**
 attempt to reproduce the AVAGO RAID controller's own LUN configuration
 either — that has to happen before the OS installer ever sees a block

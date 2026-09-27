@@ -67,5 +67,17 @@ The original lab served variant builds against real Elasticsearch data on
 ports 19201–19205, driven by an env-guarded Go test that booted the dashboard
 with a stubbed OIDC session, a `STATIC_DIR` override and nil write-services
 so the real index stayed read-only. That harness depended on the Go dashboard
-and went away with it. A `frontend-next` equivalent needs the same read-only
-guarantees; scoped separately.
+and went away with it.
+
+It has since been rebuilt for `frontend-next` as
+[`branding/design-lab/lab.mjs`](../../branding/design-lab/lab.mjs) (#1828,
+#1935), which serves variants on the same 19201–19205 range and the elements
+playground on 19300. `frontend-next` has no nil-write-services handle — it
+reaches data over HTTP through two bases — so the read-only guarantee is made
+at that seam instead: `BACKEND_URL` goes through a gate that forwards
+GET/HEAD and answers 405 to everything else, and `BACKEND_MOUNTED_URL` is
+pointed at a stub that answers 503 to every request. That is stronger than the original, which relied
+on remembering to pass nil.
+
+This directory is the redacted public copy and does not carry the harness
+itself; run it from `branding/design-lab/`.

@@ -189,9 +189,21 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: all
+              device_ids: ["GPU-18a00c7e-670a-c305-a2aa-20e3a71917a3"]
               capabilities: [gpu]
 ```
+
+**Do not use `count: all` here.** #1539 replaced it: the homeserver carries
+two NVIDIA cards, and the `count: all` form handed Ollama *both* — wrong
+even when it works, and it starves the Windows sandbox VM of the Quadro
+P2200 reserved for its passthrough whenever Ollama loads a model during a
+detonation. The overlay therefore pins the RTX 4000 Ada's UUID, confirmed
+live via `nvidia-smi -L` on the actual box. Re-run `nvidia-smi -L` and
+update the UUID if the card is ever physically replaced.
+
+The same file also documents why `ghidra` is deliberately *not* given the
+GPU: decompilation is CPU work and would only compete for the card with the
+model it is feeding.
 
 Note this repo keeps the GPU reservation in a **separate overlay file**,
 applied only when a GPU is actually present:
@@ -225,7 +237,11 @@ Docker's `--gpus all` / `count: all` doesn't partition VRAM — every
 container that requests the GPU gets the whole card, and it's up to each
 process to behave. Nothing stops two containers from both trying to
 allocate more VRAM than the card has, at which point the second allocator
-gets a CUDA out-of-memory error, not a scheduling wait.
+gets a CUDA out-of-memory error, not a scheduling wait. On this box the
+question is sharper still, because the host has **two** cards: an RTX 4000
+Ada for compute and a Quadro P2200 reserved for the Windows sandbox VM's
+passthrough. `count: all` would hand both to one container, which is the
+#1539 bug the overlay's pinned `device_ids` exists to prevent.
 
 This repo's own answer to that (see
 [`gpu-ml-worker-acceleration.md` §5, "GPU Sharing Contract with the LLM

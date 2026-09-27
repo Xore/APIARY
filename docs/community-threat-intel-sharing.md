@@ -7,7 +7,7 @@
 `hpfeeds` publisher). Declined, not deferred — the reasoning below is
 worth someone re-reading before re-proposing this, not just a placeholder
 for "someone hasn't gotten to it yet."** TANNER already ships a disabled,
-unused `hpfeeds` config block (`tanner/tanner/config.yaml`) that an
+unused `hpfeeds` config block (`arcane/home/honeypot-tanner/tanner/tanner/config.yaml`) that an
 operator can turn on by hand if they personally want to participate — see
 §4 — but this repo doesn't recommend it by default, document a workflow
 around it, or build anything to support it.
@@ -48,14 +48,17 @@ logs access-controlled and short-lived"). Publishing structured attack
 data to an open community broker is a materially bigger, harder-to-reverse
 commitment than this repo's existing IP-blocklist reporting:
 
-- The existing reporter (`reporter/`, #68/#69, `arcane/home/honeypot-utilities/compose.yml`)
+- The existing reporter (`arcane/home/honeypot-utilities/reporter/`, #68/#69, `arcane/home/honeypot-utilities/compose.yml`)
   sends a *narrow* signal (an IP, to a blocklist, for a defensive purpose:
   getting that IP blocked elsewhere) to a small number of well-understood
   destinations (AbuseIPDB, Blocklist.de), stays dry-run by default, and
   needed its own multi-phase build (#68 for the dry-run foundation and
   safeguards, #69 for validation and metrics, #153 for reputation
-  filtering and observability, still open) to get the privacy posture
-  right.
+  filtering and observability) to get the privacy posture
+  right. All three are closed and implemented: #153 shipped GreyNoise
+  RIOT pre-checks (`reporter/greynoise.go`, off unless `GREYNOISE_ENABLED=1`)
+  and a `metrics.json` counter snapshot that the dashboard mirrors into
+  `reporter-metrics-v1`.
 - A generic `hpfeeds` publisher would share *richer* structured data
   (commands, credentials, payload hashes, session metadata -- whatever
   TANNER or another sensor chose to publish) with *whichever broker an
@@ -84,7 +87,7 @@ that work, which continues independently.
 
 ## 4. What already exists and isn't being built on
 
-`tanner/tanner/config.yaml` has a native, currently-disabled `HPFEEDS`
+`arcane/home/honeypot-tanner/tanner/tanner/config.yaml` has a native, currently-disabled `HPFEEDS`
 block (`enabled: False`, plus `HOST`/`PORT`/`IDENT`/`SECRET`/`CHANNEL`) --
 TANNER's own upstream already supports publishing to an `hpfeeds` broker,
 no new code required to turn it on. This is *not* a recommendation: an

@@ -13,11 +13,13 @@ scripts that run on the sensor host.
 > [#74](https://github.com/Xore/APIARY/issues/74) (the manual publisher).
 > Per the roadmap's own status line: **built** — dashboard trigger/read
 > (Phases 2-3), the host publisher itself (Phase 1), queue health/alerting
-> (Phase 5), and IOC/family enrichment (Phase 6); the host publisher is
-> **built but not installed** on a given deployment until an operator runs
-> `analysis/github/install-github-publisher.sh` there; environment/Compose
-> wiring (Phase 7) has **not started**. Publication is **not** automatic
-> even where installed — see "Publication is manual" below.
+> (Phase 5), IOC/family enrichment (Phase 6), and environment/Compose wiring
+> (Phase 7 — `GITHUB_ANALYSIS_REQUEST_DIR` / `_RESULTS_DIR` /
+> `_ALERT_POSITIVES` and both spool bind-mounts are in the dashboard
+> service); the host publisher is **built but not installed** on a given
+> deployment until an operator runs
+> `analysis/github/install-github-publisher.sh` there. Publication is **not**
+> automatic even where installed — see "Publication is manual" below.
 
 ---
 
@@ -67,17 +69,21 @@ flowchart TB
 
 ## Components in this folder
 
+Most of the tooling below is no longer under the repository-root `analysis/`
+tree: #1502 moved each deployable piece under its own Arcane stack directory
+in `arcane/home/`. The table names the current home of each.
+
 | Path | Purpose |
 |---|---|
-| `analyze.py` | Offline triage of Cowrie / http-honeypot / multipot / Dionaea JSON logs. Stdlib only |
-| `collect.sh` | **Deprecated.** Cron-driven bulk copy of captures into a clone of `Xore/honeypot`. Superseded by the dashboard button; kept for a one-time manual backfill |
-| `dedupe-payloads.py` | Collapses duplicate captures by SHA-256 |
-| *none here* — the YARA scanner moved to `arcane/home/honeypot-payload-analysis/analysis/yara/` (#1502) | Networkless YARA scanner sidecar, local rules, and vendored upstream corpus (`sync-yara.sh`); operator doc kept at [`yara/README.md`](yara/README.md) |
-| `ghidra/` | Headless Ghidra reverse-engineering pipeline, local-model triage, and the analysis-host installer ([`ghidra/README.md`](ghidra/README.md)) |
-| `es-results-importer/` | Ships Ghidra/sandbox/GitHub-analysis/workbench-run results into Elasticsearch, read-only, alongside the raw event stream ([#378](https://github.com/Xore/APIARY/issues/378)) |
-| `elasticsearch-setup.sh`, `honeypot-kibana-setup.sh`, `filebeat.yml`, `evebox.yaml` | Log pipeline and search UI provisioning |
-| `backup-honeypot.sh`, `verify-backup.sh`, `log-maintenance.sh`, `RECOVERY.md` | Retention and recovery |
-| `verify-stack.py` | Post-deploy/recovery health gate over the backend's `/api/v1/source-health` ([#2086](https://github.com/Xore/APIARY/issues/2086)) |
+| `analysis/analyze.py` | Offline triage of Cowrie / http-honeypot / multipot / Dionaea JSON logs. Stdlib only |
+| `analysis/collect.sh` | **Deprecated.** Cron-driven bulk copy of captures into a clone of `Xore/honeypot`. Superseded by the dashboard button; kept for a one-time manual backfill |
+| `arcane/home/honeypot-payload-analysis/analysis/dedupe-payloads.py` | Collapses duplicate captures by SHA-256 |
+| *not here* — the YARA scanner moved to `arcane/home/honeypot-payload-analysis/analysis/yara/` (#1502) | Networkless YARA scanner sidecar, local rules, and vendored upstream corpus (`sync-yara.sh`); operator doc kept at [`yara/README.md`](yara/README.md) |
+| `analysis/ghidra/` (code), [`ghidra/`](ghidra/README.md) (docs) | Headless Ghidra reverse-engineering pipeline, local-model triage, and the analysis-host installer ([`ghidra/README.md`](ghidra/README.md)) |
+| `arcane/home/honeypot-dashboard/analysis/es-results-importer/` | Ships Ghidra/sandbox/GitHub-analysis/workbench-run results into Elasticsearch, read-only, alongside the raw event stream ([#378](https://github.com/Xore/APIARY/issues/378)) |
+| `arcane/home/honeypot-init/analysis/elasticsearch-setup.sh`, `arcane/home/honeypot-init/analysis/honeypot-kibana-setup.sh`, `arcane/home/honeypot-elk/analysis/filebeat.yml` | Log pipeline and search UI provisioning. `evebox.yaml` is gone — the Suricata event store moved out of EveBox's SQLite into Elasticsearch, so the container is configured entirely by CLI flags in `arcane/home/honeypot-elk/compose.yml`; packet capture and session replay is **Arkime** (`arcane/home/honeypot-elk/arkime/config.ini`, templates in `arcane/home/honeypot-init/arkime/composable-templates.js`) |
+| `analysis/backup-honeypot.sh`, `analysis/verify-backup.sh`, `arcane/home/honeypot-utilities/analysis/log-maintenance.sh`, [`RECOVERY.md`](RECOVERY.md) | Retention and recovery |
+| `analysis/verify-stack.py` | Post-deploy/recovery health gate over the backend's `/api/v1/source-health` ([#2086](https://github.com/Xore/APIARY/issues/2086)) |
 
 The GitHub Actions workflow itself lives at
 [`Xore/honeypot/.github/workflows/analyze.yml`](https://github.com/Xore/honeypot/blob/main/.github/workflows/analyze.yml).
@@ -170,7 +176,8 @@ python3 analysis/analyze.py /path/to/logdir --top 15 --json summary.json
 ```
 
 ```bash
-# Copy logs out of the Docker volume first
-docker run --rm -v honeypot_honeypot-logs:/logs -v "$PWD":/out \
+# Copy logs out first. Sensors bind-mount to the host, they do not use a
+# Docker volume: /opt/stacks/apiary/logs/<service>/ on the box, e.g. cowrie/.
+docker run --rm -v /opt/stacks/apiary/logs/cowrie:/logs -v "$PWD":/out \
     alpine sh -c 'cp /logs/*.json /out/'
 ```

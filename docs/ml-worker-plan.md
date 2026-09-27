@@ -1,16 +1,24 @@
 # ML Worker — Implementation Plan
 
+> **Reading note (2026-09-27):** this is a dated plan/record, not a live
+> reference. §2, §5.3, §7, §8, §9, §10, §11.4 and §11.6 describe shipped
+> behaviour and were re-checked against the code. §1, §4.1, §6, §11.2 and §12
+> keep their original-draft wording where it was never rewritten — including
+> the Go dashboard's `dashboard/ml_anomalies.go` / `settings_domain.go`
+> references, which are historical since #1628.
+
 > **Status (2026-08-27, #1662):** the plan largely executed as written:
-> `ml-worker/worker.py` runs the ensemble described here from the same
-> repo-root compose files. What moved: consumers of its output live in the
+> `ml-worker/worker.py` runs the ensemble described here from its own
+> Arcane-managed stack, not the repo-root compose file (see §10).
+> What moved: consumers of its output live in the
 > backend-service tier now, not `dashboard/ml_anomalies.go` (deleted).
 > Open scoring-semantics defects are tracked in issues #1946/#1969 under
 > epic #1974 rather than here.
 
-> **Status:** `ml-worker/` has its own Dockge stack
-> ([`docker-compose.yml`](../ml-worker/docker-compose.yml) +
-> [`docker-compose.ml-worker.gpu.yml`](../ml-worker/docker-compose.ml-worker.gpu.yml),
-> mirroring `analysis/ghidra/`), builds, connects to Elasticsearch, and polls
+> **Status:** `ml-worker/` has its own Arcane-managed stack
+> ([`docker-compose.yml`](../ml-worker/docker-compose.yml), the only one the
+> manifest deploys). `docker-compose.ml-worker.gpu.yml` exists in-tree but is
+> inert and undeployed, so the worker is CPU-only in practice. It
 > without crashing (#62). `extract_features()`/`featurise_temporal()` read
 > the real per-sensor schema (#62 task 33, #63). The dashboard delivers
 > scores via the backend-service's `/api/v1/store/ml-anomalies` +
@@ -27,7 +35,10 @@
 > `docker build ./ml-worker` failed outright (`pyod`'s `numba` dependency had
 > no version compatible with the pinned `numpy==2.5.1` on Python 3.12 —
 > reproduced twice, locally and in-container; fixed in #62 by pinning
-> `numpy==2.4.6`/`numba==0.66.0`/`llvmlite==0.48.0`). `worker.py`'s
+> `numpy==2.4.6`/`numba==0.66.0`/`llvmlite==0.48.0`; those two transitive pins
+> have since moved on again and the file now reads `numba==0.67.0` /
+> `llvmlite==0.49.0` / `pyod==3.6.6`, so treat this paragraph as the record of
+> what #62 did, not of the current requirements). `worker.py`'s
 > `SOURCE_INDICES` (`cowrie-*`, `dionaea-*`, `honeypot-network-*`, `conpot-*`,
 > `http-honeypot-*`) still match zero indices on the live homeserver: the real
 > shape is a unified `honeypot-v2-*` stream (all sensors, disambiguated by
@@ -90,16 +101,17 @@ ground-truth labels. [web:275][web:283]
 > the "v0.1 audit verdict" callout above. `worker.py`'s real,
 > currently-deployed `SOURCE_INDICES` are the two rows below.
 
-The worker ingests from two unified, versioned index patterns
+The worker ingests from three unified, versioned index patterns
 (`ml-worker/worker.py`'s `SOURCE_INDICES`):
 
 | Index pattern | Source | Key fields |
 |---------------|--------|------------|
 | `honeypot-v2-*` | every honeypot sensor (Cowrie, Dionaea, Conpot, HTTP-honeypot, and every other sensor stack — disambiguated by `event.sensor`, not a separate index per sensor) | `event.sensor`, `source.ip`, `honeypot.*` (per-sensor nested fields, not uniform across sensors — see §5.3) |
 | `suricata-v2-*` | Suricata network/IDS events (Filebeat) | `suricata.eve.*`, `network.*`, `alert.signature` |
+| `zeek-v1-conn-*` | Zeek connection records, added by #1774's sensing layer alongside Suricata | Zeek conn-log fields; note the pattern is `zeek-v1-conn-*`, not a `zeek-v2-*` line like the other two |
 
-Both index patterns share a common `@timestamp` field used for temporal
-ordering. A third index, `ml-worker-state`, is not a data source — it's the
+All three index patterns share a common `@timestamp` field used for temporal
+ordering. A fourth index, `ml-worker-state`, is not a data source — it's the
 worker's own per-index-pattern checkpoint store (`load_checkpoint`/
 `save_checkpoint` in `worker.py`): a `last_timestamp` plus the set of
 already-seen event IDs at that exact timestamp, so a restart resumes
@@ -117,9 +129,11 @@ flowchart TD
     subgraph Stack["APIARY (existing)"]
         Sensors["every honeypot sensor stack<br/>(disambiguated by event.sensor,<br/>not a separate index each)"]
         Suricata["Suricata / network IDS"]
-        ES["Elasticsearch<br/>honeypot-v2-*, suricata-v2-*"]
+        Zeek["Zeek conn records<br/>(#1774)"]
+        ES["Elasticsearch<br/>honeypot-v2-*, suricata-v2-*,<br/>zeek-v1-conn-*"]
         Sensors --> ES
         Suricata --> ES
+        Zeek --> ES
     end
 
     subgraph Worker["ML Worker (ml-worker/)"]
@@ -168,8 +182,9 @@ different anomaly types: [web:275][web:276][web:283][web:292]
   mixed numerical+categorical features after encoding. Proven on network
   logs. [web:276][web:290]
 - **Implementation:** `scikit-learn` `IsolationForest` with `contamination=0.01`
-  (assume 1% of events are anomalous). Retrained every 6 hours on a 24h
-  rolling window.
+  (assume 1% of events are anomalous). Retrained at four fixed UTC slots
+  daily (`RETRAIN_SLOTS_UTC`, default `03:00,09:00,15:00,21:00` — #172
+  replaced the old 6h `RETRAIN_INTERVAL`) on a 24h rolling window.
 - **Output:** `anomaly_score` ∈ [-1, 0] where values closer to -1 = more anomalous.
 
 ### 4.2 LSTM Autoencoder (LSTM-AE)
@@ -391,7 +406,7 @@ loop every POLL_INTERVAL seconds (default: 30s):
 
   10. Sleep POLL_INTERVAL
 
-Every 6 hours (RETRAIN_INTERVAL):
+At each `RETRAIN_SLOTS_UTC` slot (four daily, default 03:00,09:00,15:00,21:00 UTC, #172):
   - Retrain IsoForest + HBOS on last 24h of all events
   - Fine-tune LSTM-AE on last 24h (5 epochs, low LR)
   - Save new model checkpoint to /models/
@@ -515,7 +530,7 @@ rediscovered from an empty index:
   (`ml-worker/worker.py:73`); `run_worker()` installs a delete-only policy
   (`ANOMALY_ILM_POLICY = "ml-anomalies-retention"`) via
   `ensure_ilm_policy(es, ANOMALY_ILM_POLICY,
-  build_ilm_policy(ML_ANOMALIES_RETENTION_DAYS))` (`worker.py:939`) before
+  build_ilm_policy(ML_ANOMALIES_RETENTION_DAYS))` (`worker.py:1002`) before
   the index itself is created, because an index whose
   `index.lifecycle.name` points at a missing policy fails its own
   creation. These documents are the labelled-corpus substrate
@@ -524,7 +539,8 @@ rediscovered from an empty index:
   `honeypot-30d`'s own 30-day source window, while still bounding the
   index rather than leaving it permanent. The window is an env-tunable
   default, not a hardcoded constant, per #261's convention.
-- **`ml-worker-metrics`: delete after 180d** (`ML_METRICS_RETENTION`,
+- **`ml-worker-metrics`: delete after 90d** (`ML_METRICS_RETENTION_DAYS`, default
+  `90` at `ml-worker/worker.py:74`,
   ILM policy `ml-worker-metrics-retention`, installed idempotently by
   the same `ensure_ilm_policy()` call at startup and bound via index
   settings when the index is created). Diagnostic evidence for
@@ -698,7 +714,7 @@ scores to the dashboard":
 
 ## 10. Docker Compose Integration
 
-**Rewritten 2026-07-31 (#62).** ml-worker is its own Dockge stack now, not a
+**Rewritten 2026-07-31 (#62).** ml-worker is its own standalone stack now, not a
 service folded into the root `docker-compose.yml`, and the file this section
 used to show (`ml-worker/docker-compose.override.yml`, built against a
 network named `analysis-net` that never existed anywhere in this
@@ -785,7 +801,7 @@ if wanted.
 ### 11.2 Online learning (unchanged from the original draft, still accurate)
 
 ```
-  → HBOS/IsoForest: full retrain every RETRAIN_INTERVAL (default 6h) on the
+  → HBOS/IsoForest: full retrain at each `RETRAIN_SLOTS_UTC` slot (four daily, #172) on the
     rolling 24h window, gated by §11.1
   → LSTM-AE: fine-tune on the same cycle (5 epochs, LR=1e-5), gated the same
     way (§11.1's anomaly-rate check applies to its reconstruction-loss-based
@@ -830,7 +846,7 @@ fraction `>= THRESHOLD` exceeds `DRIFT_ANOMALY_RATE` (default `0.15`,
 matching the original draft's "15%"):
 
 - an early retrain is triggered (the next poll cycle retrains regardless of
-  how much of `RETRAIN_INTERVAL` remains), and
+  which `RETRAIN_SLOTS_UTC` slot is nearest), and
 - a `ml-worker-metrics` document is written flagging the drift event
   (`kind: "drift"`, the observed rate, window size) so the dashboard's
   `/ml-anomalies` page (#64) — or a future panel reading this index directly
@@ -884,9 +900,11 @@ its contract carried over unchanged to the Rust config module.)
 | **v0.8** | Retraining scheduler + model versioning | [#65](https://github.com/Xore/APIARY/issues/65) |
 | **v1.0** | Drift detection + alert threshold tuning UI | [#65](https://github.com/Xore/APIARY/issues/65) |
 
-v0.1 is listed as an issue rather than as done on purpose. `ml-worker/` holds a
-Dockerfile, `worker.py`, and a `docker-compose.override.yml`, but it is not a
-service in the root Compose file, it has no tests or fixtures, and nothing here
+v0.1 is listed as an issue rather than as done on purpose. As of the #61 audit
+— before #62's rewrite — `ml-worker/` held a
+Dockerfile, `worker.py`, and a `docker-compose.override.yml` (since deleted, see
+§10); it was not a
+service in the root Compose file, it had no tests or fixtures, and nothing here
 has been observed running against live data. #61 is the audit that decides
 whether the scaffold is a v0.1 or a starting point.
 

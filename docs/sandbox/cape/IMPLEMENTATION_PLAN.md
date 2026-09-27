@@ -54,7 +54,7 @@ Same as `docs/sandbox/windows/IMPLEMENTATION_PLAN.md` and
 `docs/sandbox/ghosts/IMPLEMENTATION_PLAN.md`:
 - KVM/QEMU/libvirt + docker-compose only — no VMware, no Hyper-V
 - No CI-triggered detonation — the dashboard's Workbench is the only
-  trigger (`workbench_orchestrator.go` → spool file → host-side systemd
+  trigger (`workbench_orchestrator.rs` → spool file → host-side systemd
   worker)
 - VM lifecycle is CAPE's own responsibility once configured (its
   `kvm`/`libvirt` machinery module talks to `virsh` directly) — this
@@ -161,24 +161,26 @@ differently-configured venv without saying so.
 - **Host-side CAPE sandbox worker** (`sandbox/cape/worker/`, systemd path
   unit) — [#318]
   - Watches `CAPE_REQUEST_DIR` for `{sha256}.request` files written by
-    `dashboard/workbench_orchestrator.go`'s "cape" analyzer
+    the backend-service's
+    [`workbench_orchestrator.rs`](../../../arcane/home/honeypot-dashboard/backend-service/src/workbench_orchestrator.rs)
+    "cape" analyzer
   - `cape-worker.py`: submits the sample to CAPE's own `apiv2`
     (`/apiv2/tasks/create/file/`), polls `/apiv2/tasks/status/{id}/` until
-    `reported`, fetches `/apiv2/tasks/report/{id}/json/`, writes
+    `reported`, fetches `/apiv2/tasks/get/report/{id}/json/`, writes
     `{sha256}_cape.json` into `CAPE_RESULTS_DIR`
-  - **Not yet verified against a live submission through this specific
-    path** — narrower than before, not still fully open: #314's own
-    `utils/submit.py` + `/apiv2/tasks/status/` have now been exercised
-    against a real, `reported` analysis (see #314's own section below),
-    so the service side of this is confirmed live. `cape-worker.py`'s
-    own client code, though, has never itself submitted anything — its
-    endpoint contract is CAPEv2's documented `apiv2` shape, the same
-    starting point `ghidra-worker.py`'s own header warns went stale once
-    already ("the endpoints originally taken from the plan documents
-    were wrong"). Its own `--selftest` only checks reachability for
-    exactly this reason — extend it into a real round trip next, the
-    same discipline `ghidra-worker.py --selftest`'s real analysis round
-    trip already holds itself to; nothing external blocks this now.
+  - **Verified live through this path** (2026-08-08, #318), not just the
+    service side: `--selftest --round-trip` submitted a real probe through
+    `CapeClient` itself, and both the submit and the poll reached `reported`
+    with a fetchable report. Same lesson `ghidra-worker.py`'s header warns
+    about — two endpoints taken from CAPEv2's *documented* apiv2 shape were
+    wrong and only a live run caught them: the report route is
+    `/apiv2/tasks/get/report/{id}/json/`, with an extra `get/` segment (the
+    documented `/apiv2/tasks/report/{id}/json/` 404s against a task that has
+    already reported), and `ready()` must not read
+    `/apiv2/cuckoo/status/` reporting itself disabled — this host's
+    `api.conf` has `[cuckoostatus]` off, an unrelated per-endpoint opt-in —
+    as CAPE being unreachable. Both corrections are recorded in
+    `cape-worker.py`'s own module docstring, which is the authority.
 
 ---
 
@@ -192,7 +194,7 @@ differently-configured venv without saying so.
 | VM lifecycle | CAPE's own `kvm`/`libvirt` machinery module (not this worker) | `sandbox/windows/orchestrate/run_sample.py`, direct `virsh` |
 | Results | `{sha256}_cape.json` → `CAPE_RESULTS_DIR`; dashboard only reads | `{sha256}_sandbox.json` → `WINDOWS_SANDBOX_RESULTS_DIR` |
 | Trust boundary | Dashboard never touches libvirt, Docker, or CAPE's API credentials directly | Same |
-| Detail page | `/cape/{sha256}` — landed with #319, re-landed by the cutover (#1628); the page itself sits behind normal session auth — the backing `/api/v1/cape/{sha}` call is service-token gated, same middleware as the other detail pages, no admin/role check, detonation confirmation | `GET /sandbox/{job}` |
+| Detail page | `/cape/{sha256}` — landed with #319, re-landed by the cutover (#1628); the page itself sits behind normal session auth — the backing `/api/v1/cape/{sha}` call is service-token gated, same middleware as the other detail pages, no admin/role check, detonation confirmation | `GET /api/v1/sandbox/{job}` |
 
 No new trust boundary. The dashboard container stays unprivileged and never
 calls `virsh`, `docker`, or CAPE's own API directly — same guarantee every
@@ -206,17 +208,24 @@ other pipeline in this repo already holds itself to.
 except `deterministic`. There is no automatic classification-based routing
 to CAPE (or to `windows-sandbox`, or `windows-ghosts`) anywhere in this
 codebase today — an operator selects analyzers explicitly in the Workbench
-UI, and `workbenchRegistry`'s `Applicable`/`Available` fields only control
+UI, and `workbench_registry`'s `applicable`/`available` fields only control
 whether "cape" is offered as a *choice*, never whether it runs
 automatically. This was already the right answer by construction once the
-registry entry existed (`dashboard/workbench_domain.go`'s `cape` entry,
-`AcceptedKinds: ["windows"]`, `Applicable: windowsApplicable`,
-`Confirmation: "detonation"`) — no separate routing logic needed building,
-and none should be: an operator choosing to spend an hours-long CAPE
-analysis slot is exactly the kind of decision this repo's Workbench
-pattern reserves for a human, the same reasoning `windows-ghosts`'s own
-loud, opt-in-only framing already documents for its own WAN-permitted
-route.
+registry entry existed — no separate routing logic needed building, and none
+should be: an operator choosing to spend an hours-long CAPE analysis slot is
+exactly the kind of decision this repo's Workbench pattern reserves for a
+human, the same reasoning `windows-ghosts`'s own loud, opt-in-only framing
+already documents for its own WAN-permitted route.
+
+That entry is the backend-service's
+[`workbench_domain.rs`](../../../arcane/home/honeypot-dashboard/backend-service/src/workbench_domain.rs)
+`cape` `WorkbenchAnalyzer`: `display_name: "CAPE sandbox"`,
+`accepted_kinds: ["windows"]`, `applicable: windows_applicable`,
+`confirmation: "detonation"`, `detonates: true`, `required_role: "admin"`,
+`concurrency: "cape-kvm"`, `local_only: true`,
+`result_link_shape: "/cape/{sha256}"`, and `availability`/`available` keyed
+on `cape_configured` — the CAPE spool being usable at all, not on the
+payload.
 
 ---
 
@@ -520,18 +529,6 @@ ghidra/revdeck entries already hold themselves to.
 
 ## Known gaps (tracked, not silently dropped)
 
-- **`cape-worker.py`'s CAPE API client is still unverified against a
-  live service** — narrower than before, not removed: #314's own
-  `utils/submit.py` CLI and the `/apiv2/tasks/status/<id>/` read
-  endpoint are both now confirmed live against a real analysis (see
-  above), which was the actual blocker (no service to test against).
-  `cape-worker.py`'s own client code, endpoints matched against CAPEv2's
-  documented `apiv2` blueprint but never yet exercised, is real
-  remaining work — same category of risk that turned out wrong once
-  already for `ghidra-worker.py`'s Ghidra REST client. Run
-  `cape-worker.py --selftest` (extended into a real submission, the way
-  `ghidra-worker.py --selftest` already does for its own service) as the
-  next concrete step; nothing external blocks it now.
 - **PostgreSQL not stood up.** CAPE's default SQLite task DB works for
   #314's actual ask (get the host stack running, confirmed with a real
   end-to-end analysis) and was made noticeably more concurrent-safe by
@@ -584,9 +581,20 @@ sandbox/cape/
     honeypot-cape-worker.service      systemd service unit
     honeypot-cape.default.example     /etc/default/honeypot-cape template
 
-dashboard/
-  cape.go                  capeRequestDir/capeResultsDir (#319, partial)
-  workbench_domain.go       "cape" entry in workbenchRegistry (#319)
+arcane/home/honeypot-dashboard/backend-service/src/
+  workbench_domain.rs       "cape" entry in the analyzer registry, plus the
+                            CAPE_REQUEST_DIR/CAPE_RESULTS_DIR `cape_configured`
+                            check (#319, re-landed by the cutover #1628)
+  detail.rs                 /api/v1/cape/{sha} + /raw result endpoints (#319)
+  worker.rs                 cape_alerts(): CAPE spool/worker health (#319,
+                            partial — mirrors the retired Go cape.go)
+
+  # The Go tier's cape.go is gone. Its half that still has no Rust
+  # counterpart is the write side: workbench_orchestrator.rs's `marker_dir`
+  # has arms for ghidra / windows-sandbox / windows-ghosts / linux-sandbox /
+  # revdeck but none for cape, so a Workbench selection can list and validate
+  # "cape" yet never drops a {sha256}.request into the spool. That is the
+  # "partial" in #319, and it is why #317's routing is still manual.
 
 sandbox/windows/run_pending.sh   #320's shared cross-pipeline lock added
 ```

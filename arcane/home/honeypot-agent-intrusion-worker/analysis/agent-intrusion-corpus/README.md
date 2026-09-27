@@ -15,7 +15,7 @@ original consumer and is retired) that renders its output — all proven
 against that one corpus rather than hand-built fixtures alone. The
 prerequisite research (mapping the campaign to APIARY's actual trust
 boundaries) is
-[`docs/agent-intrusion-threat-model.md`](../../docs/agent-intrusion-threat-model.md);
+[`docs/agent-intrusion-threat-model.md`](../../../../../docs/agent-intrusion-threat-model.md);
 phase 4's preventive-control audits (Dockerfile digest pinning, an
 assessed ARKIME secret-delivery finding) are documented there, not here,
 since they touch the wider repo rather than this directory. Phases 1-5
@@ -259,7 +259,8 @@ change reviewed content. To extend the corpus, add events directly to
 
 `corpus.jsonl` is not itself schema-versioned (no top-level `version`
 field) — the file's own git history is the version record, matching how
-this repo treats `analysis/yara/` and other reviewed-fixture directories.
+this repo treats `arcane/home/honeypot-payload-analysis/analysis/yara/` and
+other reviewed-fixture directories.
 A future breaking change to `schema.json` (a required field added/removed,
 an enum value changed) should bump `schema.json`'s own `$id` and add a
 note here, not silently reinterpret old corpus rows under a new meaning.

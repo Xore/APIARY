@@ -1,5 +1,15 @@
 # Dionaea bistreams retention — consumer inventory and decision (#2862)
 
+> **Dated decision record — 2026-09-03.** `BISTREAMS_RETENTION_DAYS=30` is
+> still the pinned value in `arcane/home/honeypot-payload-analysis/.env.example`
+> and the decision has not been reopened. Read the forward-looking sections
+> ("nothing is 30 days old yet", "when this window first destroys something —
+> 2026-09-09") as written on 2026-09-03: that date has passed, so the pruning
+> path is now live rather than pending, and the size projections below are the
+> ones that were made then, not current measurements. Re-measure before acting
+> on the capacity numbers. The consumer inventory and the forensic argument are
+> unaffected by the passage of time and are the substance of this document.
+
 `dionaea-lib`'s `bistreams/` tree holds Dionaea's raw per-connection capture
 stream: every accepted connection gets a date-named subdirectory
 (`YYYY-MM-DD/`) full of raw capture files, payload or not — a superset of
@@ -10,7 +20,7 @@ stream this document does not cover.
 
 | reader | code path | reach |
 |---|---|---|
-| `payload-dedupe` (`hp-payload-dedupe`) | `arcane/home/honeypot-payload-analysis/analysis/dedupe-payloads.py`: `prune_old_directories()` deletes whole date subtrees older than `BISTREAMS_RETENTION_DAYS`; `dedupe()` then hard-link-dedupes whatever's left (`PAYLOAD_ROOTS` includes `/payloads/dionaea/bistreams`) | whatever the retention window currently leaves on disk — no independent age requirement |
+| `payload-dedupe` (`hp-payload-dedupe`) | `arcane/home/honeypot-payload-analysis/analysis/dedupe-payloads.py`: `prune_old_directories()` deletes whole date subtrees older than `BISTREAMS_RETENTION_DAYS`, then `dedupe()` runs over `PAYLOAD_ROOTS` — which **does include bistreams**. The compose file sets `PAYLOAD_ROOTS=/payloads/cowrie:/payloads/dionaea/binaries:/payloads/scripts/script-payloads:/payloads/dionaea/bistreams` (compose.yml:49), so content dedupe and hard-linking both reach into the bistreams tree; `BISTREAMS_ROOT=/payloads/dionaea/bistreams` (compose.yml:56) is the *separate* variable the pruning pass reads, not an exclusion from dedupe. Bistreams is listed **last** on purpose, and the compose comment says why: it is 82% duplicate by content in a live sample, so age-pruning runs before dedupe each pass to keep what dedupe must hash bounded (#112) | whatever the retention window currently leaves on disk — no independent age requirement |
 | `yara-scanner` (`hp-yara-scanner`) | `arcane/home/honeypot-payload-analysis/compose.yml`'s `YARA_PAYLOAD_ROOTS=/payloads/dionaea:...` mounts the whole `dionaea-lib` volume read-only, so it scans bistreams as part of `/payloads/dionaea` | same — whatever's currently present |
 | Elasticsearch / dashboard | none — nothing indexes bistreams content directly. `HONEYPOT_RETENTION_DAYS` (21d) governs *derived* ES indices, which is a shorter and unrelated window over structured events, not a copy of the raw stream | n/a |
 | manual forensic review | ad hoc, off-repo | as far back as the window allows |

@@ -27,7 +27,7 @@ are **two** such bridges, because there are two sandboxes:
 | Network XML | `sandbox/windows/setup/sandbox-network.xml` | `sandbox/network.xml` |
 | Fake internet | INetSim at `10.10.10.1` | none by default; optional logged DNS + Squid allowlist (`controlled` mode) |
 | Capture | `docker-compose.sandbox.yml` (tcpdump, Zeek, Suricata) | root-owned `tcpdump` per job, host and guest side |
-| Results | `sandbox/results/<run>/` | `/var/lib/honeypot-sandbox/results/` (root-only), sanitized export copied out |
+| Results | `$WINDOWS_SANDBOX_RESULTS_DIR/<sample sha256>/` — this is the path the dashboard reads. The compose file's own `./sandbox/results/current` default only applies to a manual `docker compose -f docker-compose.sandbox.yml up`; `run_sample.py` overrides `SANDBOX_RESULTS_DIR` to the current run's out_dir, and its own fallback when the env var is unset is `reports/windows-sandbox` | `/var/lib/honeypot-sandbox/results/` (root-only), sanitized export copied out |
 | Orchestrator | `sandbox/windows/orchestrate/run_sample.py` | `sandbox/run-linux-sample.sh` |
 
 Neither bridge has a `<forward>` element, so neither can route anywhere. That

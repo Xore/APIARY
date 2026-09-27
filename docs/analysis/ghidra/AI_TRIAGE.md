@@ -56,7 +56,7 @@ flowchart TD
   prompt["System + user prompt<br/>evidence named as data, not instructions"]
   local{"endpoint_is_local()?"}
   refuse["Refused before any request is made<br/>ai_triage left null, reason logged"]
-  call["POST /v1/chat/completions"]
+  request["POST /v1/chat/completions"]
   usage["token usage reported by the server"]
   truncated{"prompt_tokens indicates<br/>the prompt was truncated?"}
   discard["Answer discarded<br/>ai_triage left null, reason logged"]
@@ -69,7 +69,7 @@ flowchart TD
   imports --> budget
   budget --> evidence --> prompt --> local
   local -->|no| refuse
-  local -->|yes| call --> usage --> truncated
+  local -->|yes| request --> usage --> truncated
   truncated -->|yes| discard
   truncated -->|no| parse --> normalise --> result
 ```
@@ -82,7 +82,7 @@ complete and the result written. Triage never fails an analysis.
 ## The context window is part of the configuration
 
 The evidence block for a real binary is around 8000 tokens. Ollama's default
-window is 4096 whatever the model can do — `qwen3:8b` advertises 40960 — and an
+window is 4096 whatever the model can do — `qwen3:14b` advertises 40960 — and an
 overlong prompt is **truncated, not refused**. There is no error, no HTTP
 status, and the model answers from whichever fragment survived.
 
@@ -90,12 +90,14 @@ Measured here on `/usr/bin/wget`: at the default the reply described a command
 line with hardcoded credentials that appears nowhere in the sample; at 16384
 the same prompt returns `{"family_guess": "wget", "risk_level": "low"}`.
 
-So the compose file sets `OLLAMA_CONTEXT_LENGTH=16384`. It has to be set on the
-server, because `/v1/chat/completions` has no field for context length — only
-Ollama's native API and that variable can reach it. Budget about 1.8 GB of KV
-cache on top of the weights; `qwen3:8b` Q4_K_M reports 7.8 GB total on the live
-host and offloads about 1 GB to system RAM. CPU/RAM offload is supported and is
-not a correctness failure. On a genuinely memory-constrained host, lower the
+So the compose file sets `OLLAMA_CONTEXT_LENGTH=32768` — raised from 16384 when
+the #568 requalification ran the ghidra slot at `context_tokens: 32768` under the
+exact production manifest gates and returned identical scores with zero gate
+regressions. It has to be set on the server, because `/v1/chat/completions` has
+no field for context length — only Ollama's native API and that variable can
+reach it. Budget the KV cache on top of the weights; `qwen3:14b` Q4_K_M reports
+9,276,198,565 bytes (8.6 GB) on the live host. CPU/RAM offload is supported and
+is not a correctness failure. On a genuinely memory-constrained host, lower the
 window and the evidence budgets together rather than accept truncation.
 
 The worker does not trust the setting. Every reply is checked against the token
@@ -112,7 +114,7 @@ directly, so it is visible at install time rather than in a malware report.
   "family_guess": "Mirai variant",
   "risk_level": "high",
   "behaviors": ["connects to a hardcoded C2 address", "kills competing processes"],
-  "model": "qwen3:8b",
+  "model": "qwen3:14b",
   "slot_generation": "0123456789ab/ctx32768/vram14336mib",
   "evidence_shown": "150/312 imports, 200/11482 strings (longest first, deduplicated, >=6 chars), 100/847 functions (largest first)"
 }

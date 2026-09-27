@@ -13,3 +13,12 @@ live malware, private keys, production `.env` files, packet captures containing
 private traffic, or unredacted logs to a public issue.
 
 Supported security fixes target the current `main` branch.
+
+`scripts/check-public-leaks.py` enforces the "leak a real secret" half of this
+policy on every change, and fails CI on private keys, GitHub/AWS/Slack tokens,
+literal credential assignments, credentials embedded in URLs, deployment
+`.env` files, private-key and packet-capture binaries, and the
+deployment-specific addresses and default password this repository must never
+name. Exactly one tracked `.env` is exempt, and it is the decoy honeyfs file
+under `arcane/home/honeypot-cowrie/` that exists for attackers to find — not a
+credential, and not something to "fix" by deleting.

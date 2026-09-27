@@ -27,17 +27,30 @@ line, `#` comments and blank lines ignored.
 
 | Profile | Backbone | Sensors | Shape |
 |---|---|---|---|
-| [`full.txt`](../../deploy-profiles/full.txt) | init, elk, dashboard, utilities, payload-analysis | every deception sensor stack under `arcane/home/` | the standard deployment -- everything this repo ships |
-| [`ics-focused.txt`](../../deploy-profiles/ics-focused.txt) | init, elk, dashboard, utilities | conpot, dnp3 | OT/ICS-only exposure -- skip the general-purpose/web/SSH/legacy-protocol sensors entirely |
-| [`minimal-web.txt`](../../deploy-profiles/minimal-web.txt) | init, elk, dashboard, utilities | http, tanner | web-attack-focused -- HTTP/API honeypot + SNARE/TANNER, skip ICS/SSH/legacy-protocol sensors |
+| [`full.txt`](../../deploy-profiles/full.txt) | keycloak, init, elk, dashboard, utilities, payload-analysis | the 20 classic deception sensor stacks under `arcane/home/` -- but see the gap below | the standard deployment -- everything this repo ships |
+| [`ics-focused.txt`](../../deploy-profiles/ics-focused.txt) | keycloak, init, elk, dashboard, utilities | conpot, dnp3 | OT/ICS-only exposure -- skip the general-purpose/web/SSH/legacy-protocol sensors entirely |
+| [`minimal-web.txt`](../../deploy-profiles/minimal-web.txt) | keycloak, init, elk, dashboard, utilities | http, tanner | web-attack-focused -- HTTP/API honeypot + SNARE/TANNER, skip ICS/SSH/legacy-protocol sensors |
 
-`init`, `elk`, and `dashboard` are structural dependencies for any profile
-that includes at least one sensor -- `scripts/validate-deploy-profile.sh`
-(below) enforces
-this, it isn't just a convention to remember. `payload-analysis` and
+**`full.txt` is not actually "everything this repo ships".** It lists 26
+stacks (6 backbone + 20 sensors) and omits `honeypot-sonicwall-sma`, the
+decoy sensor stack #3131 added on 2026-09-08 (`hp-sonicwall-sma-honeypot`
+on `${HP_BIND:-10.8.0.2}:8543`). It is a natural fit for both `full.txt` and
+`ics-focused.txt`, and is in neither. The other `arcane/home/` stacks the
+profiles deliberately skip are the analysis-plane workers and
+`honeypot-dashboard-backend` (not persona declarations, per below) plus
+`unsloth` (the #3092 benchmark toolchain) -- and `rex86-eval`, which exists
+on disk but is in no manifest entry at all.
+
+`init` and `elk` are structural dependencies for any profile that includes at
+least one sensor; `keycloak` is a structural dependency of `dashboard`, and
+`elk` is too. `scripts/validate-deploy-profile.sh` enforces all three, so
+these aren't just conventions to remember. `payload-analysis` and
 `utilities` are strongly recommended (payload dedup/YARA scanning, log
 rotation/disk monitoring/autoheal) but not structurally required, so the
-validator only warns if either is missing from a non-empty profile.
+validator only warns if either is missing from a non-empty profile. Note
+that `dashboard` itself is *not* a required structural dependency: the
+validator never demands it, it only imposes `elk` and `keycloak` on a
+profile that has chosen it.
 
 Not covered here: the VPS side (`vps/`, always deployed the same way
 regardless of home profile -- see `docs/CGNAT-DEPLOYMENT.md`), the
@@ -97,9 +110,10 @@ scripts/validate-deploy-profile.sh deploy-profiles/ics-focused.txt
 Checks, against the *current* repository state (not a hardcoded snapshot):
 
 1. **Structural dependencies** -- `init`/`elk` present if any sensor stack
-   is listed; `elk` present if `dashboard` is listed (the dashboard reads
-   several sensors' events from Elasticsearch, not their log files --
-   see #403 for why that's a real dependency, not a nice-to-have).
+   is listed; `elk` and `keycloak` present if `dashboard` is listed (the
+   dashboard reads several sensors' events from Elasticsearch, not their
+   log files -- see #403 for why that's a real dependency, not a
+   nice-to-have; and the target auth path is native Keycloak OIDC).
 2. **Real-stack existence** -- every listed name must correspond to an
    actual `arcane/home/honeypot-<name>/` directory, so a typo'd or retired
    stack name fails here instead of surfacing mid-deploy or as a silently

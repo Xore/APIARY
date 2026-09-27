@@ -4,6 +4,25 @@ Decision record for #2289, gating #2290–#2292. No code changes ship with
 this document — it is the design pass #1634 asked for before any ingest
 worker exists.
 
+> **Status, re-measured 2026-09-27: authored and tracked, not deployed.** The
+> ingest worker does exist in git — `vault-worker/` carries a `worker.py`, a
+> `sanitize.py`, a `Dockerfile` and two compose files, the shipped output of
+> #2289/#2290 — but nothing deploys it. It is absent from
+> `arcane/manifests/home-production.json`; no vault-worker container has ever
+> run on the homeserver, and there is no `vault-worker` stack directory among
+> the deployed ones; Elasticsearch carries no `knowledge-vault*` index, so the
+> `knowledge-vault-state-v1` checkpoint cited for this worker in
+> [PIPELINES.md](PIPELINES.md) does not exist either (that row is planned, the
+> same way); and the live APIARY worker runs
+> `WORKER_LOOPS=alert-notifier,attacker-identity,agent-intrusion,correlator,dashboard-rollups,threat-intel,zeek-proxy-attribution`
+> — there is no vault loop in it.
+>
+> So everything below is the design and implementation record of a **planned**
+> subsystem, kept because #2289/#2290 shipped real code against it. Read it as
+> intent that has not been switched on: none of the paths, indices or
+> checkpoints it names exist on a live host, and no deployment decision is
+> recorded anywhere in the repository.
+
 ## 1. Storage: plain markdown directory, carried by the existing off-host
    backup path, not git/Syncthing
 
@@ -39,9 +58,10 @@ stack, not a reuse of one, even though it is a trivial one to stand up
 (`git init` in a directory, a commit per note-write batch). The nearest real
 precedent for "git as a sync/deploy substrate" in this repo is Arcane's own
 GitOps machinery (`docs/ARCANE-GIT-SYNC.md`), which already runs a
-git-pull-and-apply loop against `main` with `auto_sync = 0` set deliberately
-on rows that must not auto-follow (`docs/ARCANE-GIT-SYNC.md:321` and
-`docs/ARCANE-GIT-SYNC.md:374`) — i.e.
+git-pull-and-apply loop against `main` and where every live row currently
+carries `auto_sync = 0`, with every deploy still a manual
+sync → build → redeploy (`docs/ARCANE-GIT-SYNC.md:425` and
+`docs/ARCANE-GIT-SYNC.md:478`) — i.e.
 this codebase's existing git-sync tooling defaults to *manual* triggers for
 anything sensitive, which is the posture this decision adopts too (see §4).
 
@@ -172,7 +192,7 @@ A persistent, curated, cross-referenced copy of (bounded, redacted) attacker
 material is qualitatively different from the raw per-event ES documents it's
 derived from: it's smaller, denser, and easier for a human or a script to
 sweep in one pass. Reading `analysis/backup-honeypot.sh`, its archive step
-(`backup-honeypot.sh:87`) already walks `./analysis ./dashboard ./personas
+(`backup-honeypot.sh:119`) already walks `./analysis ./dashboard ./personas
 ./state` by directory-existence check, unconditionally including anything
 found there. If the vault directory (§1: `state/knowledge-vault/`) is placed
 under `$stack_dir/state/`, it is **already** inside this glob and would start
@@ -189,16 +209,17 @@ above already bounds and strips what can land in a note, the vault's content
 is closer in sensitivity to the config material `backup-honeypot.sh` already
 carries than to the bulk payload/PCAP data it explicitly excludes — so
 extending that script's existing scope to include it is the correct call,
-not an oversight to patch around later. This is a decision to record
-verbatim in `analysis/backup-honeypot.sh`'s own comment block when #2290
-lands the directory, so a future reader sees it was deliberate rather than
-inferring it from a directory glob matching by accident.
+not an oversight to patch around later. That decision is already recorded
+verbatim in `analysis/backup-honeypot.sh`'s own comment block
+(`backup-honeypot.sh:107-114`, which names #2289, #2290 and this document), so
+a future reader sees it was deliberate rather than inferring it from a
+directory glob matching by accident.
 
 ### Worker authorization gate
 
 The vault-ingest worker (#2290) must gate non-dry-run writes the same way
-`llm-worker` gates captured-data mode. Reading `llm-worker/worker.py:200-202`
-and `llm-worker/worker.py:254-264`:
+`llm-worker` gates captured-data mode. Reading `llm-worker/worker.py:246-248`
+and `llm-worker/worker.py:314-318`:
 non-dry-run requires `LLM_ENABLED=true` **and** `LLM_ALLOW_CAPTURED_DATA=true`
 together, with the error message naming both. The vault worker adopts the
 same two-flag shape (its own env var names, e.g. `VAULT_ENABLED` /

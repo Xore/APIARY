@@ -17,10 +17,15 @@ python3 /opt/honeypot-ghidra/models/model-governance.py check-runtime \
 
 The status file contains only state and reason codes. It contains no prompts, model replies, captured data, container paths, or credentials, and is written owner-only mode `0600`. If a dashboard later needs it, expose only the sanitized object through a privileged read-only endpoint; do not mount or relax the host file. `approved`, `drift`, and `unavailable` are advisory states: the service exits successfully with `--warn-only`, so an LLM problem never stops ingestion or deterministic analysis. Omit `--warn-only` in an operator check when drift should produce a non-zero exit status. The command only reads `/api/version`, `/api/tags`, Docker inspection metadata, and `nvidia-smi` telemetry.
 
-### Two expected, honest states after #2394 (not regressions)
+### Post-#2394 GPU-identity states: which are expected, which are not
 
-- **`approved_gpu_uuid_missing`** on the `host` leg: the deployed manifest copy at `/opt/honeypot-ghidra/models/approved-models.json` still predates the `approved_host.gpu_uuid` field until `install-analysis-host.sh` next runs end to end on that host. The checker reports this distinct, advisory-only code rather than silently comparing whichever GPU enumerates as index 0. It clears itself once the host is redeployed with the current manifest.
-- **`host_gpu_uuid_changed`**: any `--snapshot` file captured before #2394 was written under the older schema and has no GPU-identity fields for the new comparison to match against. Replaying it will read as drift under the new schema even though nothing on the host changed -- expected for old snapshots, not evidence of an actual UUID change.
+#2394 made the checker compare GPU identity by UUID rather than enumeration
+order, and that added three host-leg codes. Only the first two are expected
+during the rollout; the third is a real problem wearing the same shape.
+
+- **`approved_gpu_uuid_missing`** on the `host` leg — *expected.* The deployed manifest copy at `/opt/honeypot-ghidra/models/approved-models.json` still predates the `approved_host.gpu_uuid` field until `install-analysis-host.sh` next runs end to end on that host. The checker reports this distinct, advisory-only code rather than silently comparing whichever GPU enumerates as index 0. It clears itself once the host is redeployed with the current manifest.
+- **`host_gpu_uuid_changed`** — *expected for a legacy `--snapshot` only, and this code is overloaded, so check before dismissing.* A snapshot captured before #2394 was written under the older schema and carries no GPU-identity field, so replaying it reads as drift even though nothing on the host changed. But the checker also emits the **same code** when `gpu_uuid` is present and names a *different physical card* than the manifest pins — that is real drift, not a schema artefact, and the field the old schema compared (name, memory, driver) can all still look correct. Tell the two apart by whether the snapshot has a `gpu_uuid` key at all: absent means a legacy replay, present-and-different means the host is not running the approved card. The same per-field construction applies to `host_gpu_changed`, `host_gpu_memory_mib_changed`, `host_driver_changed` and `host_compute_capability_changed`, so treat each of those the same way.
+- **`approved_gpu_absent`** — *not expected.* The tool ran, was pointed at the approved UUID explicitly, and no such card exists on the host. Distinct from `gpu_telemetry_unavailable` (which means the telemetry could not be read at all). This one means the approved card is genuinely gone.
 
 ## When requalification is mandatory
 
@@ -30,7 +35,7 @@ Run the complete workflow before changing any model tag or digest, Ollama image/
 
 Use a trusted checkout on the approved analysis host. Stop unrelated GPU-heavy jobs if needed, but do not stop or modify QEMU. The benchmark uses only checked-in synthetic TEST-NET fixtures, talks only to the explicitly supplied local Ollama endpoint, records exact artifacts/settings/timing/RAM/VRAM metadata, and unloads each candidate through Ollama after its slot. It never downloads a model.
 
-Keep verbose replies outside the repository in an operator-only directory with bounded retention (30 days is the recorded recommendation):
+Keep verbose replies outside the repository in an operator-only directory with bounded retention (30 days is this doc's own recommendation; no separate retention record covers this directory):
 
 ```sh
 install -d -m 0700 "$HOME/model-qualification"

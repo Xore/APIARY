@@ -8,9 +8,13 @@ auto-renaming, protocol detection, and YARA rule generation.
 > ⚠️ **Interactive only** — GhidrAssist is for analyst-facing use in the
 > Ghidra GUI. It is NOT part of the automated CI pipeline. Your local Ghidra
 > GUI is very likely a different install (and a different, probably newer,
-> Ghidra version) than the pinned `biniamfd/ghidra-headless-rest:1.2.1`
-> (Ghidra 11.3.2) this repo's own automated pipeline runs — see "Ghidra
-> version compatibility" below for why that specifically matters here.
+> Ghidra version) than the Ghidra **11.3.2** this repo's own automated
+> pipeline runs — pinned as `GHIDRA_VERSION` in
+> [`analysis/ghidra/service/Dockerfile`](../../../../analysis/ghidra/service/Dockerfile)
+> and wrapped by this repo's own `service/server.py` since #245 replaced the
+> third-party `biniamfd/ghidra-headless-rest` image (the Ghidra version
+> itself is unchanged by that swap) — see "Ghidra version compatibility"
+> below for why the version specifically matters here.
 
 ## Install — build from source (recommended)
 
@@ -62,7 +66,7 @@ GHIDRA_INSTALL_DIR=/path/to/your/ghidra_<version>_PUBLIC gradle buildExtension
 run the extension in** — Ghidra extensions are compiled against that
 install's own API and are not portable across major versions. This isn't
 hypothetical for this specific commit: building `2.2.0` against Ghidra
-**11.3.2** (this repo's own pinned `biniamfd/ghidra-headless-rest` version)
+**11.3.2** (the version this repo's own analysis-host container pins)
 **fails outright** —
 
 ```
@@ -78,8 +82,8 @@ buildable, for this GhidrAssist version. Building against Ghidra **12.1**
 instead (verification above) succeeds cleanly.
 
 This does not block real-world use: GhidrAssist runs in *your own local
-Ghidra GUI*, not in the headless-rest container the automated pipeline
-uses, and an analyst's own desktop Ghidra install is very likely 12.x
+Ghidra GUI*, not in the headless container the automated pipeline uses,
+and an analyst's own desktop Ghidra install is very likely 12.x
 already. It does mean: point `GHIDRA_INSTALL_DIR` at your actual local
 Ghidra, not at this repo's pinned analysis-host version, and don't expect
 this exact commit to build against anything older than 12.0.
@@ -145,10 +149,17 @@ echo "${GHIDRASSIST_SHA256}  ${GHIDRASSIST_ZIP}" | sha256sum -c -
 After installation, configure the LLM in Ghidra:
 `Edit → Tool Options → GhidrAssist`
 
-Use the same endpoint as Rev·Deck:
+Use the same endpoint and model as Rev·Deck — the same local Ollama the
+analysis host runs:
 ```
 LLM Provider: OpenAI Compatible
 Base URL: http://127.0.0.1:11434/v1   (Ollama) or OpenRouter
-Model: qwen3:8b
-API Key: not-used
+Model: qwen3:14b
+API Key: ollama
 ```
+
+Unlike `ghidra-worker.py`, nothing here enforces a local-only endpoint —
+GhidrAssist is a GUI extension talking to whatever provider you type in,
+and the `OpenRouter` option above is a real one. The captured samples it
+would read are live malware off this honeypot, so the local-only rule
+`AI_TRIAGE.md` documents applies to you, not to the plugin.

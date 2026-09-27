@@ -79,8 +79,9 @@ just the `ai_triage` field on the already-written result, atomically).
 Processes at most one job per invocation — simple, and the next tick picks
 up wherever this one left off.
 
-**Dashboard** (`dashboard/gpu_queue.go`): the `/ghidra` page's "GPU queue"
-section lists every job (ES-only read, `docSearchAll` against
+**Dashboard** (`arcane/home/honeypot-dashboard/backend-service/src/gpu_queue.rs`,
+routes `/api/v1/gpu-queue` and `/api/v1/gpu-queue/{job_id}/abort`): the payload
+workbench's "GPU queue" section lists every job (ES-only `search_index` against
 `gpu-job-queue`) and offers an Abort button on anything still `queued`.
 Abort only has an effect before a drainer has committed to running a job
 — once `running`, the Ollama call is already in flight, matching

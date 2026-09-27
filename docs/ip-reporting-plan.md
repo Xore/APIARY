@@ -3,15 +3,18 @@
 Report attacker IPs observed by APIARY to public threat-intel
 blocklists via their APIs.
 
-> **Status:** built. `reporter/` (Go, not the Python layout sketched below --
+> **Status:** built. `arcane/home/honeypot-utilities/reporter/` (Go, not the
+> Python layout sketched below --
 > that part of this plan is superseded) is a real service in
 > `arcane/home/honeypot-utilities/compose.yml`. Phase 1
 > ([#68](https://github.com/Xore/APIARY/issues/68)) and Phase 2
 > ([#69](https://github.com/Xore/APIARY/issues/69)) are both closed.
 > Phase 3-4 (reputation validation, operator observability) is
 > [#153](https://github.com/Xore/APIARY/issues/153), closed and implemented:
-> `reporter/greynoise.go` implements the Phase 3 GreyNoise validation, and
-> `reporter/metrics.go` implements Phase 4's observability counters
+> `arcane/home/honeypot-utilities/reporter/greynoise.go` implements the Phase 3
+> GreyNoise validation, and
+> `arcane/home/honeypot-utilities/reporter/metrics.go` implements Phase 4's
+> observability counters
 > (attempted/suppressed/dryRun/sent/failed) as a JSON snapshot — a
 > deliberate deviation from the Prometheus sketch originally proposed below.
 >
@@ -58,19 +61,23 @@ Primary target: **AbuseIPDB** — widely used, has a public confidence score, an
 ```mermaid
 flowchart TD
     Sensors["Cowrie / Dionaea / Conpot / HTTP-honeypot / DNP3"]
-    Reporter["reporter (Python)<br/>new Docker Compose service"]
+    Reporter["reporter (Go)<br/>hp-reporter, dry-run by default"]
     AbuseIPDB["AbuseIPDB"]
     Blocklist["Blocklist.de"]
+    GreyNoise["GreyNoise RIOT<br/>(read-only pre-check)"]
 
     Sensors -->|"JSON event logs on the shared Docker volumes, tailed —<br/>not Redis pub-sub; see 'Resolved design decisions'"| Reporter
     Reporter -->|"POST /api/v2/reports"| AbuseIPDB
+    Reporter -->|"POST /api"| Blocklist
+    Reporter -->|"GET /v3/riot/{ip}"| GreyNoise
     AbuseIPDB -->|optional| Blocklist
 ```
 
 The `reporter` container:
 - Watches the same log/event volume already mounted by the `analysis` and `ml-worker` containers
 - Maintains a local SQLite DB (`/data/reported.db`) to deduplicate IPs per service per 24 h
-- Exposes a `/metrics` endpoint (Prometheus) so Grafana can graph reports-per-hour
+- Exposes no HTTP listener at all: Phase 4 writes a `metrics.json` snapshot into the
+  data volume on an interval instead (see the status banner's Phase 4 note)
 
 ---
 
@@ -162,27 +169,32 @@ Before reporting, cross-check against:
 
 Add to `docker-compose.yml`:
 
+> The block below is the original sketch. It is superseded — see the status
+> banner. Three things in it are simply wrong against what shipped, and are
+> called out because they are the kind of detail that gets copy-pasted:
+> there is **no Prometheus port** (Phase 4 emits `metrics.json` into the data
+> volume instead), the Blocklist.de credentials are **`BLOCKLISTDE_SENDER` +
+> `BLOCKLISTDE_API_KEY`**, not `BLOCKLIST_DE_EMAIL`/`BLOCKLIST_DE_PASSWORD`,
+> and the live switch is `REPORTER_LIVE`. The `whitelist.txt` mount path and
+> `REPORTER_COOLDOWN_HOURS` did land as drawn.
+
 ```yaml
   reporter:
     build: ./reporter
     restart: unless-stopped
     environment:
       ABUSEIPDB_API_KEY: ${ABUSEIPDB_API_KEY}
-      BLOCKLIST_DE_EMAIL: ${BLOCKLIST_DE_EMAIL}
-      BLOCKLIST_DE_PASSWORD: ${BLOCKLIST_DE_PASSWORD}
-      GREYNOISE_API_KEY: ${GREYNOISE_API_KEY:-}   # optional
+      BLOCKLISTDE_SENDER: ${BLOCKLISTDE_SENDER}
+      BLOCKLISTDE_API_KEY: ${BLOCKLISTDE_API_KEY}
+      GREYNOISE_API_KEY: ${GREYNOISE_API_KEY:-}   # inert unless GREYNOISE_ENABLED=1
+      REPORTER_LIVE: ${REPORTER_LIVE:-}           # unset = dry-run
       REPORTER_COOLDOWN_HOURS: ${REPORTER_COOLDOWN_HOURS:-24}
-      REPORTER_WHITELIST: /config/whitelist.txt
     volumes:
       - cowrie_logs:/logs/cowrie:ro
       - dionaea_logs:/logs/dionaea:ro
       - conpot_logs:/logs/conpot:ro
       - reporter_data:/data
       - ./reporter/whitelist.txt:/config/whitelist.txt:ro
-    ports:
-      - "127.0.0.1:9101:9101"   # Prometheus metrics
-    networks:
-      - honeypot_internal
 ```
 
 Add to `.env.example`:
@@ -190,9 +202,11 @@ Add to `.env.example`:
 ```dotenv
 # IP Blocklist Reporting
 ABUSEIPDB_API_KEY=
-BLOCKLIST_DE_EMAIL=
-BLOCKLIST_DE_PASSWORD=
+BLOCKLISTDE_SENDER=
+BLOCKLISTDE_API_KEY=
 GREYNOISE_API_KEY=
+GREYNOISE_ENABLED=0
+REPORTER_LIVE=            # leave empty: the reporter is dry-run until set
 REPORTER_COOLDOWN_HOURS=24
 ```
 
@@ -222,19 +236,38 @@ The reporter will track a daily counter and pause with exponential back-off on `
 
 ## Files To Create
 
+The Python layout originally sketched here was never built — the shipped
+service is Go. This is what
+`arcane/home/honeypot-utilities/reporter/` actually contains:
+
 ```mermaid
 flowchart TD
-    ReporterDir["reporter/"] --> Dockerfile["Dockerfile"]
-    ReporterDir --> Requirements["requirements.txt"]
-    ReporterDir --> ReporterPy["reporter.py<br/>main loop"]
-    ReporterDir --> SourcesPy["sources.py<br/>per-sensor log parsers"]
-    ReporterDir --> ApisPy["apis.py<br/>AbuseIPDB + Blocklist.de clients"]
-    ReporterDir --> DedupPy["dedup.py<br/>SQLite-backed deduplication"]
+    ReporterDir["reporter/ (Go)"] --> MainGo["main.go<br/>entrypoint, run loop wiring"]
+    MainGo --> RunloopGo["runloop.go<br/>poll tick"]
+    RunloopGo --> TailGo["tail.go<br/>per-sensor log tailing"]
+    TailGo --> EventGo["event.go<br/>normalised event"]
+    EventGo --> CategorizeGo["categorize.go<br/>sensor/kind to upstream category"]
+    CategorizeGo --> DedupGo["dedup.go<br/>SQLite-backed deduplication"]
+    DedupGo --> GreynoiseGo["greynoise.go<br/>RIOT pre-check (Phase 3)"]
+    GreynoiseGo --> WhitelistGo["whitelist.go<br/>CIDR/IP allowlist"]
+    WhitelistGo --> BlocklistdeGo["blocklistde.go<br/>Blocklist.de client"]
+    WhitelistGo --> ReportGo["report.go<br/>AbuseIPDB client"]
+    GreynoiseGo --> ProcessGo["process.go<br/>report decision + dispatch"]
+    ProcessGo --> ReportGo
+    ProcessGo --> BlocklistdeGo
+    ProcessGo --> MetricsGo["metrics.go<br/>counters to metrics.json"]
+    ProcessGo --> AuditGo["audit.go<br/>bounded rotating audit log"]
     ReporterDir --> WhitelistTxt["whitelist.txt<br/>safe IPs/CIDRs to never report"]
-    ReporterDir --> MetricsPy["metrics.py<br/>Prometheus exporter"]
+    ReporterDir --> Dockerfile["Dockerfile<br/>FROM scratch, runs as 0:0"]
 
     DocsDir["docs/"] --> PlanMd["ip-reporting-plan.md<br/>this file"]
 ```
+
+Every function here is exercised by a test, though not always in a
+same-named file: `categorize.go` is covered from `event_test.go` and `main.go`
++ `report.go` from `dryrun_test.go`. There is no `requirements.txt`,
+no `sources.py`/`apis.py`/`dedup.py`/`metrics.py`, and no Prometheus
+exporter — see the Phase 4 note in the status banner.
 
 ---
 

@@ -1,5 +1,16 @@
 # Code scanning
 
+> **Dated record — 2026-07-30.** The CodeQL history below is a worked example,
+> not a live status page; it is here for the lesson, per "do not mirror a live
+> system's state into a markdown file" (which is also why the current alerts
+> live in [#80](https://github.com/Xore/APIARY/issues/80) and the
+> [Security tab](https://github.com/Xore/APIARY/security/code-scanning)). Every
+> code path it names — `dashboard/sandbox.go`, `ghidra.go`,
+> `dashboard/static/hp-adminlte.js` — is Go-era and no longer exists: the Go
+> dashboard was deleted at #1628 (2026-08-22). The equivalents are now Rust in
+> `arcane/home/honeypot-dashboard/backend-service/src/` (`artifacts.rs`,
+> `report_pdf.rs`). The method below is unchanged and still current.
+
 Open CodeQL alerts are tracked in
 [#80](https://github.com/Xore/APIARY/issues/80) and in the
 [Security tab](https://github.com/Xore/APIARY/security/code-scanning),

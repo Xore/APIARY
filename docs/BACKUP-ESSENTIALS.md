@@ -17,14 +17,14 @@ for restoring onto a replacement host see
 
 | | |
 |---|---|
-| `homeserver/env/*.env` | all 41 Arcane/Dockge stack `.env` files |
+| `homeserver/env/*.env` | one file per Arcane/Dockge stack (40 under `/var/dockge/stacks/` as of 2026-09-27) |
 | `homeserver/secrets/` | secret files kept beside a stack rather than in its `.env` |
 | `homeserver/wireguard/` | `wg0.conf` including the private key |
 | `homeserver/installer/` | `install-homeserver.conf` — the installer's answers file, which exists only on the root filesystem a reinstall wipes |
 | `homeserver/technitium/` | hand-maintained Technitium DNS config |
 | `homeserver/keycloak/keycloak.sql.gz` | `pg_dump` of the identity DB — realm, clients, client secrets, users |
 | `homeserver/es-operator-state/` | the dashboard's operator-authored Elasticsearch documents, as mapping + NDJSON — see [Operator state](#operator-state) |
-| `homeserver/volumes/` | `dashboard-state`, `arcane-data`, `evebox-config`, `canarytokens-redis-data`, `es-importer-state` |
+| `homeserver/volumes/` | `dashboard-state`, `honeypot-arcane_arcane-data`, `honeypot-elk_evebox-config`, `honeypot-canarytokens_canarytokens-redis-data`, `honeypot-dashboard_es-importer-state` — the Arcane-prefixed names are the real volume names |
 | `vps/env/vps.env`, `vps/secrets/`, `vps/traefik/`, `vps/wireguard/` | the VPS's entire config surface, including the Traefik origin certificates |
 | `*/manifest/` | host reference notes — disks, volumes, containers, WireGuard, nftables |
 | `repo/docs/`, `repo/scripts/`, `repo/analysis/` | this repository's runbooks and operational scripts |
@@ -133,7 +133,7 @@ Three locations, all written by the workstation, which is the backup host:
 |---|---|---|---|
 | 1 | `/run/media/xore/<uuid>/apiary-backups` | ext4 (Crucial X8 USB) | udisks auto-mount — only present while plugged in |
 | 2 | `~/apiary-backups` | XFS (internal) | always available |
-| 3 | `homeserver:/mnt/usb-recovery/apiary-backups` | ext4 (Samsung T7, label `APIARY-BACKUP`) | mounted from fstab by UUID with `nofail` |
+| 3 | `homeserver:/mnt/usb-recovery/apiary-backups` | ext4 (Samsung PSSD T7, label `APIARY-BACKUP`) | mounted from fstab by UUID with `nofail` |
 
 Location 3 was a Ventoy stick formatted exfat until 2026-08-23, mounted
 read-only and absent from `/etc/fstab` — so every write to it failed and it
@@ -279,7 +279,12 @@ repository — `install-homeserver.conf.example` carries only placeholders.
    `vps/secrets/oidc/`.
 5. **Volumes.** For each `homeserver/volumes/<name>.tar.gz`, with the stack
    stopped, create the volume and unpack into it through a networkless
-   container:
+   container. `<name>` is the **full real volume name** — the archive is
+   written as `$volume.tar.gz` by `backup-essentials.sh`, so four of the
+   five carry their Arcane project prefix
+   (`honeypot-arcane_arcane-data.tar.gz`, and so on). Creating a
+   short-named `arcane-data` volume instead would restore into a volume
+   no stack is mounted against.
    ```bash
    docker volume create <name>
    docker run --rm --network none -v <name>:/dst -v "$PWD/homeserver/volumes:/src:ro" \
@@ -376,7 +381,9 @@ gone, for two reasons that happen to point the same way:
 
 Also found and worth knowing: `honeypot-keycloak/.env` carries a full set of
 `RESTIC_*` variables pointing at `/mnt-2/apiary-keycloak`, but that repository
-directory does not exist, its password file (`secrets/restic-password`) does
+directory does not exist — and as of 2026-09-27 neither does `/mnt-2` itself,
+which has been decommissioned, so the path cannot start working by accident.
+Its password file (`secrets/restic-password`) does
 not exist, `restic` is not installed on the homeserver and no unit references
 it. It is dead configuration — no Keycloak restic backup has ever run. The
 `keycloak.sql.gz` dump in both scripts here covers that gap.

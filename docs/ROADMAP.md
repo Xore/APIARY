@@ -13,6 +13,11 @@ Last audited: 2026-08-05
 > Deleted by the 2026-08-30 bulk purge and restored verbatim by #2896/#2947
 > on 2026-09-04. Nothing below was updated during that window — treat
 > "last audited" above as still true, not as of the restore date.
+>
+> The *repository* did keep moving across that same window, though, so the
+> audit date is not a safe lower bound for "still true": reconcile any status
+> claim here against the code before relying on it. The CAPEv2 line above is
+> one already re-verified (2026-09-27) and found stale.
 
 ## Current baseline
 
@@ -35,21 +40,30 @@ Last audited: 2026-08-05
   booting; the end-to-end submit-to-report path is verified for the
   Linux/Wine sandbox and GitHub-analysis publishing. The Windows-11 golden
   image epic ([#47](https://github.com/Xore/APIARY/issues/47)) is
-  still open — see the Windows sandbox section below. CAPEv2 (#314-322)
-  remains unbuilt and is post-0.1.0 backlog.
-- Documentation has been consolidated: every doc that used to be scattered
-  next to its source now lives under `docs/`, mirroring the source tree
-  ([#670](https://github.com/Xore/APIARY/issues/670), closed
-  2026-08-05).
-- A separate, not-yet-cut-over track: the dashboard is being rewritten as
-  a TanStack Start frontend/BFF + Rust service tier
+  still open — see the Windows sandbox section below. CAPEv2 (#314-322) is
+  **authored, not deployed**: [#843](https://github.com/Xore/APIARY/issues/843)
+  (2026-09-01) landed `sandbox/cape/` — compose stack, Packer
+  `win11-cape.pkr.hcl`, CAPEv2 override units and a spool worker — but unlike
+  GHOSTS it has no entry in `arcane/manifests/home-production.json`, so nothing
+  Dockge-managed deploys it. Treat it as post-0.1.0 backlog whose build work
+  has already started, not as unbuilt.
+- Documentation has been consolidated: the subsystem docs that used to be
+  scattered next to their source now live under `docs/`, mirroring the source
+  tree ([#670](https://github.com/Xore/APIARY/issues/670), closed
+  2026-08-05). The exceptions are deliberate and catalogued in
+  [`docs/README.md`](README.md) — per-stack and vendored `README.md` files stay
+  next to their code, and a few dated record trees are exempt from the
+  reachability gate (#3332). Root-level dated task records (`DIFF.md`,
+  `EVIDENCE.md`, `HANDOFF-3097.md`) are the residue of that sweep and are not
+  covered by it.
+- The dashboard rewrite is done, not pending: the TanStack Start
+  frontend/BFF + Rust service tier
   ([#1608](https://github.com/Xore/APIARY/issues/1608) and its
-  follow-ups), living on the `port-foundation` branch behind Compose's
-  `next` profile alongside the current Go dashboard. Feature-complete
-  enough to demo; not yet live in production. See
-  [`DASHBOARD-CUTOVER.md`](DASHBOARD-CUTOVER.md) and
-  [#1628](https://github.com/Xore/APIARY/issues/1628) for what's left
-  before it replaces the row above.
+  follow-ups) cut over on 2026-08-22 under
+  [#1628](https://github.com/Xore/APIARY/issues/1628), the Go dashboard is
+  deleted from Compose, and `dashboard-next` runs unconditionally — no
+  `next` profile, no runtime fallback. See
+  [`DASHBOARD-CUTOVER.md`](DASHBOARD-CUTOVER.md).
 
 Everything that was tracked here as "Gate 0" and "Release 1" through
 "Release 3" and "Release 5" in prior versions of this document is now closed.

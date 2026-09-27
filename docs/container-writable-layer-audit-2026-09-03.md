@@ -1,5 +1,14 @@
 # Container writable-layer and build-cache audit (#2859), 2026-09-03
 
+> **Dated record — 2026-09-03.** Every measurement below (245.8 GB, 13.18 GB
+> reclaimable, the 45-hour leaked buildkit container, the dangling-volume
+> census) was a snapshot of the homeserver on that date and is **not** a live
+> status page. Per the same principle `security-fixes.md` states outright: do
+> not mirror a live system's state into a markdown file. Re-run the commands
+> before acting on any number. The attribution, the reasoning and the
+> conclusions are the substance of this document and do not expire; the
+> open items named here are tracked in their issues (#2915, #2904).
+
 `docker system df` on the homeserver showed **245.8 GB in container
 writable layers**, invisible to the volume audit and the retention knob.
 This document is the attribution the issue asked for.
@@ -18,22 +27,33 @@ This document is the attribution the issue asked for.
 
 `rex86-eval` alone accounts for essentially the entire 245.8 GB figure.
 It's a `nvidia/cuda:12.4.1-devel-ubuntu22.04` container
-(`docker inspect rex86-eval`), bind-mounting only
-`/var/dockge/stacks/rex86-eval/work` → `/work` — everything else it writes
-lands in its own rootfs. `docker exec rex86-eval du -sh /root/.cache`
+(`docker inspect rex86-eval`), bind-mounting
+`/var/dockge/stacks/rex86-eval/work` → `/work` and the repo itself
+read-only at `${APIARY_REPO:-../../../../}` → `/repo:ro` — neither of which
+is `/root/.cache`, so everything the benchmark tooling caches still lands in
+its own rootfs. `docker exec rex86-eval du -sh /root/.cache`
 confirms **227 GB of the 245 GB is `/root/.cache`** (pip/HuggingFace-shaped
 model/package cache for the benchmark tooling), not mounted to a volume or
 bind mount.
 
 This is a genuine compose/run defect in the shape the issue described — a
-container writing tens of GB to its own writable layer instead of a mount —
-but `rex86-eval` is not in this repo's tracked compose files at all (it's a
-raw `docker run`/Dockge stack under `/var/dockge/stacks/rex86-eval/`, not
-`arcane/home/*`), and it is explicitly excluded from this round's scope
-(model-benchmark work, chained to the same corpus tooling #1947's paused
-sweep uses). **No fix staged for it.** The correct fix, if/when the
-benchmark work is in scope, is a bind mount for `/root/.cache` — noted here
-so a future session doesn't have to re-derive the attribution.
+container writing tens of GB to its own writable layer instead of a mount.
+
+`rex86-eval` **is** in this repo's tracked compose files:
+`arcane/home/rex86-eval/compose.yml`, `setup.sh` and `.env.example` are all
+version-controlled (restored by #847), so it is a compose piece and not the
+raw `docker run` stack this paragraph originally described. It is *not* in
+`arcane/manifests/home-production.json` — deliberately, since it is
+benchmark tooling rather than a deployment piece, which is also why it is
+absent from the 33 `arcane/home/` manifest stacks. That makes it the one
+directory on disk under `arcane/home/` with no manifest entry, alongside
+nothing else.
+
+It is explicitly excluded from this round's scope (model-benchmark work,
+chained to the same corpus tooling #1947's paused sweep uses). **No fix
+staged for it.** The correct fix, if/when the benchmark work is in scope, is a
+bind mount for `/root/.cache` — noted here so a future session doesn't have to
+re-derive the attribution.
 
 Everything else on the host contributes single-digit megabytes each; there
 is no second offender worth a compose change.
@@ -67,8 +87,8 @@ failing** — GC only starts reclaiming once usage exceeds the 100 GB
 neither of which is close on this host. No config or timer change needed;
 a standing prune timer would be redundant with `builder.gc`, which already
 runs automatically as part of build activity per buildkit's own design
-(the comment in `install-homeserver.sh:431-500` explains why a separate
-timer isn't used).
+(the comment in `install-homeserver.sh:381-465` — the reasoning at 392-397,
+the JSON block itself at 463-465 — explains why a separate timer isn't used).
 
 One stray finding, not actioned: a leaked `buildx_buildkit_builder-<uuid>`
 container (`docker-container` driver) has been running 45+ hours,
