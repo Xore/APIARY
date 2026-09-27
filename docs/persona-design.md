@@ -5,8 +5,12 @@
 Two related pieces of persona design that were implicit rather than
 documented decisions: whether a honeypot may reach the internet outbound,
 and how to name/place a honeypot host so it doesn't look staged. T-Pot's
-own README calls both out by name (`README.md` line 296 for outbound; the
-"where to place a honeypot" guidance for siting). This repo already does
+own upstream README calls both out by name (its `README.md` line 296 for
+outbound; the "where to place a honeypot" guidance for siting). That line
+number refers to T-Pot's own repository, not to this repo's `README.md`, which
+is ~135 lines; it was recorded from an unpinned upstream read and could not be
+re-verified during this reconciliation, so treat the line number as a pointer
+to look up rather than a stable citation. This repo already does
 deep, source-verified realism work for Windows personas
 ([#91](https://github.com/Xore/APIARY/issues/91)/[#94](https://github.com/Xore/APIARY/issues/94)/[#96](https://github.com/Xore/APIARY/issues/96))
 and has a full fictional-organization inventory
@@ -41,7 +45,8 @@ The tradeoff is real in both directions:
 | Cowrie | Allowed (flag: `COWRIE_AIR_GAPPED`, default `false`) | The one sensor in this stack designed around capturing attacker-fetched malware — its whole SSH/Telnet fake-shell premise is attackers running `wget`/`curl`/`tftp` against real URLs. See `arcane/home/honeypot-cowrie/compose.yml`'s `cowrie_net`. |
 | Dionaea | Allowed (flag: `DIONAEA_AIR_GAPPED`, default `false`) | Same tradeoff as Cowrie (#269/#538): captures shellcode/binaries pushed *to* it over SMB/FTP/TFTP/etc, which both ship enabled by default — this is the attacker's actual malware sample, not just the exploit attempt. See `arcane/home/honeypot-dionaea/compose.yml`'s `dionaea_net` (#541). `internal: true` still permits `tftp-relay`'s inbound forwarding on the same network — it only removes the outbound route. |
 | Tanner/Snare | Allowed (flag: `TANNER_AIR_GAPPED`, default `false`) | Same tradeoff as Cowrie and Dionaea: the `template_injection` emulator fetches real RFI payloads when enabled, capturing the attacker's actual payload instead of just the RFI attempt. See `arcane/home/honeypot-tanner/compose.yml`'s `tanner_local`. Setting the flag also breaks the emulator's own `REMOTE_DOCKERFILE` self-maintenance fetch (`raw.githubusercontent.com`) — a real cost, not just a capture-vs-safety tradeoff. |
-| Everything else (Conpot personas, DNP3, HTTP/API honeypot, multipot, dicompot, dns-honeypot, citrix-honeypot, cisco-asa-honeypot, rdp-honeypot) | Allowed, no design reason either way | None of these protocols involve the honeypot fetching attacker-supplied URLs — outbound access is unused in the intended interaction, just never explicitly closed off. An operator who wants maximum containment can set `internal: true` directly on that sensor's network in its compose file without losing anything these honeypots actually rely on. |
+| Canarytokens | Allowed (`canarytokens_net`; no air-gap flag exists) | **A different deception category, not a capture-vs-safety call.** This stack is a honeytoken *platform* — it plants fake documents, credentials and DNS names that alert when touched — not a sensor that fetches attacker-supplied content. Its reachability is the product: #1487 made the switchboard's HTTP channel publicly reachable through the VPS precisely so dashboard-created file/doc tokens fire when opened outside our own network, and that stack's compose file is explicit that "inert (internal-only) tokens don't serve it." The tradeoff argued above therefore does not transfer to it, in either direction. Note the asymmetry with the `internal: true` rule below: `internal` removes the *outbound* route, so it would not by itself break the VPS's inbound bridge — whether it is safe on `canarytokens_net` is undecided in-repo. Don't assume either way. |
+| Everything else (Conpot personas, DNP3, HTTP/API honeypot, multipot, dicompot, dns-honeypot, citrix-honeypot, cisco-asa-honeypot, rdp-honeypot, sonicwall-sma, endlessh, beelzebub, hellpot, elasticpot, galah, sentrypeer, mailoney) | Allowed, no design reason either way | None of these protocols involve the honeypot fetching attacker-supplied URLs — outbound access is unused in the intended interaction, just never explicitly closed off. An operator who wants maximum containment can set `internal: true` directly on that sensor's network in its compose file without losing anything these honeypots actually rely on. |
 | `yara-scanner` (not a honeypot — offline payload analysis) | Blocked (`network_mode: none`) | Already air-gapped; scans captured files at rest, never needs network access at all. The one existing precedent this decision extends. |
 
 `COWRIE_AIR_GAPPED=true` (`.env`) sets `internal: true` on `cowrie_net`,
