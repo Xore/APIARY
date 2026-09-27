@@ -116,6 +116,15 @@ jobs:
       # inline expression because the "no mirror" case still needs a
       # valid (empty) config -- an unset buildkitd-config would be one
       # more conditional step to keep in sync.
+      #
+      # #3380 adds a second, stronger gate. The gate above asks "is this a
+      # self-hosted executor?"; it cannot ask "does this executor have the
+      # mirror?", because CI_REGISTRY_MIRROR is one global value describing
+      # a per-host fact and the honeypot-ci pool now spans two boxes. The
+      # address is therefore probed here, on the box that is about to use
+      # it, and the mirror is written into the config only if it answers.
+      # See the comment in the script for why a dead mirror degrades loudly
+      # instead of silently.
       - name: Compose the buildkit registry config
         id: buildkit
         env:
@@ -123,7 +132,82 @@ jobs:
         run: |
           set -euo pipefail
           cfg="$RUNNER_TEMP/buildkitd.toml"
+
+          # #3380: CI_REGISTRY_MIRROR is a repo VARIABLE but the fact it
+          # names -- "this executor runs a Docker Hub pull-through cache at
+          # this address" -- is a property of the BOX. A variable can only
+          # be global, and the `honeypot-ci` pool is not one box: since
+          # #3379 `precision` is registered into the same pool as a
+          # --build-only executor, so the router's homeserver=true can land
+          # on either. An address that answers on the homeserver is a dead
+          # address on precision, where 172.16.0.1 is precision's own docker0
+          # gateway with nothing listening on it.
+          #
+          # That is what #3380 found: the variable said 172.16.0.1:5555, no
+          # executor in the pool had run install-registry-mirror.sh, and
+          # buildkit quietly fell back to docker.io -- so the #2819 cache was
+          # never in effect, every run pulled every base from Hub directly,
+          # and each of the 74 non-scratch FROM lines first paid a
+          # connect-refused round trip. Green run, no cache, nothing said so.
+          #
+          # So the only trustworthy source for a per-host fact is the host:
+          # probe the address here, on the executor that is about to use it,
+          # before buildkit is told to trust it. `/v2/` is the Docker Registry
+          # API base and is exactly the check install-registry-mirror.sh
+          # already gates its own success on, so this asks the installer the
+          # question it answered, rather than a second, weaker question.
+          #
+          # A non-200 is treated as "not a usable mirror" rather than
+          # "maybe": something else can hold a port (on the homeserver 5555
+          # is also where the multipot honeypot listens, on the WireGuard
+          # address), and a wrong mirror is worse than none.
+          #
+          # A dead mirror DEGRADES, it does not fail the run. The cache is an
+          # accelerator; the authenticated Hub login below is what actually
+          # protects against `toomanyrequests`. Turning a missing accelerator
+          # into a red main would be a worse regression than the one #3380
+          # reports, and it would contradict the router's own documented
+          # fail-safe ("routing can degrade CI's speed, never its pass/fail
+          # correctness"). So the config written is the honest empty one and
+          # the disagreement is announced -- loudly, in both the run's
+          # annotations and its summary -- rather than absorbed silently.
+          mirror=""
           if [ -n "$MIRROR" ]; then
+            probe="$(curl -sS -o /dev/null -w '%{http_code}' \
+              --connect-timeout 5 --max-time 15 "http://$MIRROR/v2/" 2>/dev/null)" \
+              || probe="000"
+            echo "registry mirror probe: http://$MIRROR/v2/ -> ${probe:-000}"
+            if [ "$probe" = "200" ]; then
+              mirror="$MIRROR"
+            else
+              {
+                echo "### Docker Hub pull-through cache not in effect"
+                echo
+                echo "CI_REGISTRY_MIRROR=\`$MIRROR\` is set, but \`http://$MIRROR/v2/\`"
+                echo "answered \`${probe:-000}\` on this executor (\`$RUNNER_NAME\`,"
+                echo "\`$RUNNER_OS\`). The #2819 pull-through cache is therefore NOT"
+                echo "in effect: every base image is being pulled from Docker Hub"
+                echo "directly, behind the authenticated login below."
+                echo
+                echo "The address is a property of the box, not of the repository."
+                echo "Either deploy the mirror on this host:"
+                echo
+                echo '```bash'
+                echo "sudo scripts/github-ci-runner/install-registry-mirror.sh \\"
+                echo "    --username <hub-user> --token <hub-read-only-PAT>"
+                echo '```'
+                echo
+                echo "or, if no host runs one, say so honestly:"
+                echo
+                echo '```bash'
+                echo "gh variable delete CI_REGISTRY_MIRROR --repo \$GITHUB_REPOSITORY"
+                echo '```'
+              } >>"$GITHUB_STEP_SUMMARY"
+              echo "::warning title=Docker Hub pull-through cache inactive::CI_REGISTRY_MIRROR=$MIRROR is set but http://$MIRROR/v2/ answered ${probe:-000} on this executor, so the #2819 pull-through cache is not in effect and every base image is pulled from Hub directly. Deploy the mirror on this host (scripts/github-ci-runner/install-registry-mirror.sh), or unset CI_REGISTRY_MIRROR so the config honestly says 'no mirror'."
+            fi
+          fi
+
+          if [ -n "$mirror" ]; then
             # http = true: the mirror is a plain-HTTP service bound to a
             # container-only address on the executor, not a public
             # registry, so there is no certificate to verify. Built with
@@ -132,13 +216,16 @@ jobs:
             # scalar's indentation.
             printf '%s\n' \
               '[registry."docker.io"]' \
-              "  mirrors = [\"$MIRROR\"]" \
-              "[registry.\"$MIRROR\"]" \
+              "  mirrors = [\"$mirror\"]" \
+              "[registry.\"$mirror\"]" \
               '  http = true' >"$cfg"
-            echo "using registry mirror $MIRROR"
+            echo "using registry mirror $mirror"
             cat "$cfg"
           else
-            echo '# no registry mirror configured for this executor' >"$cfg"
+            echo '# no registry mirror on this executor' >"$cfg"
+            if [ -z "$MIRROR" ]; then
+              echo '# CI_REGISTRY_MIRROR is unset -- no executor is claimed to run one'
+            fi
           fi
           echo "config=$cfg" >>"$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v4

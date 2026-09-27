@@ -1404,8 +1404,40 @@ A `registry:3` proxy in front of Docker Hub, run under
 upstream TTL. Eighteen rows times N bases collapse to one upstream fetch,
 and it keeps them across runs.
 
-Two things about it are easy to get wrong:
+Run it on **every** executor that should have one, not just the first. The
+variable is global and the mirror is not, which is the whole of the next
+point.
 
+Three things about it are easy to get wrong:
+
+- **The address is a per-host fact, and it is verified per-run (#3380).**
+  `CI_REGISTRY_MIRROR` is a repository *variable*, but "this executor runs a
+  mirror at this address" is a property of the *box*, and since #3379 the
+  `honeypot-ci` pool is not one box — `precision` is registered into the same
+  pool as a build-only executor, so `ci-target` routing to the homeserver can
+  land on either. One global value is therefore right on one host and dead on
+  the other, where the same `172.16.0.1` is that host's own docker0 gateway
+  with nothing listening on it. `containers.yml` therefore probes
+  `http://$CI_REGISTRY_MIRROR/v2/` **on the executor that is about to use
+  it** and writes the mirror into `buildkitd.toml` only on a `200`. That is
+  the same check `install-registry-mirror.sh` gates its own install on, so
+  the two cannot drift. Any other answer — connection refused, or some other
+  service holding the port (on the homeserver `5555` is also the multipot
+  honeypot's, on the WireGuard address) — means the honest empty config is
+  written instead, and the run says so in a `::warning::` annotation and its
+  job summary. This is not optional belt-and-braces: #3380 was filed from
+  exactly the state it prevents, with the variable set to `172.16.0.1:5555`
+  and no executor in the pool having ever run the installer. Buildkit falls
+  back to `docker.io` on an unreachable mirror, so the run stayed **green**
+  while the cache was never in effect, every base image was pulled from Hub
+  directly, and all 74 non-`scratch` `FROM` lines first paid a
+  connect-refused round trip. Note the failure is a *degradation*, not a
+  failure: the cache is an accelerator, and the authenticated login above is
+  what actually protects against `toomanyrequests`, so a missing mirror must
+  never turn a passing row red — the same fail-safe
+  [ci-router.yml](https://github.com/Xore/APIARY/blob/main/.github/workflows/ci-router.yml)
+  documents ("routing can degrade CI's speed, never its pass/fail
+  correctness").
 - **It is configured on buildkit, not on the host daemon.** buildx's
   `docker-container` driver runs its own containerd and never reads
   `/etc/docker/daemon.json`, so a `registry-mirrors` entry there is
