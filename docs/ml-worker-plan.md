@@ -35,7 +35,10 @@
 > `docker build ./ml-worker` failed outright (`pyod`'s `numba` dependency had
 > no version compatible with the pinned `numpy==2.5.1` on Python 3.12 —
 > reproduced twice, locally and in-container; fixed in #62 by pinning
-> `numpy==2.4.6`/`numba==0.66.0`/`llvmlite==0.48.0`). `worker.py`'s
+> `numpy==2.4.6`/`numba==0.66.0`/`llvmlite==0.48.0`; those two transitive pins
+> have since moved on again and the file now reads `numba==0.67.0` /
+> `llvmlite==0.49.0` / `pyod==3.6.6`, so treat this paragraph as the record of
+> what #62 did, not of the current requirements). `worker.py`'s
 > `SOURCE_INDICES` (`cowrie-*`, `dionaea-*`, `honeypot-network-*`, `conpot-*`,
 > `http-honeypot-*`) still match zero indices on the live homeserver: the real
 > shape is a unified `honeypot-v2-*` stream (all sensors, disambiguated by
@@ -98,16 +101,17 @@ ground-truth labels. [web:275][web:283]
 > the "v0.1 audit verdict" callout above. `worker.py`'s real,
 > currently-deployed `SOURCE_INDICES` are the two rows below.
 
-The worker ingests from two unified, versioned index patterns
+The worker ingests from three unified, versioned index patterns
 (`ml-worker/worker.py`'s `SOURCE_INDICES`):
 
 | Index pattern | Source | Key fields |
 |---------------|--------|------------|
 | `honeypot-v2-*` | every honeypot sensor (Cowrie, Dionaea, Conpot, HTTP-honeypot, and every other sensor stack — disambiguated by `event.sensor`, not a separate index per sensor) | `event.sensor`, `source.ip`, `honeypot.*` (per-sensor nested fields, not uniform across sensors — see §5.3) |
 | `suricata-v2-*` | Suricata network/IDS events (Filebeat) | `suricata.eve.*`, `network.*`, `alert.signature` |
+| `zeek-v1-conn-*` | Zeek connection records, added by #1774's sensing layer alongside Suricata | Zeek conn-log fields; note the pattern is `zeek-v1-conn-*`, not a `zeek-v2-*` line like the other two |
 
-Both index patterns share a common `@timestamp` field used for temporal
-ordering. A third index, `ml-worker-state`, is not a data source — it's the
+All three index patterns share a common `@timestamp` field used for temporal
+ordering. A fourth index, `ml-worker-state`, is not a data source — it's the
 worker's own per-index-pattern checkpoint store (`load_checkpoint`/
 `save_checkpoint` in `worker.py`): a `last_timestamp` plus the set of
 already-seen event IDs at that exact timestamp, so a restart resumes
@@ -125,9 +129,11 @@ flowchart TD
     subgraph Stack["APIARY (existing)"]
         Sensors["every honeypot sensor stack<br/>(disambiguated by event.sensor,<br/>not a separate index each)"]
         Suricata["Suricata / network IDS"]
-        ES["Elasticsearch<br/>honeypot-v2-*, suricata-v2-*"]
+        Zeek["Zeek conn records<br/>(#1774)"]
+        ES["Elasticsearch<br/>honeypot-v2-*, suricata-v2-*,<br/>zeek-v1-conn-*"]
         Sensors --> ES
         Suricata --> ES
+        Zeek --> ES
     end
 
     subgraph Worker["ML Worker (ml-worker/)"]
