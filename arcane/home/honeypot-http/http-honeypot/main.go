@@ -487,6 +487,21 @@ func classifyPayload(query, body string) string {
 	case strings.Contains(b, "roleid") && strings.Contains(b, "administrator"):
 		return "admin-account-create"
 
+	// #3430: agent-driven scanner-laundering -- the double-encoding bypass
+	// of a method/path filter, aimed at an OData-style endpoint. Matched on
+	// the option's own bytes rather than on a path, for the reason #2919,
+	// #3309 and #3364 each give: a real probe goes to whatever endpoint the
+	// target's own dispatch resolves, and a bait path would never match.
+	//
+	// #3430 proposes a three-layer rule. Two of its layers are not
+	// implementable in this binary and are not claimed here: per-source
+	// session behaviour and cross-source header-fingerprint correlation both
+	// need state the sensor does not keep -- it classifies one request and
+	// logs it, consulting no backend. What is left that this function can
+	// read is the query and body, and that is this case.
+	case odataDoubleEncode(query, body):
+		return "odata-double-encode-probe"
+
 	// --- injection into an interpreter that is already running ---
 
 	case containsAny(b, "union select", "or 1=1", "' or '", "sleep(", "benchmark(", "waitfor delay"):
@@ -612,6 +627,76 @@ func wordpressPagenameTraversal(query, body string) bool {
 					return true
 				}
 			}
+		}
+	}
+	return false
+}
+
+// odataDoubleEncode reports an OData system query option -- $select, $filter,
+// $top and the rest -- whose key or value still carries a percent-escape
+// after one decode. That residue is the whole signature: a client that
+// encodes its query once has nothing left to encode, so %2520 (a literal
+// %20, or a space one decode too late) is a request that was assembled to
+// survive a second decode, which is what #3430's double-encoding bypass is.
+//
+// Both halves are required and the ordering is the design. The escape alone
+// is not this class's business: measured against the pinned 30-day corpus,
+// a bare residual escape claims the PHP-CGI probe arriving as %25ADd and
+// both WordPress pagename double-encodings, and all three are already
+// correctly labelled by the more specific classes above. An OData option
+// alone is worse, because a legitimate OData client sends exactly those keys
+// and would be indistinguishable from a scanner. Together they are a shape
+// neither produces: a field-selection endpoint probed with a filter that
+// only comes out of the filter after the second decode.
+//
+// Keys are parsed rather than substring-matched, and the alias form
+// (`northwind.$filter`) is allowed because OData defines one -- which also
+// means "$filter" inside some other value cannot trigger this.
+func odataDoubleEncode(query, body string) bool {
+	options := map[string]bool{
+		"$select": true, "$filter": true, "$expand": true, "$orderby": true,
+		"$top": true, "$skip": true, "$count": true, "$apply": true,
+		"$format": true, "$search": true, "$skiptoken": true, "$index": true,
+	}
+	for _, raw := range []string{query, body} {
+		values, err := url.ParseQuery(raw)
+		if err != nil && len(values) == 0 {
+			continue
+		}
+		for key, vals := range values {
+			// OData allows a namespace alias prefix, so compare the last
+			// dotted part: `northwind.$filter` is the same option.
+			name := strings.ToLower(key)
+			if i := strings.LastIndex(name, "."); i >= 0 {
+				name = name[i+1:]
+			}
+			if !options[name] {
+				continue
+			}
+			if residualEscape(key) {
+				return true
+			}
+			for _, v := range vals {
+				if residualEscape(v) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// residualEscape reports whether s holds a %XX escape that is still there --
+// a string that will decode again if something asks it to. Malformed
+// sequences are not escapes and do not count.
+func residualEscape(s string) bool {
+	for i := 0; i+2 < len(s); i++ {
+		if s[i] != '%' {
+			continue
+		}
+		var hi, lo byte
+		if unhex(s[i+1], &hi) && unhex(s[i+2], &lo) {
+			return true
 		}
 	}
 	return false
