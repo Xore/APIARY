@@ -78,6 +78,20 @@ func TestRoundcubeVirtuserQuerySQLi(t *testing.T) {
 			body: "_task=login&_action=login&_user=admin%27%3B+drop+table+users--",
 			want: want,
 		},
+		// Case is the cheapest encoding variation there is, and the
+		// measurement in roundcube_coverage_3364_test.go is what showed
+		// the class matched only the published casing: before the fix,
+		// both of these were unlabelled on GET and POST alike.
+		{
+			name: "uppercase union select through the same gate",
+			body: "_task=login&_action=login&_user=%27+UNION+SELECT+1%2C2%2C3--",
+			want: want,
+		},
+		{
+			name:  "mixed-case time-based in the query",
+			query: "_task=login&_action=login&_user=%27+Or+SlEeP(5)--",
+			want:  want,
+		},
 		// --- the plugin reached directly rather than through the login
 		// form. Roundcube names a plugin action as _action=plugin.<name>.
 
