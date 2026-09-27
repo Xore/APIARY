@@ -1514,6 +1514,82 @@ step_provision_buildx_cache() {
   echo "  $cache_dir writable by $runner_user ${extra_users[*]} (verified)"
 }
 
+step_provision_image_sbom() {
+  # #3321: containers.yml writes a digest-keyed CycloneDX SBOM for the two
+  # dashboard images (backend-service, dashboard-next) to
+  # /var/image-sbom/<image>/ whenever a build lands on this box's self-hosted
+  # runners, so the inventory of what is in a running image sits next to the
+  # image rather than only in a CI artifact that expires.
+  #
+  # The blocker is the same one /var/buildx-cache has, for the same reason:
+  # the runners execute as github-ci-runner (systemd User= on the
+  # actions.runner.*.supermicro-ci* units) and /var is root:root 0755, so the
+  # workflow cannot create a sibling directory here itself. Measured live
+  # 2026-09-02: `sudo -u github-ci-runner mkdir -p /var/buildx-cache/x` ->
+  # "Permission denied", exit 1. Provisioning it here rather than by hand is
+  # the point -- #1609 replays this script on a rebuild, and a hand-made
+  # directory would not survive that.
+  #
+  # Consequence of NOT provisioning: generate-image-sbom.sh warns and carries
+  # on, and the SBOM survives only as the CI artifact. That is a degraded
+  # capability, not a broken build -- the same degrade-don't-fail line
+  # provision-buildx-cache's caller takes for the type=gha cache.
+  #
+  # 2775 with the runner as group owner, setgid, and a default ACL, for the
+  # same multi-runner-user reason as buildx-cache: seven runner users exist on
+  # this box and any of them can take any Containers matrix row, so the
+  # directory and everything created inside it must be group-writable or the
+  # row that did not write last is the row that fails.
+  local sbom_dir=/var/image-sbom
+  local runner_user=github-ci-runner
+
+  if ! id -u "$runner_user" >/dev/null 2>&1; then
+    echo "  $runner_user does not exist yet -- creating $sbom_dir root-owned;"
+    echo "  re-run this step after the CI runners are installed."
+    install -d -m 0755 "$sbom_dir"
+    return 0
+  fi
+
+  install -d -m 2775 -o "$runner_user" -g "$runner_user" "$sbom_dir"
+  # Default ACL, not just the mode bits: the workflow re-grants g+rwX on what
+  # it writes, but a subdirectory created by one runner before the next
+  # runner's write is exactly how #2822's 2026-09-06 fallback went unnoticed.
+  # `acl` is installed here rather than reused from further down this script
+  # (step_fix_apiary_backend_permissions is the first other setfacl caller and
+  # it runs long after this step), so a fresh #1609 replay gets a real default
+  # ACL here instead of silently falling back to the mode bits alone.
+  command -v setfacl >/dev/null 2>&1 || pkg_install acl
+  setfacl -d -m "g:${runner_user}:rwx" "$sbom_dir"
+
+  # Same group-grant + repair + prove-it loop as provision-buildx-cache: the
+  # extra runner instances are installed by a separate manual runbook step
+  # (install-ci-runner.sh) that may run after this one, and a directory that
+  # only the first runner can write degrades silently rather than loudly.
+  local extra_users=()
+  mapfile -t extra_users < <(getent passwd | cut -d: -f1 | grep -E '^github-ci-runner-[0-9]+$' | sort)
+
+  local u
+  for u in "${extra_users[@]}"; do
+    if id -nG "$u" 2>/dev/null | tr ' ' '\n' | grep -qx "$runner_user"; then
+      continue
+    fi
+    usermod -aG "$runner_user" "$u"
+    echo "  added $u to the $runner_user group"
+  done
+
+  chown -R "$runner_user:$runner_user" "$sbom_dir"
+  chmod -R g+rwX "$sbom_dir"
+
+  for u in "$runner_user" "${extra_users[@]}"; do
+    if ! runuser -u "$u" -- test -w "$sbom_dir"; then
+      echo "  ERROR: $sbom_dir is not writable by $u" >&2
+      ls -ld "$sbom_dir" >&2
+      return 1
+    fi
+  done
+  echo "  $sbom_dir writable by $runner_user ${extra_users[*]} (verified)"
+}
+
 step_build_zeek_image() {
   # honeypot-elk's zeek-proxy runs the same Zeek build as the VPS sensor, so
   # both load an identical parser set -- a divergence there would quietly make
@@ -3079,6 +3155,7 @@ run_step provision-keycloak-secrets "Generate Keycloak secrets, reset bootstrap 
 
 run_step shared-resources      "Create honeynet + placeholder volumes" step_create_shared_resources
 run_step provision-buildx-cache "Create /var/buildx-cache for the CI runners (#2822)" step_provision_buildx_cache
+run_step provision-image-sbom   "Create /var/image-sbom for digest-bound SBOMs (#3321)" step_provision_image_sbom
 run_step build-zeek-image      "Build xore-zeek:local for zeek-proxy" step_build_zeek_image
 run_step start-elasticsearch   "Start honeypot-elk, wait healthy"   step_start_elasticsearch_first
 run_step start-init            "Start honeypot-init, wait for one-shots" step_start_init

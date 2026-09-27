@@ -23,11 +23,18 @@ per-failure traces, and the Rust test log. See
 below.
 - hadolint over every tracked Dockerfile, failing on warnings and errors
   (policy and exemptions in `.hadolint.yaml`, #3320);
+- a digest-bound CycloneDX SBOM for the `backend-service` and
+  `dashboard-next` images, uploaded as an artifact and kept on the homeserver
+  at `/var/image-sbom/`, plus a `trivy sbom` scan over that same file
+  (#3321, [below](#digest-bound-sboms-for-the-two-dashboard-images-3321));
 - CodeQL for Go, JavaScript/TypeScript, and Python;
 - dependency review on pull requests.
 
 Container images are built for pull requests. A push to `main` or a version tag
 publishes the custom images to the repository's GitHub Container Registry.
+Base images are watched for advisories on a weekly cron and on any Dockerfile
+change (`image-security-scan.yml`); the two dashboard images additionally get
+a package inventory of the built result (#3321).
 
 ### CodeQL setup guardrail
 
@@ -1232,6 +1239,120 @@ deletes a PR's cache entries when the PR closes. Actions scopes cache
 *reads* by ref but charges every ref against the one repository quota, so
 a closed PR's entries are unreadable and still billed until the 7-day GC
 gets to them. Deleting on close reclaims that quota immediately.
+
+### Digest-bound SBOMs for the two dashboard images (#3321)
+
+There used to be no inventory of what is inside `apiary-backend`
+(`honeypot-backend-service`) or `dashboard-next`. Every other image in the
+fleet was at least covered at its base — `image-security-scan.yml` walks the
+tree's Dockerfiles and compose files and Trivy-scans every base image they
+pull — but a built dashboard image is its base plus everything `COPY`ed in
+after it, and nothing recorded that difference. Answering "are we affected?"
+when a CVE landed meant rebuilding the image or `exec`-ing into the running
+container.
+
+`containers.yml` now produces a CycloneDX SBOM for those two images at build
+time, keyed by the pushed manifest digest.
+
+**Only those two rows, and only where there is a digest to key to.** The
+matrix gained an `sbom: true` opt-in on `backend-service` and
+`dashboard-next`; every step below is gated on it, so the other sixteen rows
+build exactly as before and pay no syft run and no advisory-DB download. The
+steps are also limited to events that push. A `pull_request` row builds with
+`push: false` and `load: false`, so it produces no image and therefore no
+digest — a tag-keyed inventory would describe whatever that tag pointed at
+when syft ran, which is not the thing a CVE question is about. Those rows
+emit a `::notice` saying so instead of leaving the gap unexplained.
+
+**The digest is stamped into the document, not just the filename.** syft's
+CycloneDX output records the image's name and tag and no digest at all
+(verified against syft 1.52.0), so `scripts/generate-image-sbom.sh` adds
+CycloneDX properties to `metadata.component` afterwards:
+`apiary:image-digest`, `apiary:image-reference`, and `apiary:image-name`,
+plus `component.version` set to the digest for viewers that show only
+name/version. The script then re-reads the file and fails if the property is
+not there — the binding is the feature, so it is verified on disk rather than
+assumed from the exit code of the process that wrote it. It also refuses an
+unpinned reference up front.
+
+**Three copies, one generator.** `scripts/generate-image-sbom.sh` is the only
+thing that writes an SBOM, so the CI path and the homeserver path cannot
+disagree about what a file in `/var/image-sbom` claims to be:
+
+| where | what | lifetime |
+|---|---|---|
+| CI artifact `sbom-<image>-<hex-digest>` | the SBOM plus the Trivy JSON report | 90 days |
+| `/var/image-sbom/<image>/<hex-digest>.sbom.json` | the record, content-addressed | 10 builds per image |
+| `/var/image-sbom/<image>/latest.sbom.json` | the pointer a person or Arcane reads | re-pointed at the newest survivor |
+
+The artifact name is digest-keyed so an operator can paste it straight into
+`trivy sbom`; it uses the hex form because a colon is not a legal
+artifact-name character.
+
+`/var/image-sbom` is published **only when the row ran on the homeserver**.
+The GitHub-hosted fallback has an ephemeral `/var` that dies with the job, so
+publishing there would only write a file nobody reads. Like
+`/var/buildx-cache`, the directory has to be provisioned first —
+`/var` is `root:root 0755`, so the workflow's own `mkdir` gets `EACCES`.
+`scripts/install-homeserver.sh`'s `provision-image-sbom` step creates it
+`2775 github-ci-runner:github-ci-runner` with a default ACL, joins every
+extra runner instance to the group, repairs what is there, and then proves
+each runner user can write it. Without that step the publish step degrades to
+a `::warning` and the CI artifact still has the SBOM — a missing homeserver
+copy must not cost a build.
+
+**What Arcane builds.** The generator takes an image reference and a digest,
+not a tag, so it is not tied to the CI path: an image built on the box rather
+than by a workflow is inventoried by running the same script by hand against
+that image's digest, and the file it writes is the same one CI would have
+written. `scripts/generate-image-sbom.sh --help` documents the interface.
+What the workflow itself does is narrower and worth stating plainly: it
+writes the homeserver copy on the builds that land on this box, and it
+refuses to invent a digest for anything else.
+
+`scripts/prune-image-sbom.sh` keeps the newest 10 records per image and
+re-points `latest.sbom.json` afterwards, because a pointer naming a pruned
+digest is worse than no pointer: it looks authoritative and is wrong. Records
+are pruned by count, never by age — a digest-keyed inventory's whole value is
+that it names one exact image, so dropping a month-old one because a newer
+one exists would make that older image unanswerable.
+
+**The scan reads the SBOM, not the image.**
+`scripts/scan-image-sbom.sh` runs `trivy sbom` over the same file the
+inventory is in, with `image-security-scan.yml`'s flags verbatim
+(`--scanners vuln --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1`).
+Scanning the SBOM is what makes the two agree: the scan and the inventory are
+derived from one artefact, so "the scan says clean" and "the inventory has no
+such package" cannot drift apart. Both now install Trivy through
+`scripts/install-trivy.sh`, because a version + asset + sha256 triple copied
+into two YAML files is exactly how the same CVE ends up graded two different
+ways with no visible cause; a test asserts the pin appears in that script and
+nowhere else.
+
+Like the base-image scan it mirrors, the scan is **report-only** and it
+refuses to conflate two opposite findings: Trivy exits non-zero both for
+"found CRITICAL/HIGH" and for "could not read this", and the second is a
+coverage gap, not a vulnerability. The script tells them apart from Trivy's
+own `Detected SBOM format` log line and annotates accordingly. Generating the
+SBOM, by contrast, is a hard failure — the required `Containers gate`
+aggregates the `build` job, and a silently absent inventory is the gap this
+section exists to close.
+
+Honest limitations:
+
+- **Pull requests get no SBOM.** See above. The inventory that matters is the
+  one for the digest that was actually deployed.
+- **Trivy warns** `Third-party SBOM may lead to inaccurate vulnerability
+  detection` on a Syft-generated CycloneDX file, and recommends Trivy
+  generate SBOMs itself. The issue specifies `trivy sbom` over a CycloneDX
+  inventory, so that is what this does; the warning is Trivy's, not a
+  finding.
+- **Provenance attestation is out of scope.** Cosign or
+  `buildx --provenance` is tracked as a follow-up. An SBOM is an inventory,
+  not a signature: nothing here proves the SBOM was produced by the build it
+  describes.
+- **CVE findings do not fail the build.** Same posture, and same re-arm note,
+  as `image-security-scan.yml`'s base-image backlog.
 
 ### Docker Hub authentication and the pull-through cache (#2819)
 
