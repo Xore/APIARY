@@ -249,7 +249,7 @@ appeared there. Split into:
 
 ```console
 $ curl -s http://backend-service:8081/livez
-{"live":true,"built":"2026-09-27T01:46:34+00:00"}
+{"live":true,"built":"2026-09-27T01:46:34+00:00","revision":"3dca4457f1b2c0d4e5a69788796a5b4c3d2e1f0ab"}
 
 $ curl -s http://backend-service:8081/readyz
 {"ready":true,"cluster":"green","write_blocked":[]}
@@ -257,6 +257,12 @@ $ curl -s http://backend-service:8081/readyz
 $ curl -s -o /dev/null -w '%{http_code}\n' http://backend-service:8081/readyz   # during an ES outage
 503
 ```
+
+`/readyz` deliberately carries **no** `revision`: readiness is about whether
+this process can do its job, which is a property of the running container and
+not of a build, and the two questions have different answers during a rollback.
+The revision belongs to the liveness body, which is the one every probe and
+every ops script already reads.
 
 **`/livez` is what the container `HEALTHCHECK` curls, and it must stay that
 way.** A probe that can block on Elasticsearch converts that dependency's
@@ -302,6 +308,102 @@ that blocks for 30s is indistinguishable from the outage it exists to report.
 - **"Why is the dashboard empty?"** → `/api/v1/source-health` (the
   per-sensor freshness page). `/readyz` says the backend cannot write; only
   source-health says whether events are arriving.
+- **"Which commit is actually deployed?"** → `revision` on `/livez`, plus
+  the image label. See below.
+
+### Which revision is deployed (#3315)
+
+The failure this exists for is the one `docs/ARCANE-GIT-SYNC.md` names
+directly: a content-change redeploy leaves the dashboard **"green, healthy,
+running the old code."** A fresh container id, a passing healthcheck and a
+recent image build all say the machinery ran — none of them say this code is
+what is running. So both dashboard images carry the git revision they were
+built from, and `scripts/verify-deploy.sh` compares it against what you
+expect.
+
+**The contract, in one table.** Four surfaces, one value:
+
+| Surface | Where | Read it with |
+|---|---|---|
+| Backend health body | `{"live":…,"built":…,"revision":…}` on `/livez` and `/healthz` | `curl -s …/healthz` |
+| Backend boot log | `revision=…` on the `apiary-backend listening` line | `docker logs … \| grep listening` |
+| Frontend static file | `/build.json` → `{"built":…,"revision":…,"source":…}` | `curl -s …/build.json` |
+| Both images | `org.opencontainers.image.revision` (with `.source`, `.created`) | `docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' apiary-backend:latest` |
+
+The health body and `build.json` are small enough to read unfiltered, so
+there is nothing to parse here and nothing that needs `jq` — which is
+deliberately absent from these hosts (`verify-deploy.sh` uses `python3` for
+the same reason).
+
+**Where the value comes from, and what `"unknown"` means.** `GIT_SHA` is a
+Docker **build arg**, declared in both Dockerfiles and passed by the stacks'
+compose files as `build.args.GIT_SHA: ${GIT_SHA:-}`. The backend compiles it
+in (`build.rs` re-exports `GIT_SHA` as `APIARY_GIT_SHA`); the frontend writes
+it into `public/build.json` before `npm run build`. Unset is normal and not
+an error — you get the literal string `unknown`, never a fabricated revision,
+because a plausible-looking wrong answer is worse than no answer. Both tiers
+normalize to a bare lowercase hex object name (optional `sha256:` prefix
+stripped, 7–64 hex chars) or `unknown`, and both are held to one shared table,
+`backend-service/src/revision-corpus.json`, so the two normalizers — different
+languages, different CI lanes — cannot drift.
+
+`build.rs` also emits `cargo:rerun-if-env-changed=GIT_SHA`. That line is
+load-bearing, not hygiene: cargo caches a build script's output by its inputs
+and an environment variable is not one of them unless declared, so without it
+the *second* build of an identical tree silently reports the *first* build's
+revision — the exact failure this section exists to end, reproduced by the
+stamp itself.
+
+**Turning it on.** Nothing repo-tracked writes `GIT_SHA`; the stacks' `.env`
+files are root-owned and provisioned outside this repository, and there is no
+`.git` on the host to ask (`deploy.yml` rsyncs with `--exclude .git/`). So
+the first run after this landed correctly reports **not stamped**. From a
+clone you are deploying, one line per stack:
+
+```console
+echo "GIT_SHA=$(git rev-parse HEAD)" >> /var/dockge/stacks/honeypot-dashboard-backend/.env
+echo "GIT_SHA=$(git rev-parse HEAD)" >> /var/dockge/stacks/honeypot-dashboard/.env
+```
+
+followed by the `POST /projects/{id}/build` that a content-change sync does
+*not* do. CI (`.github/workflows/containers.yml`) passes `github.sha` for the
+two Dockerfiles that declare the arg.
+
+**Running the check.** `scripts/verify-deploy.sh` compares the live revision,
+the image label, and an expected revision — which it takes from `origin/main`
+in a real clone, or from an argument:
+
+```console
+# On a host with a clone of apiary, the full check:
+scripts/verify-deploy.sh --healthz-exec \
+  'docker exec hp-apiary-backend curl -sf http://127.0.0.1:8081/healthz' \
+  --image apiary-backend:latest
+
+# Without one, name the expected revision yourself:
+scripts/verify-deploy.sh --behind-days 0 "$(git rev-parse origin/main)" \
+  --healthz-exec 'docker exec hp-apiary-backend curl -sf http://127.0.0.1:8081/healthz'
+
+# The frontend's form:
+scripts/verify-deploy.sh --healthz-url http://host:19090/build.json
+```
+
+Exit codes are the point, and are deliberately three-valued: **0** the
+deployed revision matches; **1** a finding (missing, unstamped, malformed, or
+stale past `--behind-days`); **2** *could not tell* — an unreadable body or an
+image that is not on this host. An unreadable answer must never read as a
+stale deploy, which is why 2 is not 1. Add `--image` to check a label against
+the running container, which catches the commoner variant where a
+`compose up` recreated from an older image than the one whose label you just
+read. The lag check measures the age of the *commit*, not of the container, so
+it survives a container that has been up since before the merge it is missing
+— but it needs a clone to measure against, hence `--behind-days 0` for the
+clone-less form.
+
+`diagnostics.yml` runs it in `--warn-only` mode in its own "Deployed
+revision" section, against `$GITHUB_SHA`: the home runner has no clone to
+measure against, so the section degrades to "is the running revision the
+current tip of `main`" and says so in the report. Its exit 2 is still
+reported as **could not tell**, not as a pass.
 
 ## Disk space monitoring
 
