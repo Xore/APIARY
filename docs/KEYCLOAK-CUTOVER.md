@@ -82,13 +82,17 @@ pinned Keycloak runtime does not provide a recovery-code required-action factory
 | decoy/static/API/status/file/blog hosts currently lacking `forward-auth` | Public honeypot or explicitly application-owned auth | Public / unchanged | none | none | Never attach operator SSO merely because the hostname exists. Public collection must remain independent of IdP availability. |
 
 Role names differ per row on purpose. The realm's low-privilege client role is
-`access` -- granted to the `users` group -- and every gateway enforces exactly
-`<client>:access` through `OAUTH2_PROXY_ALLOWED_ROLES` in
-`vps/docker-compose.yml`; `traefik-dashboard` and `arcane` deliberately use
-`admin` instead (#1014/#1185, root-equivalent). The dashboard row's `user` is
+`access`, and every gateway enforces exactly `<client>:access` through
+`OAUTH2_PROXY_ALLOWED_ROLES` in `vps/docker-compose.yml`;
+`traefik-dashboard` and `arcane` deliberately use `admin` instead
+(#1014/#1185, root-equivalent). The dashboard row's `user` is
 *not* a Keycloak role name: `resource_access.apiary-dashboard.roles` carries
 `access` and `admin`, and the dashboard collapses them to its own
-`user`/`admin` session role.
+`user`/`admin` session role. Which human carries which role is a realm
+provisioning decision, not a repository fact: the committed
+`keycloak/realm/apiary-realm.json` defines the `users` and `administrators`
+groups with empty `roleMappings`, so treat the group membership the matrix
+implies as an operator-side grant to be verified in the live realm.
 
 The deployment validator must fail when a protected router has neither native
 OIDC ownership nor its named gateway. A redirect alone is not evidence: each
