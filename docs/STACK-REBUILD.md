@@ -84,7 +84,7 @@ confusing at best.
 ```bash
 ssh vps
 docker stop hp-suricata hp-suricata-rules-refresh hp-suricata-log-maintenance \
-  hp-portbridge hp-portbridge-log-rotate hp-portbridge-log-maintenance \
+  hp-portbridge hp-portbridge-log-maintenance \
   hp-portbridge-blackhole-refresh hp-p0f
 sudo find /opt/stacks/apiary/logs/suricata -mindepth 1 -delete
 sudo find /opt/stacks/apiary/logs/portbridge -mindepth 1 -delete
@@ -207,9 +207,20 @@ done
 ssh vps
 cd /root/vps
 docker compose -f docker-compose.yml up -d suricata portbridge p0f \
-  suricata-rules-refresh suricata-log-maintenance portbridge-log-rotate \
+  suricata-rules-refresh suricata-log-maintenance \
   portbridge-log-maintenance portbridge-blackhole-refresh
 ```
+
+There is no `portbridge-log-rotate` service to start or stop. It was removed
+in #1779, and its only job — pruning the renamed `portbridge.json.*` files
+once they age out — is what `portbridge-log-maintenance` does now, per that
+script's own header. A stop or start naming it fails on a container that does
+not exist, which in a reset runbook is a step that silently does nothing.
+
+The list also omits `portbridge-manual-blackhole-refresh` on purpose: it is
+the manual counterpart to the scheduled `portbridge-blackhole-refresh` and
+should not be brought up by a reset. `suricata-update` is covered separately,
+just below.
 
 `suricata` depends on `suricata-update` (`condition: service_completed_successfully`)
 — if `suricata-update`'s container is still sitting there `Exited(0)` from a
