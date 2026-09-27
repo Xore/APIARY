@@ -225,7 +225,7 @@ entrypoint instead — the cross-stack readiness contract documented in
 ## Event ingestion (summary)
 
 The full pipeline — PROXY-aware vs tunnel-blind sensor split, the
-ingest-time `via_port` join, the 12-step `geoip-honeypot` processor chain,
+ingest-time `via_port` join, the 14-processor `geoip-honeypot` chain,
 and the dashboard's four read paths — is
 [PIPELINES.md §1](PIPELINES.md#1-event-ingestion). Facts that shape
 everything else:

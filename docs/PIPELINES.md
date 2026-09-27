@@ -135,11 +135,19 @@ Order (1:1 with `arcane/home/honeypot-init/analysis/elasticsearch-setup.sh`):
    p0f OS guess. Stripped/empty sources write nothing — no empty-string
    pollution — so ES-side terms aggs reproduce what the dashboard's
    read-time classification produced without the dashboard running.
-3–5. GeoIP on suricata src/dst fields (`ignore_missing` no-ops elsewhere)
-6–9. GeoIP on honeypot/portbridge src fields
-10. Dionaea incident hash extraction (plain scan, no regex)
-11. Network-type classification from ASN org (scanner/cloud/hosting)
-12. Log4Shell deobfuscation flag (bounded depth/length)
+3. Traefik wire-tuple `community_id` (#1765) — hashes the tuple the request
+   was actually accepted on (`ClientAddr` → VPS address/entrypoint port), not
+   the client Traefik resolved after forwarded-header trust, so a Traefik
+   record and huginn's sidecar observation of the same TLS connection share
+   a key
+4. Generic `community_id` (#1742) — derives the key for any record that has a
+   5-tuple but none of its own (Zeek's ~20 protocol logs carry `uid`; only
+   `conn.log` carries `community_id`), seed 0 to match `suricata.yaml`
+5–7. GeoIP on suricata src/dst fields (`ignore_missing` no-ops elsewhere)
+8–11. GeoIP on honeypot/portbridge src fields
+12. Dionaea incident hash extraction (plain scan, no regex)
+13. Network-type classification from ASN org (scanner/cloud/hosting)
+14. Log4Shell deobfuscation flag (bounded depth/length)
 
 No processor makes a network call — GeoIP reads local `.mmdb` files.
 
@@ -172,6 +180,7 @@ flowchart TB
     zpa["zeek-proxy-attribution<br/>every 120s · time-bounded join"]
     alert["alert-notifier<br/>webhook fan-out, cooldown-gated"]
     roll["dashboard-rollups<br/>every ROLLUP_RUN_INTERVAL_SECS (default 300s)"]
+    tint["threat-intel<br/>every 15m · 24h lookback"]
   end
 
   subgraph out["Durable entities"]
@@ -189,6 +198,8 @@ flowchart TB
   raw --> zpa
   atk & cmp & aic --> alert --> st
   raw --> roll --> rll
+  raw --> tint
+  tint -.->|"rewrites source.as.type in place"| raw
 ```
 
 | Loop | Reads | Writes | Cadence | Notes |
@@ -197,6 +208,7 @@ flowchart TB
 | correlator | raw events | `campaigns-v1`, `attacker-clusters-v1` | every cycle | pure aggregations, recomputed from scratch; groups ≥2 IPs sharing fingerprint/hash/ASN/provider-class |
 | agent-intrusion | raw events | `agent-intrusion-campaigns` | 300s | deterministic criticality rules escalate; LLM never gates escalation; deterministic sha256 campaign_id ⇒ upsert not duplicate |
 | zeek-proxy-attribution | zeek flows + portbridge log | flow docs | 120s | attributes relayed flows to attackers; ordering rule above applies here too |
+| threat-intel | raw event indices | `source.as.type` in place | 15m run, 5m CIDR reload, 24h lookback | classifies source IPs against `threat-cidrs.csv`; intel labels win over the ingest pipeline's provider class, reproducing the retired Go dashboard's `firstNonEmpty(e.Intel, e.Provider)` precedence at the data layer |
 | dashboard-rollups (#2046) | raw event indices (default pattern) | `overview-rollup-v1`, `geo-rollup-v1`, `attack-rollup-v1` | `ROLLUP_RUN_INTERVAL_SECS`, default 300s | pure-ES derived overviews the dashboard's overview/map/kill-chain reads slice cheaply instead of re-aggregating raw events per request |
 | ml-worker / llm-worker | payloads + events | `ml-anomalies` + `dashboard-ml-anomaly-ack-v1` | continuous | scoring semantics tracked in #1969/#1974 |
 | payload-inventory | disk stores | `dashboard-payload-inventory-v1`, `dashboard-payload-bytes-v1` | periodic scan | HEAD-exists fast path (#1221) |

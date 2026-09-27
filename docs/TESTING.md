@@ -133,8 +133,9 @@ fixed back into this document and the install scripts themselves.
      lingering call into a route or function that's been superseded or
      replaced but never removed (the kind of gap a working install can
      mask, since the old path may still technically respond). Cross-check
-     call sites against the routes actually registered in `main.go` and
-     the functions actually exported by each module, not just "does it
+     call sites against the routes actually registered in
+     [`main.rs`](../arcane/home/honeypot-dashboard/backend-service/src/main.rs)
+     and the functions actually exported by each module, not just "does it
      still return 200."
    - Dead code: the reverse direction of the check above — routes,
      handlers, functions, and files that exist but are no longer called

@@ -2823,3 +2823,802 @@ doc stale-path check passed
 docs reachability check passed (85 reachable, 35 in exempt record trees)
 OK — 40 mermaid blocks in 155 files parse cleanly
 > build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && git add -A && git commit -q -F - <<'EOF' && git log --oneline -1
+docs(pipelines): correct the enrichment source count, conpot classification and index names
+
+- "16 named sources ... 22 sources in all" -> 17 + 6 conpot personas = 23.
+  sonicwall-sma-honeypot joined the #1217 canonical-promotion watch list
+  in #3131 and nobody updated the count. Cited discover_sources in
+  ip_enrichment/mod.rs so the next reader can re-derive it.
+- Conpot was listed as wholly tunnel-blind. All six personas set
+  CONPOT_PROXY_PROTOCOL=1 and portbridge's RULES carry the pp flag on
+  their TCP listeners, so they are PROXY-aware on TCP; only SNMP 161,
+  BACnet 47808 and IPMI 623 are tunnel-blind (PROXY v1 has no UDP form).
+  Moved them across, with the same per-listener nuance the cisco-asa
+  entry already used.
+- Index names: the payload-bytes index is dashboard-payload-bytes-v1, not
+  a "-bytes-v1" suffix on dashboard-payload-inventory-v1 (which would
+  read as dashboard-payload-inventory-bytes-v1). The ml score index is
+  ml-anomalies. Added workbench-runs-v1, which the init stack templates
+  as part of the *-analysis-v1 family but the catalog omitted.
+- README's honeypot-agent-intrusion-worker row described the retired
+  Python worker as the live writer of agent-intrusion-campaigns. It has
+  been profiles:["legacy"] since #1649; the Rust loop writes the index.
+- ROADMAP.md still described the dashboard tier as pre-cutover behind a
+  `next` profile alongside the Go dashboard. Cutover completed
+  2026-08-22 and no `next` profile exists.
+- settings-operations.md said to revoke the admin role "in auth-backend";
+  the live IdP is Keycloak (realm `apiary`, role `apiary-admin`).
+EOF
+0065c0d7 docs(pipelines): correct the enrichment source count, conpot classification and index names
+> build · stealth
+Now let me check route paths against main.rs across my assigned docs:
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && R=arcane/home/honeypot-dashboard/backend-service/src/main.rs && python3 -c "
+import re
+s=open('$R').read()
+routes=sorted(set(re.findall(r'\.route\(\"([^\"]+)\"', s)))
+print(len(routes),'routes')
+for r in routes: print(r)
+" > /home/xore/.hermes/cache/scratch/opencode/routes.txt; wc -l /home/xore/.hermes/cache/scratch/opencode/routes.txt; head -70 /home/xore/.hermes/cache/scratch/opencode/routes.txt
+121 /home/xore/.hermes/cache/scratch/opencode/routes.txt
+120 routes
+/api/v1/alerts
+/api/v1/alerts/{key}/ack
+/api/v1/artifacts/{kind}/{key}
+/api/v1/artifacts/{kind}/{key}/{filename}
+/api/v1/attack-vectors
+/api/v1/attackers
+/api/v1/attackers-graph
+/api/v1/attackers/{id}/events
+/api/v1/audit
+/api/v1/campaigns
+/api/v1/canarytokens
+/api/v1/canarytokens/types
+/api/v1/canarytokens/{id}/download
+/api/v1/cape/{sha}
+/api/v1/cape/{sha}/raw
+/api/v1/charts/anomaly-trend
+/api/v1/charts/attacker-fusion
+/api/v1/charts/attck-coverage
+/api/v1/charts/campaign-timeline
+/api/v1/charts/decoy-client-fingerprints
+/api/v1/charts/decoy-requests
+/api/v1/charts/dionaea-cves
+/api/v1/charts/endlessh-held-histogram
+/api/v1/charts/ics-functions
+/api/v1/charts/ja4h-fingerprints
+/api/v1/charts/ja4l-fingerprints
+/api/v1/charts/ja4x-fingerprints
+/api/v1/charts/kill-chain-sankey
+/api/v1/charts/ml-anomaly-scores
+/api/v1/charts/ml-backlog
+/api/v1/charts/netflow-bytes
+/api/v1/charts/netflow-packets
+/api/v1/charts/os-distribution
+/api/v1/charts/ssh-fingerprints
+/api/v1/charts/tcp-stack-clusters
+/api/v1/charts/tls-fingerprints
+/api/v1/clusters
+/api/v1/config
+/api/v1/config/history
+/api/v1/config/rollback
+/api/v1/config/validate
+/api/v1/connections/{community_id}
+/api/v1/cred-reuse
+/api/v1/credentials/{id}/link-token
+/api/v1/credentials/{id}/rotate
+/api/v1/event/{id}
+/api/v1/event/{id}/connections
+/api/v1/events
+/api/v1/export/campaigns.csv
+/api/v1/export/clusters.csv
+/api/v1/export/commands.csv
+/api/v1/export/events.csv
+/api/v1/export/history.json
+/api/v1/export/ips.csv
+/api/v1/filter-values
+/api/v1/ghidra-callgraph/{sha}
+/api/v1/ghidra/submit
+/api/v1/ghidra/{sha}
+/api/v1/github-analysis/submit
+/api/v1/github-analysis/{sha}
+/api/v1/gpu-queue
+/api/v1/gpu-queue/{job_id}/abort
+/api/v1/investigate/cidr/{cidr}
+/api/v1/investigate/cluster
+/api/v1/investigate/ip/{ip}
+/api/v1/ip-block
+/api/v1/ip-block-export
+/api/v1/ip-block/{ip}
+/api/v1/live
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && FILES="docs/STACK-REBUILD.md docs/GEOIP-THREAT-INTEL.md docs/RECOVERY.md docs/NETWORK.md docs/TESTING.md docs/persona-design.md docs/settings-operations.md docs/KEYCLOAK-OPERATIONS.md docs/ARCHITECTURE.md docs/ROCKY-10-MIGRATION.md docs/PIPELINES.md docs/gpu-docker-passthrough.md docs/gpu-ml-worker-acceleration.md docs/knowledge-store-design.md docs/STORAGE.md docs/DASHBOARD-CUTOVER.md docs/ES-CONSUME-PATTERNS.md docs/KEYCLOAK-CUTOVER.md docs/OPERATIONS.md docs/canarytoken-live-fire-checklist.md docs/community-threat-intel-sharing.md docs/container-writable-layer-audit-2026-09-03.md docs/dionaea-bistreams-retention.md docs/honeypot-network-isolation.md docs/ip-reporting-plan.md docs/kvm-network-traffic-analysis.md docs/kvm-snapshot-vs-golden-image.md docs/llm-inference-backend-comparison.md docs/ml-gpu-coordinated-roadmap.md docs/security-fixes.md README.md docs/ROADMAP.md docs/agent-intrusion-threat-model.md docs/dashboard-manual-ip-block-design.md docs/ml-worker-plan.md"; grep -ohE '/api/v1/[A-Za-z0-9_{}/.-]*' $FILES | sed 's/[.,)]*$//' | sort -u > /home/xore/.hermes/cache/scratch/opencode/doc-routes.txt; wc -l < /home/xore/.hermes/cache/scratch/opencode/doc-routes.txt; echo "=== doc-cited routes NOT in main.rs ==="; comm -23 /home/xore/.hermes/cache/scratch/opencode/doc-routes.txt <(sort -u /home/xore/.hermes/cache/scratch/opencode/routes.txt)
+10
+=== doc-cited routes NOT in main.rs ===
+/api/v1/store/ml-anomalies
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && grep -n 'store/' arcane/home/honeypot-dashboard/backend-service/src/main.rs | cut -c1-150 && echo "=== stores.rs known store names ===" && grep -nE '^\s+"[a-z0-9-]+" =>' arcane/home/honeypot-dashboard/backend-service/src/stores.rs | cut -c1-120
+438:        .route("/api/v1/store/{name}", get(stores::generic).delete(stores::generic_delete))
+=== stores.rs known store names ===
+364:        "auth-events" => ("auth-failure-events", "@timestamp", "date", &[] as &[&str]),
+366:        "llm-analysis" => ("llm-analysis", "@timestamp", "date", &[]),
+370:        "ml-anomalies" => ("ml-anomalies", "@timestamp", "date", &[]),
+375:        "agent-campaigns" => ("agent-intrusion-campaigns", "@timestamp", "date", &[]),
+381:        "canarytokens" => ("dashboard-canarytokens-v1", "created_at", "date", &["auth_token"]),
+382:        "problem-reports" => ("dashboard-problem-reports-v1", "submitted_at", "date", &["dom_snapshot"]),
+383:        "dead-letters" => ("dead-letter-honeypot", "@timestamp", "date", &[]),
+384:        "yara" => ("yara-analysis-v1", "@timestamp", "date", &[]),
+385:        "sandbox-runs" => ("sandbox-analysis-v1", "@timestamp", "date", &[]),
+386:        "ghidra-runs" => ("ghidra-analysis-v1", "@timestamp", "date", &[]),
+391:        "static-analysis" => ("dashboard-static-analysis-v1", "Fingerprint", "keyword", &[]),
+394:        "revdeck" => ("revdeck-analysis-v1", "@timestamp", "date", &[]),
+395:        "cape" => ("cape-analysis-v1", "@timestamp", "date", &[]),
+396:        "github-analysis" => ("github-analysis-v1", "@timestamp", "date", &[]),
+397:        "workbench-runs" => ("dashboard-workbench-runs-v1", "created_at", "date", &[]),
+398:        "generated-reports" => ("dashboard-generated-reports-v1", "created_at", "date", &["pdf_base64"]),
+399:        "report-definitions" => ("dashboard-reports-definitions-v1", "updated", "date", &[]),
+400:        "intelligence" => ("dashboard-intelligence-archive-v1", "generated", "date", &[]),
+> build · stealth
+[0m→ [0mRead docs/STORAGE.md 
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== PCAP env defaults ===" && grep -rn 'PCAP_MAX_GB\|PCAP_RETENTION_DAYS' --include='*.yml' --include='*.example' --include='*.sh' --include='*.md' . 2>/dev/null | grep -v node_modules | grep -v graphify-out | cut -c1-170
+=== PCAP env defaults ===
+./arcane/home/honeypot-elk/.env.example:21:PCAP_MAX_GB=200
+./arcane/home/honeypot-elk/.env.example:24:PCAP_RETENTION_DAYS=14
+./arcane/home/honeypot-elk/compose.yml:444:          find /dst -type f -name 'log.pcap.*' -mtime "+$${PCAP_RETENTION_DAYS:-14}" -delete
+./arcane/home/honeypot-elk/compose.yml:448:          cap_kb=$$(( $${PCAP_MAX_GB:-200} * 1024 * 1024 ))
+./arcane/home/honeypot-elk/compose.yml:465:      # stops being a coincidence. PCAP_MAX_GB is the ceiling that binds
+./arcane/home/honeypot-elk/compose.yml:468:      - PCAP_RETENTION_DAYS=${PCAP_RETENTION_DAYS:-14}
+./arcane/home/honeypot-elk/compose.yml:469:      - PCAP_MAX_GB=${PCAP_MAX_GB:-200}
+./docs/STORAGE.md:102:  pcap[("PCAP store")] --> ceiling["ceiling: PCAP_MAX_GB (200)<br/>retention: PCAP_RETENTION_DAYS (14)<br/>enforced by pcap container"]
+./docs/STORAGE.md:108:- PCAP is disk-ceilinged (`PCAP_MAX_GB`, default 200 GB) *and* aged
+./docs/STORAGE.md:109:  (`PCAP_RETENTION_DAYS`, default 14) — the ceiling binds first under
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== json-file logging defaults ===" && grep -rn -A3 'x-runtime-defaults' arcane/home/honeypot-dashboard/compose.yml | head -12 && echo && grep -rhoE 'max-size:.*|max-file:.*' arcane/home/*/compose.yml | sort | uniq -c
+=== json-file logging defaults ===
+55:x-runtime-defaults: &runtime-defaults
+56-  logging:
+57-    driver: json-file
+58-    options:
+
+     30 max-file: "3"
+     30 max-size: "25m"
+> build · stealth
+[0m← [0mEdit docs/STORAGE.md
+Index: docs/STORAGE.md
+===================================================================
+--- docs/STORAGE.md
++++ docs/STORAGE.md
+@@ -80,11 +80,11 @@
+ Indices follow `<source>-v<N>` naming. Producers and consumers were
+ verified one-to-one during the #1960 review — the catalog table lives in
+ [PIPELINES.md](PIPELINES.md#4-index-catalog).
+ 
+-- **Templates**: `honeypot-*`, `suricata-*`, `portbridge-*` set the shared
+-  ingest pipeline and flattened mappings so heterogeneous sensor fields
+-  land safely.
++- **Templates**: `honeypot-v2-*`, `suricata-*`, `portbridge-v2-*` set the
++  shared ingest pipeline and flattened mappings so heterogeneous sensor
++  fields land safely.
+ - **Derived entities** (`attackers-v1`, `campaigns-v1`,
+   `attacker-clusters-v1`, `agent-intrusion-campaigns`) are recomputed
+   idempotently by their loops — safe to delete and regenerate from raw
+   events within their windows.
+
+> build · stealth
+Now let me check OPERATIONS.md and TESTING.md claims:
+[0m→ [0mRead docs/OPERATIONS.md 
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== runtime / metrics / intelligence / campaigns routes ===" && grep -nE 'runtime|metrics|intelligence|campaigns' /home/xore/.hermes/cache/scratch/opencode/routes.txt && echo && echo "=== does /api/campaigns or /api/v1/runtime exist in frontend? ===" && grep -rhoE "'/api/[A-Za-z0-9_{}/.-]*'|\"/api/[A-Za-z0-9_{}/.-]*\"|\`/api/[A-Za-z0-9_{}/.-]*\`" arcane/home/honeypot-dashboard/frontend-next/src/ 2>/dev/null | tr -d "'\"\`" | grep -vE '^/api/v1' | sort -u | head -30
+=== runtime / metrics / intelligence / campaigns routes ===
+11:/api/v1/campaigns
+50:/api/v1/export/campaigns.csv
+121:/metrics
+
+=== does /api/campaigns or /api/v1/runtime exist in frontend? ===
+/api/
+/api/chart/anomaly-trend
+/api/chart/attck-coverage
+/api/chart/campaign-timeline
+/api/chart/decoy-client-fingerprints
+/api/chart/decoy-requests
+/api/chart/dionaea-cves
+/api/chart/endlessh-held-histogram
+/api/chart/ics-functions
+/api/chart/ja4h-fingerprints
+/api/chart/ja4l-fingerprints
+/api/chart/ja4x-fingerprints
+/api/chart/kill-chain-sankey
+/api/chart/ml-anomaly-scores
+/api/chart/ml-backlog
+/api/chart/netflow-bytes
+/api/chart/netflow-packets
+/api/chart/os-distribution
+/api/chart/ssh-fingerprints
+/api/chart/tcp-stack-clusters
+/api/chart/tls-fingerprints
+/api/export/campaigns.csv
+/api/export/clusters.csv
+/api/export/commands.csv
+/api/export/ips.csv
+/api/live
+/api/topology/flow
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && grep -nE "api/v1|BASE|prefix|API_PREFIX" arcane/home/honeypot-dashboard/frontend-next/src/lib/backend.server.ts | head -20 && echo "=== runtime route? ===" && grep -rn "runtime" /home/xore/.hermes/cache/scratch/opencode/routes.txt; grep -nE '"/api/v1/[^"]*runtime' arcane/home/honeypot-dashboard/backend-service/src/main.rs; echo "(none = no runtime route)"; echo "=== metrics mount ==="; grep -nE 'metrics|intelligence' arcane/home/honeypot-dashboard/backend-service/src/main.rs | head
+225: * route, same as serviceFetch — the cache key is prefixed by target, not
+227: * the same path (confirmed live: without the prefix, whichever target
+305: * queue. Pass the caller's own mount prefix (`'/bff'` / `'/bff-mounted'`) so
+352:  // route's mount prefix and pass everything else through byte-for-byte;
+354:  // matching prefix (direct invocation in tests, or a mount we don't know)
+357:  const prefixLength =
+363:    prefixLength >= 0
+364:      ? `${target.pathname.slice(prefixLength) || '/'}${target.search}`
+=== runtime route? ===
+(none = no runtime route)
+=== metrics mount ===
+102:    /// #1972: request metrics + where durable JSONL request lines land
+475:        .route("/metrics", get(obs::metrics_route))
+478:        // metrics scrape, and every /api/v1 route get a request id echoed
+479:        // in x-request-id, metrics recorded per family/status/latency, and
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== API prefix in frontend ===" && grep -rn "'/api/v1'\|\"/api/v1\"\|/api/v1\${\|API_BASE\|V1 =" arcane/home/honeypot-dashboard/frontend-next/src/lib/backend.server.ts | head -10; echo "=== how chart path is composed ==="; grep -rn "api/chart/anomaly-trend" arcane/home/honeypot-dashboard/frontend-next/src/ | head -3; echo "=== runtime: where does source-health get heap/mem/uptime ==="; grep -nE 'goroutine|heap|cgroup|uptime|reserved' arcane/home/honeypot-dashboard/backend-service/src/health.rs | head -10
+=== API prefix in frontend ===
+=== how chart path is composed ===
+arcane/home/honeypot-dashboard/frontend-next/src/routes/index.tsx:740:            <EChart kind="line" url="/api/chart/anomaly-trend" height={280} />
+=== runtime: where does source-health get heap/mem/uptime ===
+69:/// service, so Go heap/goroutines have no equivalent — /proc/self uptime
+73:    pub uptime_seconds: u64,
+128:    let mut health = RuntimeHealth { uptime_seconds: 0, rss_bytes: 0, vm_bytes: 0 };
+144:    if let (Ok(stat), Ok(uptime)) =
+145:        (std::fs::read_to_string("/proc/self/stat"), std::fs::read_to_string("/proc/uptime"))
+147:        let boot_seconds = uptime.split_whitespace().next().and_then(|v| v.parse::<f64>().ok());
+153:            health.uptime_seconds = (boot - start / 100.0).max(0.0) as u64;
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && sed -n '60,80p' arcane/home/honeypot-dashboard/backend-service/src/health.rs && echo "=== RuntimeHealth serialized field names ===" && grep -n -B3 -A12 'struct RuntimeHealth' arcane/home/honeypot-dashboard/backend-service/src/health.rs | head -30 && echo "=== where served ===" && grep -n 'runtime' arcane/home/honeypot-dashboard/backend-service/src/health.rs | head -20
+pub enabled: bool,
+    pub last_scan: String,
+    pub rules_sha256: String,
+    pub samples: u64,
+    pub matched: u64,
+    pub errors: u64,
+}
+
+/// "Dashboard runtime" card, ported honestly: this is the Rust backend
+/// service, so Go heap/goroutines have no equivalent — /proc/self uptime
+/// and memory stand in.
+#[derive(Serialize)]
+pub struct RuntimeHealth {
+    pub uptime_seconds: u64,
+    pub rss_bytes: u64,
+    pub vm_bytes: u64,
+}
+
+/// "Ingestion freshness" card — dashboard/elastic.go refresh()'s verdict:
+/// healthy, delayed (>2m), stale (>15m) on the newest indexed event.
+#[derive(Serialize)]
+=== RuntimeHealth serialized field names ===
+69-/// service, so Go heap/goroutines have no equivalent — /proc/self uptime
+70-/// and memory stand in.
+71-#[derive(Serialize)]
+72:pub struct RuntimeHealth {
+73-    pub uptime_seconds: u64,
+74-    pub rss_bytes: u64,
+75-    pub vm_bytes: u64,
+76-}
+77-
+78-/// "Ingestion freshness" card — dashboard/elastic.go refresh()'s verdict:
+79-/// healthy, delayed (>2m), stale (>15m) on the newest indexed event.
+80-#[derive(Serialize)]
+81-pub struct IngestFreshness {
+82-    pub state: String,
+83-    pub last_ingest: String,
+84-    pub age_seconds: i64,
+=== where served ===
+68:/// "Dashboard runtime" card, ported honestly: this is the Rust backend
+112:    pub runtime: RuntimeHealth,
+127:fn runtime_health() -> RuntimeHealth {
+417:        runtime: runtime_health(),
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== intelligence routes ===" && grep -n 'intelligence' arcane/home/honeypot-dashboard/backend-service/src/main.rs | cut -c1-140 && echo && echo "=== report.pdf / export routes ===" && grep -nE 'export' arcane/home/honeypot-dashboard/backend-service/src/main.rs | cut -c1-140 && echo && echo "=== kibana setup data views ===" && grep -nE 'data-view|data_view|index-pattern|index_pattern|title' arcane/home/honeypot-init/analysis/honeypot-kibana-setup.sh | cut -c1-160 | head -25
+=== intelligence routes ===
+
+=== report.pdf / export routes ===
+45:mod exports;
+283:        .route("/api/v1/export/events.csv", get(exports::events_csv))
+284:        .route("/api/v1/export/commands.csv", get(exports::commands_csv))
+285:        .route("/api/v1/export/ips.csv", get(exports::ips_csv))
+286:        .route("/api/v1/export/campaigns.csv", get(exports::campaigns_csv))
+287:        .route("/api/v1/export/clusters.csv", get(exports::clusters_csv))
+288:        .route("/api/v1/export/history.json", get(exports::history_json))
+345:        .route("/api/v1/ip-block-export", get(ip_block::export))
+
+=== kibana setup data views ===
+9:data_view() {
+10:  id=$1 title=$2 name=$3
+11:  curl -fsS -X POST "$kibana/api/data_views/data_view" -H "$header" -H 'Content-Type: application/json' \
+12:    -d "{\"data_view\":{\"id\":\"$id\",\"title\":\"$title\",\"name\":\"$name\",\"timeFieldName\":\"@timestamp\",\"allowNoIndex\":true},\"override\":true}" >/
+15:data_view honeypot-events 'honeypot-v2-*' 'Honeypot normalized events'
+16:data_view suricata-events 'suricata-*' 'Suricata all protocols'
+17:data_view dead-letter-events 'dead-letter-honeypot*' 'Honeypot ingest errors'
+25:{"attributes":{"title":"Honeypot — enriched recent events","description":"All sensors with persona, site, asset, GeoIP, ASN, provider and OT context","column
+30:{"attributes":{"title":"Honeypot — industrial OT activity","description":"Conpot PLC, S7, IEC-104, Guardian and Kamstrup personas","columns":["event.sensor",
+35:{"attributes":{"title":"Honeypot — executed commands and credentials","description":"Cowrie and multipot commands with session/source context, plus SSH clien
+40:{"attributes":{"title":"Honeypot — payloads and downloads","description":"Captured hashes, URLs and source attribution","columns":["event.sensor","honeypot.p
+45:{"attributes":{"title":"Suricata — enriched alerts","description":"IDS alerts with GeoIP/ASN and flow context","columns":["source.ip","source.geo.country_iso
+50:{"attributes":{"title":"Pipeline — rejected/dead-letter events","description":"Filebeat records rejected by Elasticsearch with the original document and caus
+55:{"attributes":{"title":"OT - process and PLC state changes","description":"High-impact S7, Modbus and DNP3 write, operate, restart, start, stop, download and
+60:{"attributes":{"title":"IDS - local honeypot rules","description":"Alerts produced by the local HONEYPOT rule set, including OT ATT&CK metadata","columns":["
+65:{"attributes":{"title":"Investigation - attack progression","description":"Chronological sensor, credential, command and payload context; filter source.ip or
+70:{"attributes":{"title":"XORE Honeypot — enriched investigation","description":"Unified dashboard for honeypots, OT personas, commands, payloads, GeoIP/ASN, I
+75:{"attributes":{"title":"XORE OT - control activity and ATT&CK","description":"Focused S7, Modbus and DNP3 process-change investigation with local rule and ch
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== any 'intelligence' in main.rs (case-insens) ===" && grep -niE 'intelligence' arcane/home/honeypot-dashboard/backend-service/src/main.rs | cut -c1-150; echo "(empty = no route)"; echo; echo "=== frontend intelligence page ==="; grep -rn 'store/intelligence\|intelligence/archive' arcane/home/honeypot-dashboard/frontend-next/src/ | head -5; echo; echo "=== kibana-setup service name in init compose ==="; grep -n -B2 -A3 'kibana-setup' arcane/home/honeypot-init/compose.yml | head -20
+=== any 'intelligence' in main.rs (case-insens) ===
+(empty = no route)
+
+=== frontend intelligence page ===
+
+=== kibana-setup service name in init compose ===
+19-#   service_completed_successfully, because that condition cannot cross a
+20-#   Compose project boundary -- it only resolves against a service defined
+21:#   in the same file. persona-apply and honeypot-kibana-setup need no
+22-#   marker: log-init depends on persona-apply within this same file, and
+23:#   nothing outside this stack depends on honeypot-kibana-setup at all.
+24-#
+25-#   state/init-markers/ must be mode 777 on the host before this stack's
+26-#   first run. The jobs that write into it run as different container
+--
+30-#   a manual bootstrap needs the same `install -d -m 777`.
+31-#
+32:#   honeynet. elasticsearch-setup, honeypot-kibana-setup, and arkime-init
+33-#   reach elasticsearch/kibana in the main stack over this network, which
+34-#   APIARY creates with a fixed name (not project-prefixed)
+35-#   specifically so a second stack can attach to it.
+--
+265-          memory: 512M
+266-
+267:  honeypot-kibana-setup:
+268-    <<: *runtime-defaults
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== frontend route files ===" && git ls-files 'arcane/home/honeypot-dashboard/frontend-next/src/routes/*' | sed 's|.*/routes/||' | sort && echo && echo "=== dynamic route dirs ===" && git ls-files 'arcane/home/honeypot-dashboard/frontend-next/src/routes/*/**' | sed 's|.*/src/routes/||' | sort | head -30
+=== frontend route files ===
+agent-campaigns.tsx
+alerts.tsx
+api/artifact.$kind.$key.$filename.ts
+api/canarytoken.$id.download.ts
+api/chart.$name.ts
+api/export.$name.ts
+api/live.ts
+api/payload.$hash.download.ts
+api/raw-report.$kind.$sha.ts
+api/recording.$shasum.$format.ts
+api/report.$id.pdf.ts
+api/topology.flow.ts
+attackers.tsx
+auth/callback.ts
+auth-events.tsx
+auth/login.ts
+auth/logout.test.ts
+auth/logout.ts
+bff.$.ts
+bff-mounted.$.ts
+campaigns.tsx
+canarytokens.tsx
+cape.$sha.tsx
+cape.index.tsx
+-clientHrefs.test.ts
+clusters.tsx
+commands.tsx
+credentials.tsx
+dead-letters.tsx
+event.$id.tsx
+events.tsx
+export.portbridge-manual-blackhole[.]txt.ts
+ghidra.$sha.tsx
+github-analysis.$sha.tsx
+github-analysis.index.tsx
+healthz.ts
+history.tsx
+index.tsx
+investigate.cidr.$cidr.tsx
+investigate.cluster.tsx
+investigate.ip.$ip.tsx
+investigate.lookup.tsx
+ips.tsx
+kill-chain.tsx
+llm-analysis.tsx
+metrics.ts
+ml-anomalies.tsx
+payload-analysis.$hash.tsx
+payloads.tsx
+payload-workbench.results.tsx
+problem-reports.tsx
+recordings.tsx
+reports.tsx
+revdeck.$sha.tsx
+revdeck.index.tsx
+__root.tsx
+-routeShape.test.ts
+sandbox.$job.tsx
+sandbox.vnc.tsx
+search.tsx
+sensors.$sensor.tsx
+sensors.index.tsx
+sessions.$id.tsx
+settings.tsx
+source-health.tsx
+topology.tsx
+tty-replay.$shasum.tsx
+
+=== dynamic route dirs ===
+api/artifact.$kind.$key.$filename.ts
+api/canarytoken.$id.download.ts
+api/chart.$name.ts
+api/export.$name.ts
+api/live.ts
+api/payload.$hash.download.ts
+api/raw-report.$kind.$sha.ts
+api/recording.$shasum.$format.ts
+api/report.$id.pdf.ts
+api/topology.flow.ts
+auth/callback.ts
+auth/login.ts
+auth/logout.test.ts
+auth/logout.ts
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && grep -rn "store/intelligence\|intelligence" arcane/home/honeypot-dashboard/frontend-next/src/ | cut -c1-170 | head -10; echo "=== who writes dashboard-intelligence-archive-v1 ==="; grep -rn 'dashboard-intelligence-archive-v1' --include='*.rs' --include='*.py' --include='*.go' --include='*.sh' --include='*.yml' . 2>/dev/null | grep -v node_modules | cut -c1-170 | head
+arcane/home/honeypot-dashboard/frontend-next/src/routes/attackers.tsx:144:// attckTechniqueURL (intelligence.go:42) — the canonical MITRE page for a
+=== who writes dashboard-intelligence-archive-v1 ===
+./arcane/home/honeypot-dashboard/backend-service/src/stores.rs:400:        "intelligence" => ("dashboard-intelligence-archive-v1", "generated", "date", &[]),
+./arcane/home/honeypot-init/analysis/elasticsearch-setup.sh:1549:# ml-worker-metrics, ml-worker-state, dashboard-intelligence-archive-v1, and
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && sed -n '1540,1570p' arcane/home/honeypot-init/analysis/elasticsearch-setup.sh
+# This is intentionally a single-node analysis cluster. Replica shards cannot
+# be allocated here and only make cluster health yellow; primaries retain data.
+curl -fsS -X PUT "$es_url/_all/_settings?expand_wildcards=all" \
+  -H 'Content-Type: application/json' \
+  -d '{"index.number_of_replicas":0}' >/dev/null || true
+
+# #787: the PUT above only reaches indices that already exist the moment this
+# script runs. auth-events-worker-state, auth-failure-events, ml-anomalies,
+# ml-worker-metrics, ml-worker-state, dashboard-intelligence-archive-v1, and
+# dashboard-payload-bytes-v1 have no index template of their own (they're
+# dynamically created on each producer's first write, which can happen well
+# after this script's one-time pass) -- confirmed live, all seven picked up
+# Elasticsearch's built-in default of 1 replica instead and sat permanently
+# yellow on this single-node cluster. A lowest-priority catch-all template
+# closes this for good: every other template above sets its own
+# number_of_replicas explicitly and outranks this one on priority, so this
+# only ever applies to an index nothing more specific already covers.
+#
+# EXCEPT arkime_sessions3-*/arkime_history_v1-*, explicitly excluded below.
+# Elasticsearch's own documented precedence rule: when ANY composable index
+# template (the modern _index_template API, what this whole script and
+# every "priority": N template above uses) matches an index, EVERY legacy
+# template (the old _template API) is ignored outright for that index, not
+# merged -- even a priority-1 catch-all like this one wins outright over a
+# legacy template with no priority concept at all. Arkime's own db.pl
+# still creates its real field-typing templates (arkime_sessions3_template/
+# _ecs_template, arkime_history_v1_template) via that legacy API, and this
+# catch-all's original "*" pattern silently shadowed them completely --
+# confirmed live: every arkime_sessions3-* index's source.ip/destination.ip
+# fell through to Elasticsearch's own dynamic string default (text +
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== does analysis/kibana-export.sh exist? ===" && ls -la analysis/kibana-export.sh analysis/kibana-import.sh analysis/backup-honeypot.sh analysis/analyze.py 2>&1 | cut -c1-100; echo; echo "=== does dashboard/frontend exist? ==="; ls -d dashboard/frontend 2>&1; ls -d arcane/home/honeypot-dashboard/frontend-next 2>&1; echo; echo "=== 'dashboard/frontend' mentions in my files ==="; grep -n 'dashboard/frontend' docs/OPERATIONS.md
+=== does analysis/kibana-export.sh exist? ===
+-rw-r--r--. 1 xore xore 11947 Sep 27 12:28 analysis/analyze.py
+-rwxr-xr-x. 1 xore xore 10756 Sep 27 12:28 analysis/backup-honeypot.sh
+-rwxr-xr-x. 1 xore xore  1829 Sep 27 12:28 analysis/kibana-export.sh
+-rwxr-xr-x. 1 xore xore  1172 Sep 27 12:28 analysis/kibana-import.sh
+
+=== does dashboard/frontend exist? ===
+ls: cannot access 'dashboard/frontend': No such file or directory
+arcane/home/honeypot-dashboard/frontend-next
+
+=== 'dashboard/frontend' mentions in my files ===
+173:  a transient notification. Browser API contracts live in `dashboard/frontend`
+> build · stealth
+Now let me apply the OPERATIONS.md fixes:
+[0m← [0mEdit docs/OPERATIONS.md
+Index: docs/OPERATIONS.md
+===================================================================
+--- docs/OPERATIONS.md
++++ docs/OPERATIONS.md
+@@ -169,9 +169,10 @@
+   diagnostics. Alerts have persistent cooldown/acknowledgment, live refresh uses
+   SSE, and events pivot directly to Kibana, EveBox, Arkime, and VirusTotal.
+   Event tables support keyboard-accessible sorting, selectable columns, and an
+   expandable normalized-row JSON view; live events on investigation pages raise
+-  a transient notification. Browser API contracts live in `dashboard/frontend`
++  a transient notification. Browser API contracts live in
++  `arcane/home/honeypot-dashboard/frontend-next`
+   as strict TypeScript and compile to the committed, dependency-free production
+   bundle, so Node.js is only a development tool and never part of the container.
+ - **Operational APIs** — `/metrics` exposes Prometheus text metrics for event,
+   sensor, ingestion, Filebeat, runtime, dead-letter, and YARA health.
+
+> build · stealth
+[0m← [0mEdit docs/OPERATIONS.md
+Index: docs/OPERATIONS.md
+===================================================================
+--- docs/OPERATIONS.md
++++ docs/OPERATIONS.md
+@@ -118,9 +118,9 @@
+   exactly which cross-sensor, credential, payload, alert, or fingerprint factors
+   produced their correlation score. The navbar alert badge shows unacknowledged
+   alert state, while source health uses neutral metric tiles for feeds,
+   Elasticsearch, Filebeat, and dead letters.
+-  `/api/campaigns` exposes the same correlation data. A balanced recent feed
++  `/api/v1/campaigns` exposes the same correlation data. A balanced recent feed
+   prevents one noisy sensor from hiding lower-volume sensors. The
+   portbridge connection log is used only to recover real source IPs; it is not
+   counted as a sensor or displayed as an event.
+   The overview attack map uses the vendored Leaflet 1.9.4 client with a
+
+> build · stealth
+[0m← [0mEdit docs/OPERATIONS.md
+Index: docs/OPERATIONS.md
+===================================================================
+--- docs/OPERATIONS.md
++++ docs/OPERATIONS.md
+@@ -137,10 +137,11 @@
+   hardcodes both values outright (`frontend-next/src/components/
+   OverviewPanels.tsx`), so there is no basemap env surface to set anymore.
+   The hourly activity chart also exposes exact counts on hover/focus. The 24-hour
+   KPI compares activity with the preceding 24 hours and labels large changes;
+-  source health reports dashboard heap, reserved and cgroup memory, uptime, and
+-  goroutine count through the same `/api/runtime` contract.
++  source health reports dashboard process uptime and memory (RSS + virtual)
++  as the runtime card on `/api/v1/source-health` — the Go heap/goroutine
++  figures that card used to show have no Rust equivalent and are gone.
+   Event metadata is directly pivotable: sessions, HASSH/JA3/JA4/User-Agent
+   fingerprints, exact commands and credentials, HTTP paths, IDS signatures and
+   categories, payload hashes, ASNs, organizations, and provider classes all
+   open their related events. Source-health tail counts open normalized events;
+
+> build · stealth
+[0m← [0mEdit docs/OPERATIONS.md
+Index: docs/OPERATIONS.md
+===================================================================
+--- docs/OPERATIONS.md
++++ docs/OPERATIONS.md
+@@ -176,10 +176,13 @@
+   as strict TypeScript and compile to the committed, dependency-free production
+   bundle, so Node.js is only a development tool and never part of the container.
+ - **Operational APIs** — `/metrics` exposes Prometheus text metrics for event,
+   sensor, ingestion, Filebeat, runtime, dead-letter, and YARA health.
+-  `/dead-letters` investigates rejected Elasticsearch documents and
+-  `/api/intelligence/archive` exposes durable campaign/cluster snapshots.
++  `/dead-letters` investigates rejected Elasticsearch documents, and
++  durable campaign/cluster snapshots in `dashboard-intelligence-archive-v1`
++  are readable through the generic index-store route
++  `/api/v1/store/intelligence` (there is no dedicated intelligence route
++  in the Rust router).
+   Alert acknowledgements and captured-malware downloads require the
+   dashboard's own Keycloak-derived `admin` role.
+ - **Safe payload triage** — `yara-scanner` inventories all mounted Dionaea,
+   Cowrie, and script captures without network access or execution. Its results
+
+> build · stealth
+[0m✗ [0mEdit docs/OPERATIONS.md failed
+[91m[1mError: [0mCould not find oldString in /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs/docs/OPERATIONS.md. It must match exactly, including whitespace and indentation.
+> build · stealth
+> build · stealth
+[0m→ [0mRead docs/OPERATIONS.md [90m[limit=14, offset=44][0m
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && S=arcane/home/honeypot-init/analysis/elasticsearch-setup.sh && echo "=== _index_template PUTs ===" && grep -cE '_index_template/' $S && grep -oE '_index_template/[a-z0-9{}$_:-]+' $S | sed 's|_index_template/||' | sort -u | nl && echo "=== default_pipeline geoip-honeypot count ===" && grep -c '"index.default_pipeline": "geoip-honeypot"' $S && echo "=== all default_pipeline values ===" && grep -oE '"index.default_pipeline": "[^"]*"' $S | sort | uniq -c
+=== _index_template PUTs ===
+25
+     1	${dashboard_settings_index}
+     2	${index_name
+     3	cowrie-ttylog
+     4	dashboard-alert-state
+     5	dashboard-backend-app
+     6	dashboard-bff-app
+     7	dashboard-generated-reports
+     8	dashboard-payload-inventory
+     9	dashboard-problem-reports
+    10	dashboard-static-analysis
+    11	dashboard-workbench-recipes
+    12	dashboard-workbench-runs
+    13	dionaea-incidents
+    14	extracted-files
+    15	ghidra-report-artifacts
+    16	honeypot-dead-letter
+    17	honeypot-events-v2
+    18	huginn-events
+    19	portbridge-events
+    20	sandbox-export-artifacts
+    21	single-node-replica-default
+    22	suricata-events
+    23	traefik-access
+    24	zeek-events
+    25	zeek-proxy-events
+=== default_pipeline geoip-honeypot count ===
+8
+=== all default_pipeline values ===
+      8 "index.default_pipeline": "geoip-honeypot"
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && S=arcane/home/honeypot-init/analysis/elasticsearch-setup.sh && echo "=== every _index_template/ occurrence with line no ===" && grep -nE '_index_template/' $S | cut -c1-110 && echo && echo "=== the for-loop spec list ===" && sed -n '/^for spec in/,/^do/p' $S && echo "=== dashboard_settings_index value ===" && grep -n 'dashboard_settings_index=' $S
+=== every _index_template/ occurrence with line no ===
+350:curl -fsS -X PUT "$es_url/_index_template/honeypot-events-v2" \
+403:curl -fsS -X PUT "$es_url/_index_template/suricata-events" \
+464:curl -fsS -X PUT "$es_url/_index_template/portbridge-events" \
+524:curl -fsS -X PUT "$es_url/_index_template/zeek-events" \
+651:curl -fsS -X PUT "$es_url/_index_template/zeek-proxy-events" \
+707:curl -fsS -X PUT "$es_url/_index_template/extracted-files" \
+758:curl -fsS -X PUT "$es_url/_index_template/huginn-events" \
+804:curl -fsS -X PUT "$es_url/_index_template/traefik-access" \
+858:curl -fsS -X PUT "$es_url/_index_template/dashboard-backend-app" \
+895:curl -fsS -X PUT "$es_url/_index_template/dashboard-bff-app" \
+945:curl -fsS -X PUT "$es_url/_index_template/dionaea-incidents" \
+1014:  curl -fsS -X PUT "$es_url/_index_template/${index_name%-v1}" \
+1058:curl -fsS -X PUT "$es_url/_index_template/ghidra-report-artifacts" \
+1095:curl -fsS -X PUT "$es_url/_index_template/sandbox-export-artifacts" \
+1134:curl -fsS -X PUT "$es_url/_index_template/dashboard-alert-state" \
+1169:curl -fsS -X PUT "$es_url/_index_template/dashboard-problem-reports" \
+1223:  curl -fsS -X PUT "$es_url/_index_template/${dashboard_settings_index}" \
+1253:curl -fsS -X PUT "$es_url/_index_template/dashboard-static-analysis" \
+1295:curl -fsS -X PUT "$es_url/_index_template/dashboard-payload-inventory" \
+1335:curl -fsS -X PUT "$es_url/_index_template/dashboard-generated-reports" \
+1375:curl -fsS -X PUT "$es_url/_index_template/cowrie-ttylog" \
+1407:curl -fsS -X PUT "$es_url/_index_template/dashboard-workbench-runs" \
+1464:curl -fsS -X PUT "$es_url/_index_template/dashboard-workbench-recipes" \
+1502:curl -fsS -X PUT "$es_url/_index_template/honeypot-dead-letter" \
+1616:curl -fsS -X PUT "$es_url/_index_template/single-node-replica-default" \
+
+=== the for-loop spec list ===
+for spec in "suricata-7d:${suricata_days}d" \
+            "dead-letter-60d:$(( retention_days * 2 ))d" "portbridge-30d:${retention_days}d" \
+            "dionaea-incidents-30d:${retention_days}d" \
+            "traefik-30d:${retention_days}d" \
+            "zeek-30d:${retention_days}d" "zeek-proxy-30d:${retention_days}d" "huginn-30d:${retention_days}d" \
+            "zeek-60d:$(( retention_days * 2 ))d" "zeek-proxy-60d:$(( retention_days * 2 ))d" \
+            "extracted-files-30d:${retention_days}d" \
+            "dashboard-app-30d:${retention_days}d" \
+            "analysis-results-180d:$(( retention_days * 6 ))d"; do
+  name=${spec%%:*}
+  age=${spec#*:}
+  curl -fsS -X PUT "$es_url/_ilm/policy/$name" \
+    -H 'Content-Type: application/json' \
+    --data-binary "{\"policy\":{\"phases\":{\"hot\":{\"actions\":{}},\"delete\":{\"min_age\":\"$age\",\"actions\":{\"delete\":{}}}}}}" >/dev/null
+done
+for spec in \
+  "ghidra-analysis-v1:ghidra" \
+  "sandbox-analysis-v1:sandbox" \
+  "github-analysis-v1:github_analysis" \
+  "workbench-runs-v1:workbench" \
+  "cape-analysis-v1:cape" \
+  "revdeck-analysis-v1:revdeck" \
+  "yara-analysis-v1:yara"
+do
+=== dashboard_settings_index value ===
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && grep -n 'dashboard_settings_index' arcane/home/honeypot-init/analysis/elasticsearch-setup.sh | cut -c1-160 && echo "=== which 8 templates set geoip-honeypot ===" && python3 -c "
+import re
+s=open('arcane/home/honeypot-init/analysis/elasticsearch-setup.sh').read().split('\n')
+cur=None
+for i,l in enumerate(s,1):
+    m=re.search(r'_index_template/([a-z0-9{}_$:-]+)', l)
+    if m: cur=(i,m.group(1))
+    if 'index.default_pipeline\": \"geoip-honeypot' in l:
+        print(f'  line {cur[0]}: {cur[1]}')
+"
+1222:for dashboard_settings_index in dashboard-config-v1 dashboard-users-v1 dashboard-reports-definitions-v1; do
+1223:  curl -fsS -X PUT "$es_url/_index_template/${dashboard_settings_index}" \
+1226:  "index_patterns": ["'"${dashboard_settings_index}"'"],
+=== which 8 templates set geoip-honeypot ===
+  line 350: honeypot-events-v2
+  line 403: suricata-events
+  line 464: portbridge-events
+  line 524: zeek-events
+  line 651: zeek-proxy-events
+  line 707: extracted-files
+  line 758: huginn-events
+  line 804: traefik-access
+> build · stealth
+[0m← [0mEdit docs/OPERATIONS.md
+Index: docs/OPERATIONS.md
+===================================================================
+--- docs/OPERATIONS.md
++++ docs/OPERATIONS.md
+@@ -41,11 +41,12 @@
+   [arkime/config.ini](../arcane/home/honeypot-elk/arkime/config.ini). Sessions
+   get country + ASN. (#2713: this used to point at a separate,
+   never-automated `arkime/geo/` directory populated by hand from db-ip.com —
+   retired in favor of the same files everything else already uses.)
+-- **Elasticsearch** enriches every `suricata-*` and `honeypot-*` event through
++- **Elasticsearch** enriches every `suricata-*` and `honeypot-v2-*` event (and
++  the portbridge, zeek, extracted-files, huginn and traefik families) through
+   the `geoip-honeypot` ingest pipeline (set as `index.default_pipeline` on 8 of
+-  the init stack's 27 index templates), writing ECS `source.geo` / `source.as` / `destination.geo`
++  the init stack's 33 index templates), writing ECS `source.geo` / `source.as` / `destination.geo`
+   with city-level lat/lon — this is what powers Kibana maps
+   (`source.geo.location` is mapped as `geo_point`), from
+   `GeoLite2-City.mmdb` mounted at
+   `analysis/geoip/ → /usr/share/elasticsearch/config/ingest-geoip`, with
+
+> build · stealth
+[0m✗ [0mEdit docs/OPERATIONS.md failed
+[91m[1mError: [0mCould not find oldString in /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs/docs/OPERATIONS.md. It must match exactly, including whitespace and indentation.
+> build · stealth
+[0m→ [0mRead docs/OPERATIONS.md [90m[limit=14, offset=222][0m
+> build · stealth
+[0m← [0mEdit docs/OPERATIONS.md
+Index: docs/OPERATIONS.md
+===================================================================
+--- docs/OPERATIONS.md
++++ docs/OPERATIONS.md
+@@ -225,13 +225,14 @@
+   ```bash
+   python3 analysis/analyze.py /opt/stacks/apiary/logs --top 20
+   ```
+ - **Kibana** → `https://kibana.<domain>` (Keycloak via the oauth2-proxy gateway). Data views already exist:
+-  `honeypot-*` and `suricata-*` (time field `@timestamp`) plus **Arkime
++  `honeypot-v2-*` and `suricata-*` (time field `@timestamp`) plus
++  `dead-letter-honeypot*`, alongside **Arkime
+   Sessions** (`arkime_sessions3-*`, time field `lastPacket`). All suricata and
+   honeypot events carry `source.geo` / `source.as` — build maps on
+-  `source.geo.location`. Arkime sessions have country + ASN only (the GeoLite2
+-  Country database has no coordinates).
++  `source.geo.location`. Arkime sessions have country + ASN only (GeoLite2
++  Country has no coordinates).
+ - **Arkime** → `http://<HP_BIND>:19080` — full-packet session search over
+   everything Suricata captured on the VPS.
+ - **TANNER dashboard** → `https://tanner.<domain>` (Keycloak via the oauth2-proxy gateway) — web-attack analysis.
+ - Dionaea/Conpot write their own JSON into the shared volume for jq/ELK; the
+
+> build · stealth
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== DISK_CHECK_PATHS / DISK_WARN_PERCENT_FREE ===" && grep -rn 'DISK_CHECK_PATHS\|DISK_WARN_PERCENT_FREE' arcane/home/honeypot-utilities/ | cut -c1-170; echo; echo "=== GEOIPUPDATE_FREQUENCY + hp-geoipupdate ==="; grep -rn 'GEOIPUPDATE_FREQUENCY\|container_name:.*geoipupdate\|geoipupdate' arcane/home/honeypot-init/compose.yml | cut -c1-150 | head; echo; echo "=== .kibana claim: kibana export script ==="; grep -nE '\.kibana|save' analysis/kibana-export.sh | cut -c1-150 | head
+=== DISK_CHECK_PATHS / DISK_WARN_PERCENT_FREE ===
+arcane/home/honeypot-utilities/analysis/disk-space-check.sh:15:warn_percent_free="${DISK_WARN_PERCENT_FREE:-15}"
+arcane/home/honeypot-utilities/analysis/disk-space-check.sh:20:paths="${DISK_CHECK_PATHS:-honeypot-logs=/logs:honeypot-state=/state:dionaea-payloads=/dionaea-lib}"
+arcane/home/honeypot-utilities/compose.yml:234:      - DISK_WARN_PERCENT_FREE=15
+arcane/home/honeypot-utilities/compose.yml:236:      - DISK_CHECK_PATHS=honeypot-logs=/logs:honeypot-state=/state:dionaea-payloads=/dionaea-lib
+
+=== GEOIPUPDATE_FREQUENCY + hp-geoipupdate ===
+8:# exception: geoipupdate (#123) is long-running by design (it loops on its
+472:  # file, geoipupdate is long-running (restart: unless-stopped, loops
+473:  # internally on GEOIPUPDATE_FREQUENCY) and nothing depends on it
+480:  geoipupdate:
+481:    image: ghcr.io/maxmind/geoipupdate:v8.0.0@sha256:51e70dd6f16cd3e4d845ac02d09940b10772a75b9d741427d235a78570923c1d
+482:    container_name: hp-geoipupdate
+492:      - GEOIPUPDATE_FREQUENCY=24
+506:  # #244: same shape as geoipupdate above -- long-running (restart:
+513:  # the full apiary checkout (like geoipupdate's own volume above), not a
+518:  # geoipupdate this needs no credentials, but it does add new outbound
+
+=== .kibana claim: kibana export script ===
+7:# repo's ELK setup (elasticsearch-setup.sh) never touched Kibana saved
+9:# .kibana index, with no recovery path on an ES reset/migration/upgrade.
+25:curl -fsS -X POST "$kibana_url/api/saved_objects/_export" \
+31:# The last line is a summary object ({"exportedCount":N,...}), not a saved
+34:# saved object. Pull exportedCount out of that line instead of counting.
+36:echo "kibana-export: wrote ${count:-an unknown number of} saved object(s) to $output"
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && grep -nE 'image:.*(kibana|elasticsearch)' arcane/home/honeypot-elk/compose.yml | cut -c1-140
+48:    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.3@sha256:f456578fc2a620a8a4f4c21d070fff1f6070345adb2be5e5626b65be72aea350
+135:    image: docker.elastic.co/kibana/kibana:9.5.3@sha256:4530cd98c529bc913ae364067f0233ab6cfb9a560644480b365b45f74a18dbf3
+> build · stealth
+[0m← [0mEdit docs/OPERATIONS.md
+Index: docs/OPERATIONS.md
+===================================================================
+--- docs/OPERATIONS.md
++++ docs/OPERATIONS.md
+@@ -191,10 +191,11 @@
+ - **Backups** — run `sudo analysis/backup-honeypot.sh`; Elasticsearch uses its
+   snapshot API and other named volumes are archived separately. Test and restore
+   procedures are in [`docs/analysis/RECOVERY.md`](analysis/RECOVERY.md).
+ - **Kibana saved objects** (dashboards, visualizations, data views you build
+-  by hand) live only in Elasticsearch's `.kibana` index — an ES reset,
+-  migration, or upgrade loses them with no recovery path unless you've
++  by hand) live only in Elasticsearch's Kibana saved-objects index — on this
++  stack's Kibana 9.5.3 that is `.kibana_<n>`, not a bare `.kibana` — so an ES
++  reset, migration, or upgrade loses them with no recovery path unless you've
+   exported first. Run `analysis/kibana-export.sh` before any ES-affecting
+   change (matching `KIBANA_URL` to how you reach Kibana — defaults to
+   `http://kibana:5601`, the in-cluster address); restore with
+   `analysis/kibana-import.sh`. **Export first, the same way you'd back up
+
+> build · stealth
