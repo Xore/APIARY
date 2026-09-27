@@ -47,15 +47,18 @@ flowchart TB
     containersHome["containers.yml — all image builds"]
     securityHome["security.yml — all CodeQL languages"]
     pagesHome["pages.yml artifact build"]
+    imageScanHome["image-security-scan.yml"]
   end
 
   prPush --> quality
   prPush -->|"PR: build only,<br/>never published"| containerBuild
+  prPush --> codeql
+  prPush --> pages
   mainPush --> quality
   mainPush --> containerBuild
   mainPush --> codeql
   mainPush --> pages
-  mainPush -.->|"every workflow's compute jobs —<br/>only after passing the ci-router<br/>trust gate + heartbeat; pull_request needs<br/>repo variable CI_HOMESERVER_PRS,<br/>and forks can never qualify"| ciSelfHosted
+  mainPush -.->|"those five workflows' ci-target jobs —<br/>only after passing the ci-router<br/>trust gate + heartbeat; pull_request needs<br/>repo variable CI_HOMESERVER_PRS,<br/>and forks can never qualify"| ciSelfHosted
 ```
 
 **`honeypot-ci` does not see `pull_request` by default, by design.** A
@@ -64,9 +67,11 @@ job; a self-hosted runner's job runs as a real process on real
 home-network infrastructure. A malicious test file in an unreviewed PR
 (`os.system(...)`, a crafted Go `TestMain`) would execute wherever that
 runner has access — the same reasoning `production-home`'s own deployment
-runner (below) already applies. Every workflow's executor routing (each
-caller's own `ci-target` job, which since #2571 always calls the shared
-`.github/workflows/ci-router.yml`) trusts
+runner (below) already applies. Executor routing is a caller-side job named
+`ci-target`, which since #2571 calls the shared
+`.github/workflows/ci-router.yml`. Five of the repo's twenty workflows have
+one: `quality.yml`, `containers.yml`, `security.yml`, `pages.yml` and
+`image-security-scan.yml`. It trusts
 push-to-main (already reviewed and merged), the `schedule` and
 `workflow_dispatch` (an operator's own machinery); same-repo pull
 requests need the repository variable `CI_HOMESERVER_PRS=true`, and fork
@@ -316,10 +321,14 @@ stack on the host lives entirely in Arcane's Git-sync machinery — see
 [ARCANE-GIT-SYNC.md](ARCANE-GIT-SYNC.md) for the full contract (its
 non-obvious cornerstones: creating a sync *is* an initial deploy, a sync
 materializes files without redeploying — live `redeploy_after_sync`
-defaults to 0, though the manifest schema cannot express it — and every
-synced stack runs `autoSync: false`: the #1507 tag-promotion /
-`production`-pointer policy was decided but never deployed, so all syncs
-track `main` and deploys are manual; ARCANE-GIT-SYNC.md's promotion
+defaults to 0, though the manifest schema cannot express it — and deploys
+are manual. #1507's tag-promotion / `production`-pointer policy was only
+half activated: #1943 (2026-08-25) put `branch: "production"` and three
+`autoSync: true` flags into `arcane/manifests/home-production.json`, so all
+39 entries now name that branch rather than `main` — but the live store
+still reads `auto_sync = 0` on every row, and `origin` has no
+`refs/heads/production` for the pointer to name, so nothing follows a
+promotion and deploys stay manual; ARCANE-GIT-SYNC.md's promotion
 section carries the live-state evidence).
 This workflow deliberately stopped touching those directories entirely:
 running an rsync/build loop alongside Arcane's own sync would put two
@@ -476,10 +485,9 @@ alert/intelligence history in the old one is gone.
 
 Everything else that was still monolithic as of the earlier revision of
 this section (`dionaea`, `payload-dedupe`, `yara-scanner`, and the Tanner
-group) has since split out too -- see the `honeypot-dionaea` and
-`honeypot-payload-analysis` section below; only the Tanner group remains in
-`APIARY`, as part of its own internal `depends_on` chain not yet
-worth splitting.
+group) has since split out too -- see the `honeypot-dionaea`,
+`honeypot-payload-analysis` and `honeypot-tanner` sections below. Nothing
+remains in `APIARY`: the root `docker-compose.yml` is `services: {}`.
 
 #### Dashboard redeploy (single replica; #266 rolling pair retired, #1659 legacy `dashboard` removed)
 
@@ -630,13 +638,26 @@ open handles into the log directories this script wipes for this target.
 ### honeypot-elk (#258)
 
 `arcane/home/honeypot-elk/compose.yml` bundles the ELK/analysis plane (`elasticsearch`,
-`kibana`, `filebeat`, `evebox`, `arkime-capture`, `arkime-viewer`,
-`pcap-sync`) into one stack at `/opt/stacks/honeypot-elk` -- the last group
+`kibana`, `filebeat`, `evebox`, `pcap-sync`, `arkime-pcap-init`,
+`arkime-capture`, `arkime-viewer`, `extracted-file-importer`, `zeek-proxy`)
+into one stack at `/opt/stacks/honeypot-elk` -- the last group
 that was still in the monolithic file. Kept together, not split further:
-all seven sit on the shared `honeynet` network and either read from or
-write to the one Elasticsearch instance, so splitting them apart would
-turn every one of those relationships into a cross-stack shared resource
-for services that only ever make sense running together.
+they share the one Elasticsearch instance, the `arkime-pcap` volume and the
+host's `logs/` bind-mount tree, so splitting them apart would turn every one
+of those relationships into a cross-stack shared resource for services that
+only ever make sense running together.
+
+The shared-network story is narrower than it looks, and the count above is
+not "ten on `honeynet`". Seven of the ten declare `honeynet` explicitly
+(`elasticsearch`, `kibana`, `filebeat`, `evebox`, `arkime-capture`,
+`arkime-viewer`, `extracted-file-importer`); `elasticsearch` is additionally
+on `llm-data`. `pcap-sync` and `arkime-pcap-init` declare no `networks:` at
+all and so ride the project's implicit default network -- `pcap-sync` moves
+rotated pcaps through host bind-mounts and a marker file, and
+`arkime-pcap-init` is a one-shot `chown` of the `arkime-pcap` volume, so
+neither needs the shared network. `zeek-proxy` sets `network_mode: host`
+outright and reaches the sensor plane through host-published ports, which is
+the point of it.
 
 `honeynet` and `llm-data` get the usual explicit shared `name:` treatment.
 `es-data` does **not**, despite appearances: `honeypot-init`'s
@@ -868,8 +889,9 @@ The install also drops two things next to the unit:
 
 The leading `+` runs that line as root even though the unit's own `User=`
 is the unprivileged runner account, so no new sudoers grant was needed
-(unlike `compose-project-state.py` above, this runs as part of the unit's
-own privileged startup rather than from inside a workflow step).
+(unlike `scripts/compose-project-state.py`, the narrow root helper for
+`compose-drift-watch.py`, this runs as part of the unit's own privileged
+startup rather than from inside a workflow step).
 
 **Why it exists.** A root process that writes into a runner's `_work`
 checkout leaves files the runner user can never delete, and
@@ -1072,7 +1094,7 @@ The `Pick cache backend` step therefore chooses per executor:
 the runner can actually write it, so a rebuild replay (#1609) recreates it
 rather than leaving a hand-made directory nobody records. If the step has
 not run on a given box, `Pick cache backend` emits a workflow warning and
-falls back to `type=gha` -- a slow build, not eighteen failed matrix rows.
+falls back to `type=gha` -- a slow build, not nineteen failed matrix rows.
 
 **Bounding it.** `type=local` has *no* eviction: every export leaves
 unreferenced blobs behind in `blobs/sha256/` forever.
@@ -1096,9 +1118,11 @@ gets to them. Deleting on close reclaims that quota immediately.
 `docker/login-action` targets `ghcr.io` and is gated
 `if: github.event_name != 'pull_request'`, so on a PR every base-image pull
 went out anonymous -- and Docker Hub meters anonymous pulls **per source
-IP**, at roughly 100 per 6h. With `CI_HOMESERVER_PRS=true` all 18 matrix
-rows leave this box through one address, and the tree carries **74
-non-`scratch` Hub `FROM` lines**. One cold run spends most of the budget;
+IP**, at roughly 100 per 6h. With `CI_HOMESERVER_PRS=true` all 19 matrix
+rows leave this box through one address, and the tree carries **75
+non-`scratch` `FROM` lines** across 56 tracked Dockerfiles, 68 of them
+resolving to Docker Hub (the other 7 are `mcr.microsoft.com`). One cold run
+spends most of the budget;
 the run after it fails with `toomanyrequests` on whichever rows happen to
 ask last. #2771's per-image `type=gha` scopes do not help: that cache holds
 *our* layers, never the base image, so every run re-resolves every `FROM`
@@ -1181,9 +1205,9 @@ flowchart TB
   checkout["actions/checkout"]
   key["VPS_SSH_KEY written to a<br/>temp file, mode 0600"]
   backup[("Snapshot: /root/vps-backups/<br/>pre-deploy-&lt;timestamp&gt;.tar.gz,<br/>10 most recent kept")]
-  rsync["rsync vps/ -> /root/vps/<br/>over SSH, excluding .env,<br/>traefik/certs/, traefik/dynamic.yml<br/>(VPS-owned, see table below)"]
+  rsync["rsync vps/ -> /root/vps/<br/>over SSH, excluding .env,<br/>traefik/certs/, traefik/dynamic.yml,<br/>secrets/ (VPS-owned, see table below)"]
   validate["SSH: docker compose config<br/>validates /root/vps/docker-compose.yml"]
-  up["SSH: docker compose up -d --build"]
+  up["SSH: docker compose up -d --build<br/>--remove-orphans (#2813)"]
   dynGen["Separate step: substitute DOMAIN<br/>into the committed *.honeypot.example<br/>placeholders, validate as YAML,<br/>no leftover placeholders --<br/>all BEFORE touching the VPS"]
   dynWrite["Copy to a temp path on the VPS,<br/>then write in place with cat --<br/>never copy-then-rename (see below:<br/>Traefik's bind mount tracks the<br/>inode, not the path)"]
   verify["Verify step: fail the job if certs<br/>or dynamic.yml are missing, empty,<br/>unparseable, or still placeholder"]
@@ -1211,10 +1235,14 @@ The VPS job runs on a short-lived GitHub-hosted Ubuntu runner:
    `/root/vps-backups/pre-deploy-<timestamp>.tar.gz`, keeping the ten most
    recent archives.
 5. `rsync` sends only the repository's `vps/` directory over SSH to
-   `/root/vps/`, **excluding** `traefik/dynamic.yml` (see below).
+   `/root/vps/`, **excluding** the four VPS-owned paths in the table below
+   (`.env`, `traefik/certs/`, `traefik/dynamic.yml`, `secrets/`).
 6. A second SSH command runs on the VPS, validates
    `/root/vps/docker-compose.yml`, and executes
-   `docker compose up -d --build`.
+   `docker compose up -d --build --remove-orphans`. The flag matters: a
+   service removed from `docker-compose.yml` otherwise leaves its container
+   running forever, which is how #2813 found `socat-hp-wordpot` still up a
+   week after #2469 retired wordpot and dropped its forwarder rule.
 7. A dedicated step generates the deployable `traefik/dynamic.yml` --
    substitutes `DOMAIN` for every `*.honeypot.example` placeholder in the
    committed template -- and validates the result (parses as YAML, no
@@ -1229,7 +1257,7 @@ The VPS job runs on a short-lived GitHub-hosted Ubuntu runner:
 ### Files the VPS owns, not the repository
 
 `--delete-delay` removes destination files that no longer exist under the
-repository's `vps/` directory, and overwrites the ones that do. Three paths are
+repository's `vps/` directory, and overwrites the ones that do. Four paths are
 therefore excluded from the main `rsync` because the VPS copy is authoritative
 (or, for `dynamic.yml`, because it needs different handling entirely):
 
@@ -1238,6 +1266,11 @@ therefore excluded from the main `rsync` because the VPS copy is authoritative
 | `.env` | Secrets and host-specific values. |
 | `traefik/certs/` | Issued TLS certificates. They do not exist in the repository, so an unexcluded `--delete-delay` deletes them, and the workflow cannot reissue them. |
 | `traefik/dynamic.yml` | Carries the deployment's real domain. The committed copy is a `*.honeypot.example` placeholder -- Traefik's file provider has no `${VAR}`-style substitution the way docker-compose already gives every other host-specific value in this repo, so this file can't just be templated in place the normal way. Deployed by its own dedicated step instead (step 7 above), which substitutes `DOMAIN` and writes the result separately. |
+| `secrets/` | Per-gateway OIDC cookie-secret/client-secret files (`OIDC_SECRETS_DIR=./secrets/oidc` in `vps/.env.example`). Git-ignored, so they are never present in the checkout at all -- and `--delete-delay` reads "absent from the source" as "delete it". That happened once for real and took down every oauth2-proxy gateway at the time, which is why the exclude exists. A client-secret is never regenerated: it has to match what is already registered with Keycloak, so recovering it means `kcadm get clients/<id>/client-secret`, and losing it means re-registering the client. |
+
+The pre-deploy backup step ahead of the bulk `rsync` archives the same four
+paths (`.env`, `traefik/certs`, `traefik/dynamic.yml`, `secrets/`) that
+actually exist, keeping the last ten under `/root/vps-backups/`.
 
 The certificates were lost once, in a single `target: both` run before that
 exclusion existed: Traefik fell back to self-signed and every router silently
@@ -1294,8 +1327,8 @@ scratch twice, reaching the same blocker both times.
 
 **No workflow edit is needed.** Every `secrets.VPS_*` / `secrets.DOMAIN`
 reference already sits inside a job that declares
-`environment: production-vps` — `deploy.yml`'s `vps` job (`:207`, environment
-at `:210`), `diagnostics.yml`'s `vps` job (`:252`/`:255`), and
+`environment: production-vps` — `deploy.yml`'s `vps` job (`:231`, environment
+at `:234`), `diagnostics.yml`'s `vps` job (`:292`/`:295`), and
 `vps-start-blackhole.yml`'s `start-blackhole-profile` job (`:22`/`:24`). The
 `home` jobs (`deploy.yml:21`, `diagnostics.yml:76`) read none of the five.
 Environment secrets also shadow repository secrets of the same name, so
@@ -1324,7 +1357,7 @@ source rather than the password manager, rotate it deliberately rather than
 as a side effect of the move.
 
 `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` (added 2026-09-01) are read only by
-`containers.yml:157-160`, which declares **no** `environment:` at all — so
+`containers.yml:157-162`, which declares **no** `environment:` at all — so
 they have to stay repository-scoped until that workflow gains one, and they
 are correctly out of this migration's scope rather than merely deferred. They
 are still the reason the repository-secret set grew from five to seven, which
@@ -1411,13 +1444,21 @@ diagnostics workflow itself.
 Home:
 GitHub -> outbound-polling self-hosted runner on homeserver
        -> local rsync /opt/stacks/apiary
-       -> Arcane compose.yml -> docker compose up
+       -> compose config --quiet (validation only, no `up`;
+          the root file is services: {})
+       -> Arcane's own Git-sync machinery materializes and
+          deploys stacks (ARCANE-GIT-SYNC.md)
 
 VPS:
 GitHub-hosted runner -> rsync + SSH over VPS_PORT
                      -> /root/vps
                      -> docker compose up on VPS
 ```
+
+The home path has not run a deploy in this workflow since #1502 — see
+"What deploy.yml actually runs (since #1502)" above for the full list of
+what it does instead. A `home` run that succeeds has still changed nothing
+on the host.
 
 Selecting `both` creates both jobs from the same workflow run. They share the
 `honeypot-production` concurrency group, but the home and VPS jobs are
