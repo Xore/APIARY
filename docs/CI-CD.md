@@ -15,6 +15,12 @@ Every push to `main` and every pull request runs:
 - actionlint over every workflow (warning-level ShellCheck in `run:` blocks),
   plus a zizmor security audit that fails on anything except the four rules
   #3313's hardening still owns (#3314);
+
+A red run also leaves evidence behind: machine-readable JUnit XML from the
+frontend unit, browser, and pytest suites, a retained Playwright report with
+per-failure traces, and the Rust test log. See
+[Test evidence retained on failure](#test-evidence-retained-on-failure-3319)
+below.
 - hadolint over every tracked Dockerfile, failing on warnings and errors
   (policy and exemptions in `.hadolint.yaml`, #3320);
 - CodeQL for Go, JavaScript/TypeScript, and Python;
@@ -170,6 +176,84 @@ and hourly (`scripts/main-health-watch.py`):
 
 Replay any past moment without side effects:
 `GITHUB_REPOSITORY=Xore/APIARY python3 scripts/main-health-watch.py --before 2026-09-25T10:00:00Z`.
+
+## Test evidence retained on failure (#3319)
+
+A red Quality run used to leave one thing behind: the log. Playwright traces,
+screenshots, and machine-readable results were all discarded, and a lane that
+was router-skipped or path-filtered looked identical in the checks list to one
+that ran and passed. Both are now fixed.
+
+### Artifacts
+
+Every upload uses `actions/upload-artifact` pinned by SHA, with a 7-day
+retention — long enough that the evidence is still there when a red run is
+picked up the following week, short enough that a busy `main` does not
+accumulate them indefinitely.
+
+| Lane | Artifact | Uploaded |
+| --- | --- | --- |
+| Dashboard frontend (next) | `frontend-next-unit-junit.xml` | `always()` |
+| Dashboard-next browser matrix | `playwright-junit.xml` | `always()` |
+| Dashboard-next browser matrix | `playwright-report/` + `test-results/` (HTML report, per-failure traces and screenshots) | `failure()` |
+| Dashboard backend-service (Rust) | `cargo-test.log` | `failure()` |
+| `scripts-and-compose` pytest rows | `ml-worker-junit.xml`, `auth-events-worker-junit.xml` | `always()` |
+
+JUnit XML is uploaded on `always()`, not only on failure, because it is the
+record of *what ran* rather than of what the exit code happened to be. The
+Playwright report and the Rust log are `failure()`-only: on a green run they
+hold nothing worth storing.
+
+The report files are all written under `.ci-artifacts/` at the workspace root,
+which is git-ignored. `playwright-report/` and `test-results/` stay where the
+Playwright config already put them inside `frontend-next/`.
+
+The Rust lane gets a log rather than JUnit XML on purpose: `cargo` has no
+built-in JUnit reporter, and its per-test result stream is only reachable
+through the unstable `--format json`. Retaining the full log is honest about
+that; converting it to XML here would mean a hand-rolled translation that
+could itself misreport a result.
+
+### The switch
+
+Both reporters are opt-in through a single environment variable,
+`CI_ARTIFACTS_DIR`, which the workflow sets and nothing else does:
+
+- `arcane/home/honeypot-dashboard/frontend-next/vitest.config.ts` adds
+  `junit` alongside the existing `default` reporter and writes
+  `frontend-next-unit-junit.xml` when it is set.
+- `arcane/home/honeypot-dashboard/frontend-next/playwright.config.ts` inserts
+  a `junit` reporter *between* the existing `github` and `html` reporters, so
+  inline PR annotations and the browsable report are unchanged.
+
+Gating on the variable rather than on `CI` is deliberate: the same `npm test`
+and `npm run test:browser` a developer runs locally, and that `deploy.yml`
+runs, keep their console output and write no report file.
+
+`trace: "retain-on-failure"` and `screenshot: "only-on-failure"` were already
+set in the Playwright config (#2034). What was missing was uploading what they
+produced, which is what the `failure()` step above does.
+
+### Lane summary
+
+Each aggregate job (**Go formatting and tests**, **Scripts and Compose**,
+**Quality**) renders a table into the run's step summary via
+`scripts/ci-lane-summary.py`, so a reader can see which executor ran and which
+twin the router skipped without opening the log. An executor pair (the
+homeserver job and its `-cloud` fallback) collapses to one row that names the
+leg that ran. The script reads `${{ toJSON(needs) }}` and is a pure function
+of it.
+
+A skip is not a pass. The script exits non-zero when a lane has no passing
+result behind it at all — a pair where *neither* twin reported is called out as
+*neither executor reported a result*, which is the state that used to read as
+green. One legitimately-skipped lane is accounted for explicitly: the
+`--allow-skip` flag carries a reason, and Quality passes
+`ai-attribution:pull_request only (#3329)` on non-PR events, matching the rule
+the gate itself already encodes.
+
+The script is covered by `scripts/tests/test_ci_lane_summary.py`, which runs
+in the `scripts-and-compose` matrix's `scripts/tests suite` row.
 
 ## Pull request workflow
 
