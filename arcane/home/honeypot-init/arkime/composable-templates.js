@@ -112,7 +112,16 @@ const LEGACY_IP_FIX = 'arkime-sessions3-ip-fix';
 // and re-shadows + regenerates here -- so the loss is one deploy of
 // number_of_replicas on newly created indices, not a permanent one. Kept out of
 // the shared init-markers volume, which is a *.done readiness contract.
-const SHADOW_FILE = process.env.SHADOW_FILE || '/tmp/arkime-composable-shadow.json';
+// The stash is one deploy's worth of deleted templates and the only record
+// that db.pl's originals existed. The `shadow` and `generate` passes are two
+// separate processes, so the path is a fixed name under os.tmpdir() rather
+// than a fresh mkdtemp (which would not be shared). writeShadow() creates the
+// parent 0700 and the file 0600, so it is not exposed through a
+// world-writable /tmp -- CodeQL js/insecure-temp-file, and a real
+// pre-creation/symlink window on a shared host. SHADOW_FILE still moves it.
+const SHADOW_FILE =
+  process.env.SHADOW_FILE ||
+  path.join(os.tmpdir(), 'arkime-composable-shadow', 'shadow.json');
 const DRY_RUN = Boolean(process.env.DRY_RUN);
 
 // #3283: same knob, same 30-day default as elasticsearch-setup.sh's
@@ -240,8 +249,10 @@ function readShadow() {
 }
 
 function writeShadow(shadow) {
-  fs.mkdirSync(path.dirname(SHADOW_FILE), { recursive: true });
-  fs.writeFileSync(SHADOW_FILE, JSON.stringify(shadow, null, 2) + '\n');
+  // 0700 dir + 0600 file, and never widened on rewrite: the stash holds the
+  // full body of templates that were deleted from the cluster.
+  fs.mkdirSync(path.dirname(SHADOW_FILE), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(SHADOW_FILE, JSON.stringify(shadow, null, 2) + '\n', { mode: 0o600 });
 }
 
 async function shadow() {

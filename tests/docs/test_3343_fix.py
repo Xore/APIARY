@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import pathlib
 import shutil
 import subprocess
@@ -674,3 +675,26 @@ def test_unknown_subcommand_fails_loudly(tmp_path):
         out = _run(url, tmp_path / "s.json", "translate")
         assert out.returncode != 0
         assert "unknown subcommand" in out.stderr
+
+
+@node_only
+def test_shadow_stash_is_not_world_readable(tmp_path):
+    """The stash holds the full body of templates deleted from the cluster, so
+    it must not land world-readable. CodeQL flags a direct /tmp write
+    (js/insecure-temp-file); the fix keeps a fixed path -- the shadow and
+    generate passes are separate processes sharing it -- but creates the
+    parent 0700 and the file 0600."""
+    shadow = tmp_path / "nested" / "s.json"
+    stub = _StubElasticsearch(
+        index_templates={
+            "single-node-replica-default": CATCH_ALL,
+            "arkime-sessions3-ip-fix": IP_FIX,
+        },
+        legacy_templates={},
+    )
+    with _serving(stub) as url:
+        out = _run(url, shadow, "shadow")
+    assert out.returncode == 0, out.stderr
+    assert shadow.exists()
+    assert stat.S_IMODE(shadow.stat().st_mode) == 0o600, oct(shadow.stat().st_mode)
+    assert stat.S_IMODE(shadow.parent.stat().st_mode) == 0o700, oct(shadow.parent.stat().st_mode)
