@@ -51,6 +51,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import urllib.parse
 from contextlib import contextmanager
@@ -230,16 +231,50 @@ class _Routing(dict):
         return computed if computed is not None else default
 
 
-def run_script(routes: dict, *, env: dict | None = None, expect_ok: bool = True):
-    """Run the real script against a stub cluster; return (calls, result)."""
-    with stub_cluster(routes) as server:
+def run_script(routes: dict, *, env: dict | None = None, args: list[str] | None = None,
+               expect_ok: bool = True):
+    """Run the real script against a stub cluster; return (calls, result).
+
+    `args` is the subcommand, and the default (no subcommand) is the script's
+    own `generate`. The two are separate processes in production too -- the
+    stash is written by `shadow` either side of db.pl and read by `generate`
+    after it -- so a test that wants to see stash state travel has to drive
+    both.
+
+    The stash gets a fresh private path per call, and that is load-bearing
+    rather than tidiness. `SHADOW_FILE` unset means the script falls back to
+    its default, a *fixed* name under `os.tmpdir()` -- one name shared by
+    every run of this suite, by test_3343_fix.py, and by any other job
+    running on the same host. composable-templates.js opens that path 0700
+    and the file 0600, so the moment anything else owns the directory first,
+    every run here dies with
+
+        reading /tmp/arkime-composable-shadow/shadow.json: EACCES
+
+    before it asserts anything. That is not hypothetical: this suite goes
+    green in a fresh container and red on the homeserver runner, where
+    /tmp/arkime-composable-shadow is long-lived and shared. Which is also
+    why the fix is SHADOW_FILE and not a chmod -- a suite must not depend on
+    the permissions of a machine-wide directory it does not own, and it must
+    not need to be able to write outside its own tmpdir to be run at all.
+
+    The env stays otherwise minimal on purpose (it is a closed set, not
+    os.environ), so adding SHADOW_FILE here rather than inheriting the
+    parent environment keeps that property.
+    """
+    with stub_cluster(routes) as server, tempfile.TemporaryDirectory() as stash:
         # The handler records into server.calls; the computed-route hook needs
         # the same object, so it is wired here rather than in __init__.
         handler_calls = server.calls
-        environ = {"PATH": "/usr/bin:/bin", "ARKIME__elasticsearch": f"http://127.0.0.1:{server.server_address[1]}"}
+        shadow_file = pathlib.Path(stash) / "shadow.json"
+        environ = {
+            "PATH": "/usr/bin:/bin",
+            "ARKIME__elasticsearch": f"http://127.0.0.1:{server.server_address[1]}",
+            "SHADOW_FILE": str(shadow_file),
+        }
         environ.update(env or {})
         result = subprocess.run(
-            [NODE, str(SCRIPT)], capture_output=True, text=True, env=environ, timeout=60
+            [NODE, str(SCRIPT), *(args or [])], capture_output=True, text=True, env=environ, timeout=60
         )
         calls = list(handler_calls)
     if expect_ok:
@@ -485,6 +520,109 @@ def test_a_cluster_with_no_sessions_indices_still_succeeds():
     calls, result = run_script(_default_responses(indices=[]))
     assert any(path == CAT_PATH for _, path, _ in calls)
     assert "0 index(es) adopted, 0 already on" in result.stdout, result.stdout
+
+
+# --------------------------------------------------------------------------
+# The stash this suite uses
+# --------------------------------------------------------------------------
+
+
+@needs_node
+def test_the_stash_is_ours_alone_and_never_the_default_tmp_path(tmp_path):
+    """A run must not consult composable-templates.js's default stash path.
+
+    The regression this pins: run_script passed no SHADOW_FILE, so the script
+    fell back to its default -- one fixed name under os.tmpdir(), opened 0700
+    with the file 0600. On the homeserver runner that directory already
+    belongs to another user, and all 20-odd tests in this file died on
+    `EACCES` before reaching an assert, while the same commit was green in a
+    clean container. A suite whose pass/fail depends on who owns a shared
+    directory reports the machine, not the code.
+
+    TMPDIR is pointed at a private directory and that default path is
+    poisoned, which reproduces the runner's condition exactly -- the script
+    resolves os.tmpdir() to this dir, computes exactly the path that is
+    unreadable, and would fail on it if it consulted the default at all.
+    Reproducing the condition rather than fixing the machine is the point:
+    planting a decoy in the real /tmp would make this test depend on, and
+    disturb, the same shared state it is asserting independence from.
+    """
+    hostile_root = tmp_path / "hostile-tmp"
+    decoy_dir = hostile_root / "arkime-composable-shadow"
+    decoy_dir.mkdir(parents=True)
+    decoy = decoy_dir / "shadow.json"
+    decoy.write_text("{}", encoding="utf-8")
+    # Unreadable rather than merely foreign-owned, so the check does not
+    # depend on which uid the suite runs as. The directory stays traversable
+    # so the failure under test is the file open -- which is the one the
+    # homeserver runner produced.
+    decoy.chmod(0o000)
+
+    calls, result = run_script(_default_responses(), env={"TMPDIR": str(hostile_root)})
+
+    assert result.returncode == 0, (
+        "run_script consulted the default stash path under TMPDIR:\n"
+        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    # And the real work still happened -- isolation is not a way to make the
+    # script a no-op.
+    assert body_for(calls, "PUT", f"/_ilm/policy/{POLICY}") is not None, (
+        "the run did nothing, so a green result here would prove nothing"
+    )
+
+
+@needs_node
+def test_two_runs_do_not_see_each_others_stash(tmp_path):
+    """Each run gets its own stash, so no test can inherit another's state.
+
+    The same fixed-default-path bug as the test above, seen from the other
+    side: even with nothing else on the host, two runs into one path let the
+    second see what the first stashed. A suite that depends on run order to be
+    correct is a suite that breaks when pytest-xdist or a reordering lands.
+
+    The cluster here has a composable template covering an Arkime family, so
+    the `shadow` pass really does stash and delete it -- without that the
+    stash stays empty and a leak would be invisible to any assertion. The
+    two runs are `shadow` then `generate`, which is the pairing production
+    uses: one stashes, a later process restores.
+    """
+    routes = _default_responses()
+    routes[("GET", "/_index_template")] = (200, {"index_templates": [
+        {
+            "name": "operator-catch-all",
+            "index_template": {"index_patterns": ["arkime_sessions3-*"]},
+        },
+    ]})
+    routes[("DELETE", "/_index_template/operator-catch-all")] = (200, {"acknowledged": True})
+    shared_root = tmp_path / "shared-tmp"
+    shared_root.mkdir()
+    env = {"TMPDIR": str(shared_root)}
+
+    shadowed, shadow_result = run_script(routes, env=env, args=["shadow"])
+    generated, generate_result = run_script(routes, env=env, args=["generate"])
+
+    for result in (shadow_result, generate_result):
+        assert result.returncode == 0, (
+            f"a run failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+    # The precondition, so a green result below cannot be vacuous: the first
+    # run must actually have stashed and deleted something. Membership rather
+    # than body_for: a DELETE carries no body, so a body check would read
+    # "was called" as "was not called".
+    def called(calls, method, path):
+        return (method, path) in [(m, p) for m, p, _ in calls]
+
+    assert called(shadowed, "DELETE", "/_index_template/operator-catch-all"), (
+        f"nothing was shadowed, so a leak would be invisible here: {mutations(shadowed)}"
+    )
+    # The second run is the tell. A shared stash means it inherits the
+    # operator-catch-all body and puts it back -- a write the first run's own
+    # state does not account for, and the clearest possible statement that
+    # one run's state reached another's.
+    assert not called(generated, "PUT", "/_index_template/operator-catch-all"), (
+        "the generate pass restored a template this run never shadowed, so it "
+        f"inherited the previous run's stash: {mutations(generated)}"
+    )
 
 
 # --------------------------------------------------------------------------
