@@ -251,6 +251,20 @@ fn clean(value: &str) -> String {
     value.chars().filter(|c| !c.is_control()).collect::<String>().replace("\\x00", "")
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/overview/dashboard",
+    summary = "The one aggregation the overview page renders, sliced by ?parts=.",
+    params(
+        ("parts" = inline(Option<String>), Query, description = "Comma-separated subset of slice names; absent or empty means every slice."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn dashboard(
     State(state): State<AppState>,
     Query(query): Query<DashboardQuery>,

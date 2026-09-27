@@ -26,7 +26,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{delete, get, patch, post},
+
     Json, Router,
 };
 use serde::Serialize;
@@ -107,6 +107,7 @@ pub mod workbench_domain;
 pub mod workbench_es;
 pub mod workbench_orchestrator;
 pub mod openapi;
+pub mod contract;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -260,12 +261,29 @@ fn readiness_verdict(
     Readiness { ready: true, reason: None, cluster, write_blocked: blocked }
 }
 
+#[utoipa::path(
+    get,
+    path = "/livez",
+    summary = "Liveness. The same handler as /healthz under a second name (main.rs); public like it.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+    ),
+)]
 /// GET /livez, and GET /healthz — the same handler under two names. See
 /// `Liveness` for why the response carries no Elasticsearch signal.
 async fn livez() -> Json<Liveness> {
     Json(Liveness { live: true, built: build_stamp(), revision: git_revision() })
 }
 
+#[utoipa::path(
+    get,
+    path = "/healthz",
+    summary = "Liveness plus an Elasticsearch reachability flag. Public on purpose: the container healthcheck is the caller.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+)]
 /// `/healthz` is the name the image's HEALTHCHECK, the port-test harness
 /// and the ops scripts already use, so it stays as an alias rather than
 /// being broken (killing a 2024-era name in a health-probe rename is how a
@@ -277,6 +295,14 @@ async fn healthz() -> Json<Liveness> {
     livez().await
 }
 
+#[utoipa::path(
+    get,
+    path = "/readyz",
+    summary = "Readiness: Elasticsearch reachable and this tier's write targets checked. Public like /healthz.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+    ),
+)]
 /// GET /readyz — see `Readiness`. Unauthenticated exactly like the liveness
 /// probes and /metrics, because the callers are infrastructure: the deploy
 /// verifier, diagnostics, and an operator on a jump host. Authentication
@@ -470,220 +496,212 @@ pub fn git_revision() -> String {
 // route table that only `main.rs` can see. `main.rs` still owns state
 // construction and the listener.
 
+/// The builder the route table is written in: an `axum::Router` that also
+/// carries each route's OpenAPI operation.
+///
+/// # Why the table names handlers and not paths
+///
+/// This used to be `Router::new().route("/api/v1/events", get(events::list))`
+/// -- 128 calls that each spelled out a path, a method and a handler. With
+/// `ContractRouter` the path and the method live on the handler's
+/// `#[utoipa::path]`, and `utoipa_axum::routes!(events::list)` reads them
+/// from there to register the route in *both* the served router and the
+/// #3325 document.
+///
+/// So this table is now an index of the surface rather than a second copy of
+/// it, which is the point: a table that spells the path out beside the
+/// handler is a second thing to update, and the direction that rots is the
+/// one where a new route never reaches it. Reading `events::list` should get
+/// you to the path, and it does -- the annotation is on the handler, in
+/// `events.rs`, next to the code that answers it. `contract_covers_every_`
+/// `router_route` in `openapi.rs` is what keeps the index honest.
+pub type ContractRouter = utoipa_axum::router::OpenApiRouter<AppState>;
+
 /// The /api/v1 surface: every route behind the BFF's service token.
 ///
 /// `state` is not a parameter because nothing here needs it: the token
 /// middleware is layered on by [`router`] below, so the same table serves
 /// the process and the contract generator.
-pub fn api_router() -> Router<AppState> {
-    Router::new()
-        .route("/api/v1/overview/kpis", get(overview::kpis))
-        .route("/api/v1/overview/dashboard", get(dashboard::dashboard))
-        .route("/api/v1/events", get(events::list))
-        .route("/api/v1/export/events.csv", get(exports::events_csv))
-        .route("/api/v1/export/commands.csv", get(exports::commands_csv))
-        .route("/api/v1/export/ips.csv", get(exports::ips_csv))
-        .route("/api/v1/export/campaigns.csv", get(exports::campaigns_csv))
-        .route("/api/v1/export/clusters.csv", get(exports::clusters_csv))
-        .route("/api/v1/export/history.json", get(exports::history_json))
-        .route("/api/v1/live", get(live::stream))
-        .route("/api/v1/mail/{session_id}", get(mail::get))
-        .route("/api/v1/ml-health", get(ml_health::list))
-        .route("/api/v1/gpu-queue", get(gpu_queue::list))
-        .route("/api/v1/gpu-queue/{job_id}/abort", post(gpu_queue::abort))
-        .route("/api/v1/sources", get(aggregates::sources))
-        .route("/api/v1/filter-values", get(aggregates::filter_values))
-        .route("/api/v1/investigate/ip/{ip}", get(investigate::ip))
-        .route("/api/v1/investigate/cidr/{cidr}", get(investigate::cidr))
-        .route("/api/v1/investigate/cluster", get(investigate::cluster))
-        .route("/api/v1/source-health", get(health::source_health))
+pub fn api_router() -> ContractRouter {
+    ContractRouter::default()
+        .routes(utoipa_axum::routes!(overview::kpis))
+        .routes(utoipa_axum::routes!(dashboard::dashboard))
+        .routes(utoipa_axum::routes!(events::list))
+        .routes(utoipa_axum::routes!(exports::events_csv))
+        .routes(utoipa_axum::routes!(exports::commands_csv))
+        .routes(utoipa_axum::routes!(exports::ips_csv))
+        .routes(utoipa_axum::routes!(exports::campaigns_csv))
+        .routes(utoipa_axum::routes!(exports::clusters_csv))
+        .routes(utoipa_axum::routes!(exports::history_json))
+        .routes(utoipa_axum::routes!(live::stream))
+        .routes(utoipa_axum::routes!(mail::get))
+        .routes(utoipa_axum::routes!(ml_health::list))
+        .routes(utoipa_axum::routes!(gpu_queue::list))
+        .routes(utoipa_axum::routes!(gpu_queue::abort))
+        .routes(utoipa_axum::routes!(aggregates::sources))
+        .routes(utoipa_axum::routes!(aggregates::filter_values))
+        .routes(utoipa_axum::routes!(investigate::ip))
+        .routes(utoipa_axum::routes!(investigate::cidr))
+        .routes(utoipa_axum::routes!(investigate::cluster))
+        .routes(utoipa_axum::routes!(health::source_health))
         // #3330: the alert fan-out's own delivery outcomes. Also a field on
         // /api/v1/source-health; this route is what the Settings card
         // reads, so the operations page's one-snapshot design is not the
         // only way to get at it.
-        .route("/api/v1/webhook-delivery", get(webhook_delivery::health))
-        .route("/api/v1/event/{id}", get(event_page::get))
+        .routes(utoipa_axum::routes!(webhook_delivery::health))
+        .routes(utoipa_axum::routes!(event_page::get))
         // #2047: materialized cross-sensor correlations — the event page's
         // same-flow summary and the re-used-wordlist edges.
-        .route("/api/v1/event/{id}/connections", get(correlations::event_connections))
-        .route("/api/v1/connections/{community_id}", get(correlations::flow_by_id))
-        .route("/api/v1/cred-reuse", get(correlations::cred_reuse))
-        .route("/api/v1/sensors", get(sensors::detail))
+        .routes(utoipa_axum::routes!(correlations::event_connections))
+        .routes(utoipa_axum::routes!(correlations::flow_by_id))
+        .routes(utoipa_axum::routes!(correlations::cred_reuse))
+        .routes(utoipa_axum::routes!(sensors::detail))
         // #1856: /catalog is registered before /{sensor} so the literal
         // segment is not swallowed by the capture. A sensor genuinely
         // named "catalog" would be shadowed; none is, and the alternative
         // is a query parameter that reads worse for the common case.
-        .route("/api/v1/sensors/catalog", get(sensors::catalog))
-        .route("/api/v1/sensors/{sensor}/events", get(sensors::events))
-        .route("/api/v1/sensors/{sensor}/overview", get(sensors::overview))
-        .route("/api/v1/sessions/{id}", get(session::detail))
-        .route("/api/v1/search", get(search::search))
-        .route("/api/v1/topology", get(topology::topology))
-        .route("/api/v1/settings/storage", get(health::storage))
-        .route("/api/v1/config", get(config::get_config))
-        .route(
-            "/api/v1/config/presentation",
-            axum::routing::put(config::put_presentation),
-        )
-        .route(
-            "/api/v1/config/{section}",
-            axum::routing::put(config::put_config_section),
-        )
-        .route("/api/v1/config/history", get(config::history))
-        .route("/api/v1/config/rollback", post(config::rollback))
-        .route("/api/v1/config/validate", post(config::validate))
-        .route("/api/v1/users", get(config::users))
-        .route("/api/v1/audit", get(audit::list))
-        .route(
-            "/api/v1/preferences",
-            get(preferences::get).put(preferences::put),
-        )
-        .route("/api/v1/preferences/reset", post(preferences::reset))
-        .route("/api/v1/reporter-stats", get(reporter_stats::stats))
-        .route("/api/v1/services", get(services_control::list))
-        .route("/api/v1/services/{name}/logs", get(services_control::logs))
-        .route("/api/v1/services/{name}/{action}", post(services_control::action))
-        .route("/api/v1/llm-search", get(llm_search::search))
-        .route("/api/v1/vault-rag", get(vault_rag::ask))
-        .route("/api/v1/ip-block", post(ip_block::set_block))
-        .route("/api/v1/ip-block/{ip}", get(ip_block::get_block))
-        .route("/api/v1/ip-block-export", get(ip_block::export))
-        .route("/api/v1/sandbox/{job}", get(detail::sandbox_run))
-        .route("/api/v1/ghidra/{sha}", get(detail::ghidra_run))
-        .route("/api/v1/ghidra-callgraph/{sha}", get(detail::ghidra_callgraph))
-        .route("/api/v1/revdeck/{sha}", get(detail::revdeck_run))
-        .route("/api/v1/cape/{sha}", get(detail::cape_run))
-        .route("/api/v1/cape/{sha}/raw", get(detail::cape_raw))
-        .route("/api/v1/github-analysis/{sha}", get(detail::github_analysis_run))
-        .route("/api/v1/attackers-graph", get(detail::attackers_graph))
-        .route("/api/v1/attack-vectors", get(detail::attack_vectors))
-        .route("/api/v1/ml-anomalies/ack", post(detail::ml_anomaly_ack))
-        .route("/api/v1/ml-anomalies/ack-all", post(detail::ml_anomaly_ack_all))
-        .route("/api/v1/ml-anomalies/acks", get(detail::ml_anomaly_acks))
-        .route("/api/v1/ml-anomalies/stats", get(detail::ml_anomaly_stats))
-        .route("/api/v1/ml-anomalies/disposition", post(detail::ml_anomaly_disposition))
-        .route("/api/v1/reports/{id}/pdf", get(reports::pdf))
+        .routes(utoipa_axum::routes!(sensors::catalog))
+        .routes(utoipa_axum::routes!(sensors::events))
+        .routes(utoipa_axum::routes!(sensors::overview))
+        .routes(utoipa_axum::routes!(session::detail))
+        .routes(utoipa_axum::routes!(search::search))
+        .routes(utoipa_axum::routes!(topology::topology))
+        .routes(utoipa_axum::routes!(health::storage))
+        .routes(utoipa_axum::routes!(config::get_config))
+        .routes(utoipa_axum::routes!(config::put_presentation))
+        .routes(utoipa_axum::routes!(config::put_config_section))
+        .routes(utoipa_axum::routes!(config::history))
+        .routes(utoipa_axum::routes!(config::rollback))
+        .routes(utoipa_axum::routes!(config::validate))
+        .routes(utoipa_axum::routes!(config::users))
+        .routes(utoipa_axum::routes!(audit::list))
+        .routes(utoipa_axum::routes!(preferences::get, preferences::put))
+        .routes(utoipa_axum::routes!(preferences::reset))
+        .routes(utoipa_axum::routes!(reporter_stats::stats))
+        .routes(utoipa_axum::routes!(services_control::list))
+        .routes(utoipa_axum::routes!(services_control::logs))
+        .routes(utoipa_axum::routes!(services_control::action))
+        .routes(utoipa_axum::routes!(llm_search::search))
+        .routes(utoipa_axum::routes!(vault_rag::ask))
+        .routes(utoipa_axum::routes!(ip_block::set_block))
+        .routes(utoipa_axum::routes!(ip_block::get_block))
+        .routes(utoipa_axum::routes!(ip_block::export))
+        .routes(utoipa_axum::routes!(detail::sandbox_run))
+        .routes(utoipa_axum::routes!(detail::ghidra_run))
+        .routes(utoipa_axum::routes!(detail::ghidra_callgraph))
+        .routes(utoipa_axum::routes!(detail::revdeck_run))
+        .routes(utoipa_axum::routes!(detail::cape_run))
+        .routes(utoipa_axum::routes!(detail::cape_raw))
+        .routes(utoipa_axum::routes!(detail::github_analysis_run))
+        .routes(utoipa_axum::routes!(detail::attackers_graph))
+        .routes(utoipa_axum::routes!(detail::attack_vectors))
+        .routes(utoipa_axum::routes!(detail::ml_anomaly_ack))
+        .routes(utoipa_axum::routes!(detail::ml_anomaly_ack_all))
+        .routes(utoipa_axum::routes!(detail::ml_anomaly_acks))
+        .routes(utoipa_axum::routes!(detail::ml_anomaly_stats))
+        .routes(utoipa_axum::routes!(detail::ml_anomaly_disposition))
+        .routes(utoipa_axum::routes!(reports::pdf))
         // #1612 phase 4: Reports studio — template/element catalog,
         // definitions CRUD, and on-demand generate. See reports_store.rs's
         // module doc comment for the sandbox/payload/ghidra scope decision.
-        .route("/api/v1/reports/templates", get(reports_api::templates))
-        .route(
-            "/api/v1/reports/definitions",
-            get(reports_api::list_definitions).post(reports_api::create_definition),
-        )
-        .route(
-            "/api/v1/reports/definitions/{id}",
-            get(reports_api::get_definition)
-                .put(reports_api::replace_definition)
-                .delete(reports_api::delete_definition),
-        )
-        .route("/api/v1/reports/definitions/{id}/generate", post(reports_api::generate))
-        .route("/api/v1/reports/generated/{id}", delete(reports_api::delete_generated))
-        .route("/api/v1/artifacts/{kind}/{key}", get(artifacts::list))
-        .route("/api/v1/artifacts/{kind}/{key}/{filename}", get(artifacts::download))
-        .route("/api/v1/charts/kill-chain-sankey", get(kill_chain::sankey))
-        .route("/api/v1/charts/attck-coverage", get(kill_chain::attck_coverage))
-        .route("/api/v1/charts/campaign-timeline", get(kill_chain::campaign_timeline))
-        .route("/api/v1/charts/ml-backlog", get(charts::ml_backlog))
-        .route("/api/v1/charts/netflow-bytes", get(charts::netflow_bytes))
-        .route("/api/v1/charts/netflow-packets", get(charts::netflow_packets))
-        .route("/api/v1/charts/anomaly-trend", get(charts::anomaly_trend))
-        .route("/api/v1/charts/dionaea-cves", get(charts::dionaea_cves))
-        .route("/api/v1/charts/os-distribution", get(charts::os_distribution))
+        .routes(utoipa_axum::routes!(reports_api::templates))
+        .routes(utoipa_axum::routes!(reports_api::list_definitions, reports_api::create_definition))
+        .routes(utoipa_axum::routes!(reports_api::get_definition, reports_api::replace_definition, reports_api::delete_definition))
+        .routes(utoipa_axum::routes!(reports_api::generate))
+        .routes(utoipa_axum::routes!(reports_api::delete_generated))
+        .routes(utoipa_axum::routes!(artifacts::list))
+        .routes(utoipa_axum::routes!(artifacts::download))
+        .routes(utoipa_axum::routes!(kill_chain::sankey))
+        .routes(utoipa_axum::routes!(kill_chain::attck_coverage))
+        .routes(utoipa_axum::routes!(kill_chain::campaign_timeline))
+        .routes(utoipa_axum::routes!(charts::ml_backlog))
+        .routes(utoipa_axum::routes!(charts::netflow_bytes))
+        .routes(utoipa_axum::routes!(charts::netflow_packets))
+        .routes(utoipa_axum::routes!(charts::anomaly_trend))
+        .routes(utoipa_axum::routes!(charts::dionaea_cves))
+        .routes(utoipa_axum::routes!(charts::os_distribution))
         // #1727 §7: JA4T stack clusters, the successor to the p0f OS chart above.
-        .route("/api/v1/charts/tcp-stack-clusters", get(charts::tcp_stack_clusters))
+        .routes(utoipa_axum::routes!(charts::tcp_stack_clusters))
         // #1736/#1739: two surfaces for data that currently has no view at all.
-        .route("/api/v1/charts/ics-functions", get(charts::ics_functions))
-        .route("/api/v1/charts/decoy-requests", get(charts::decoy_requests))
+        .routes(utoipa_axum::routes!(charts::ics_functions))
+        .routes(utoipa_axum::routes!(charts::decoy_requests))
         // #1765: the wire-tuple join in use -- Traefik requests meeting the
         // ClientHello fingerprints only the passive sniffer can see.
-        .route("/api/v1/charts/decoy-client-fingerprints", get(charts::decoy_client_fingerprints))
+        .routes(utoipa_axum::routes!(charts::decoy_client_fingerprints))
         // #1729: the rest of the JA4+ family Zeek produces.
-        .route("/api/v1/charts/ja4h-fingerprints", get(charts::ja4h_fingerprints))
-        .route("/api/v1/charts/ja4x-fingerprints", get(charts::ja4x_fingerprints))
-        .route("/api/v1/charts/ja4l-fingerprints", get(charts::ja4l_fingerprints))
-        .route("/api/v1/charts/tls-fingerprints", get(charts::tls_fingerprints))
-        .route("/api/v1/charts/ssh-fingerprints", get(charts::ssh_fingerprints))
-        .route("/api/v1/charts/endlessh-held-histogram", get(charts::endlessh_histogram))
-        .route("/api/v1/charts/ml-anomaly-scores", get(charts::ml_anomaly_scores))
-        .route("/api/v1/charts/attacker-fusion", get(fusion::fusion))
-        .route("/api/v1/campaigns", get(stores::campaigns))
-        .route("/api/v1/clusters", get(stores::clusters))
-        .route("/api/v1/attackers", get(stores::attackers))
+        .routes(utoipa_axum::routes!(charts::ja4h_fingerprints))
+        .routes(utoipa_axum::routes!(charts::ja4x_fingerprints))
+        .routes(utoipa_axum::routes!(charts::ja4l_fingerprints))
+        .routes(utoipa_axum::routes!(charts::tls_fingerprints))
+        .routes(utoipa_axum::routes!(charts::ssh_fingerprints))
+        .routes(utoipa_axum::routes!(charts::endlessh_histogram))
+        .routes(utoipa_axum::routes!(charts::ml_anomaly_scores))
+        .routes(utoipa_axum::routes!(fusion::fusion))
+        .routes(utoipa_axum::routes!(stores::campaigns))
+        .routes(utoipa_axum::routes!(stores::clusters))
+        .routes(utoipa_axum::routes!(stores::attackers))
         // #2045: the raw evidence behind an attacker entity.
-        .route("/api/v1/attackers/{id}/events", get(attacker_identity::entity_events))
-        .route("/api/v1/recordings", get(stores::recordings))
-        .route("/api/v1/recordings/{shasum}", get(replay::replay))
+        .routes(utoipa_axum::routes!(attacker_identity::entity_events))
+        .routes(utoipa_axum::routes!(stores::recordings))
+        .routes(utoipa_axum::routes!(replay::replay))
         // #1711: the two download forms the Go tier served at
         // /tty/<shasum>.cast and .raw, which the port dropped.
-        .route("/api/v1/recordings/{shasum}/cast", get(replay::replay_cast))
-        .route("/api/v1/recordings/{shasum}/raw", get(replay::replay_raw))
-        .route("/api/v1/alerts", get(stores::alerts))
-        .route("/api/v1/alerts/{key}/ack", post(stores::acknowledge))
-        .route("/api/v1/canarytokens/types", get(canarytokens::types))
-        .route("/api/v1/canarytokens", get(canarytokens::list).post(canarytokens::create))
-        .route("/api/v1/canarytokens/{id}/download", get(canarytokens::download))
+        .routes(utoipa_axum::routes!(replay::replay_cast))
+        .routes(utoipa_axum::routes!(replay::replay_raw))
+        .routes(utoipa_axum::routes!(stores::alerts))
+        .routes(utoipa_axum::routes!(stores::acknowledge))
+        .routes(utoipa_axum::routes!(canarytokens::types))
+        .routes(utoipa_axum::routes!(canarytokens::list, canarytokens::create))
+        .routes(utoipa_axum::routes!(canarytokens::download))
         // #1612 misc write paths: honeyfs-implant credential provisioning/
         // rotation (credentials_manager.go/credentials_api.go). Plain HTTP
         // to a WireGuard-reachable URL, no host mount — same tier as
         // canarytokens.rs above, not the mounted-worker-role service.
-        .route(
-            "/api/v1/credentials",
-            get(credentials::list).post(credentials::create),
-        )
-        .route("/api/v1/credentials/{id}/rotate", post(credentials::rotate))
-        .route("/api/v1/credentials/{id}/link-token", post(credentials::link_token))
-        .route("/api/v1/payloads", get(stores::payloads))
-        .route("/api/v1/payloads/{hash}", get(payload_detail::detail))
-        .route("/api/v1/payloads/{hash}/raw", get(payload_detail::raw))
+        .routes(utoipa_axum::routes!(credentials::list, credentials::create))
+        .routes(utoipa_axum::routes!(credentials::rotate))
+        .routes(utoipa_axum::routes!(credentials::link_token))
+        .routes(utoipa_axum::routes!(stores::payloads))
+        .routes(utoipa_axum::routes!(payload_detail::detail))
+        .routes(utoipa_axum::routes!(payload_detail::raw))
         // #474 one-click payload PDF (hp-payload-report.js): ephemeral
         // payload-scoped report into the generated store, no saved
         // definition. See reports_api::generate_payload_report.
-        .route("/api/v1/payloads/{hash}/report", post(reports_api::generate_payload_report))
-        .route("/api/v1/store/{name}", get(stores::generic).delete(stores::generic_delete))
-        .route("/api/v1/problem-reports", post(problem_reports::submit))
-        .route("/api/v1/problem-reports/{id}", patch(problem_reports::patch_status))
+        .routes(utoipa_axum::routes!(reports_api::generate_payload_report))
+        .routes(utoipa_axum::routes!(stores::generic, stores::generic_delete))
+        .routes(utoipa_axum::routes!(problem_reports::submit))
+        .routes(utoipa_axum::routes!(problem_reports::patch_status))
         // #1612 mounted worker role (phase 3a): sandbox/ghidra/github-
         // analysis submission + golden-image status. Registered in the
         // same shared route table as everything else — which container
         // these are actually reachable/useful on depends entirely on
         // which compose service has the spool-dir mounts (backend-service-
         // mounted), not on route registration here.
-        .route("/api/v1/sandbox/submit", post(sandbox_submit::submit))
-        .route("/api/v1/sandbox/golden-image-status", get(sandbox_submit::golden_image_status))
-        .route("/api/v1/sandbox/vnc", get(sandbox_submit::vnc_status))
-        .route("/api/v1/ghidra/submit", post(ghidra_submit::submit))
-        .route("/api/v1/github-analysis/submit", post(github_analysis_submit::submit))
+        .routes(utoipa_axum::routes!(sandbox_submit::submit))
+        .routes(utoipa_axum::routes!(sandbox_submit::golden_image_status))
+        .routes(utoipa_axum::routes!(sandbox_submit::vnc_status))
+        .routes(utoipa_axum::routes!(ghidra_submit::submit))
+        .routes(utoipa_axum::routes!(github_analysis_submit::submit))
         // #1612 phase 3b: Payload Workbench orchestrator (recipes, run
         // creation/reconciliation, child cancel/retry). Same
         // shared-route-table posture as phase 3a — only useful on
         // backend-service-mounted, which has the write-capable spool mounts.
-        .route("/api/v1/workbench/analyzers", get(workbench_api::analyzers))
-        .route(
-            "/api/v1/workbench/runs",
-            get(workbench_api::list_runs).post(workbench_api::create_run),
-        )
-        .route("/api/v1/workbench/runs/{id}", get(workbench_api::get_run))
-        .route(
-            "/api/v1/workbench/runs/{id}/children/{analyzer_id}/{action}",
-            post(workbench_api::child_action),
-        )
-        .route(
-            "/api/v1/workbench/recipes",
-            get(workbench_api::list_recipes).post(workbench_api::save_recipe),
-        )
+        .routes(utoipa_axum::routes!(workbench_api::analyzers))
+        .routes(utoipa_axum::routes!(workbench_api::list_runs, workbench_api::create_run))
+        .routes(utoipa_axum::routes!(workbench_api::get_run))
+        .routes(utoipa_axum::routes!(workbench_api::child_action))
+        .routes(utoipa_axum::routes!(workbench_api::list_recipes, workbench_api::save_recipe))
 }
 
 /// The unauthenticated routes: the two liveness names, readiness, and the
 /// #1972 metrics scrape. They are a separate builder from [`api_router`]
 /// because they are the only routes the token middleware does not cover.
-pub fn public_router() -> Router<AppState> {
-    Router::new()
-        .route("/livez", get(livez))
-        .route("/healthz", get(healthz))
-        .route("/readyz", get(readyz))
+pub fn public_router() -> ContractRouter {
+    ContractRouter::default()
+        .routes(utoipa_axum::routes!(livez))
+        .routes(utoipa_axum::routes!(healthz))
+        .routes(utoipa_axum::routes!(readyz))
         // #1972: same listener, same internal-network posture as /healthz.
-        .route("/metrics", get(obs::metrics_route))
+        .routes(utoipa_axum::routes!(obs::metrics_route))
 }
 
 /// The whole service surface: the public routes, the token-gated /api
@@ -693,7 +711,7 @@ pub fn router(state: AppState) -> Router {
     let api = api_router()
         .layer(middleware::from_fn_with_state(state.clone(), require_service_token));
 
-    let app = Router::new()
+    let app: ContractRouter = ContractRouter::default()
         // The public routes are declared first, exactly as `main.rs`
         // declared them before the move; the token-gated /api table is
         // merged in behind them.
@@ -707,9 +725,13 @@ pub fn router(state: AppState) -> Router {
         // _with_state form (plain from_fn builds FromFn<(), ..> whose
         // Service bound never matches a state-taking extractor).
         .layer(middleware::from_fn_with_state(state.clone(), obs::observe))
-        .layer(tower_http::trace::TraceLayer::new_for_http())
-        .with_state(state);
-    app
+        .layer(tower_http::trace::TraceLayer::new_for_http());
+    // The process serves a plain `axum::Router`. The OpenAPI half of
+    // `ContractRouter` is what `openapi::document()` reads instead, from
+    // the same two builders merged the same way; nothing here throws it
+    // away, because the serving router and the document are the same
+    // registration and there is no second one to keep in step.
+    app.with_state(state).into()
 }
 
 #[cfg(test)]

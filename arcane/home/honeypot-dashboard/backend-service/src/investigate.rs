@@ -28,6 +28,7 @@
 //! first place, just re-run scoped to one kind+value instead of every
 //! cluster at once.
 
+use crate::contract;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -221,6 +222,21 @@ fn kv(result: &serde_json::Value, agg: &str) -> Vec<Kv> {
         .collect()
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/investigate/ip/{ip}",
+    summary = "Everything one source address did, across sensors.",
+    params(
+        ("ip" = inline(String), Path, description = "Source address to profile. A non-address is a 400."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn ip(
     State(state): State<AppState>,
     Path(ip): Path<String>,
@@ -485,6 +501,20 @@ pub struct CidrCorrelation {
     pub correlation: Correlation,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/investigate/cidr/{cidr}",
+    summary = "Correlation across one CIDR block.",
+    params(
+        ("cidr" = inline(String), Path, description = "CIDR block to correlate. A malformed block is a 400."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// GET /api/v1/investigate/cidr/{cidr} — campaigns' "ES →" drill-down:
 /// everything Elasticsearch has correlated for a whole network at once,
 /// via the `ip` field type's native CIDR term matching (the same query
@@ -558,6 +588,22 @@ fn parse_asn_value(value: &str) -> Option<i64> {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/investigate/cluster",
+    summary = "The members of one attacker cluster.",
+    params(
+        ("kind" = inline(Option<contract::ClusterKind>), Query, description = "Cluster kind."),
+        ("value" = inline(Option<String>), Query, description = "The cluster's value, as /api/v1/clusters reports it."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// GET /api/v1/investigate/cluster?kind=&value= — clusters' "ES →"
 /// drill-down: everything Elasticsearch has correlated for a cluster's
 /// member IPs. Two ES round trips: first recomputes the member IP set for

@@ -155,6 +155,21 @@ async fn relation(state: &AppState, key: &str, filter: Value, exclude_id: &str) 
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/event/{id}",
+    summary = "One event, with the pivot groups its detail pane needs.",
+    params(
+        ("id" = inline(String), Path, description = "Event document id."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn get(
     State(state): State<AppState>,
     Path(id): Path<String>,

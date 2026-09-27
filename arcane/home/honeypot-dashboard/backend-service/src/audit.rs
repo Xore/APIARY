@@ -4,6 +4,7 @@
 //! rotated generation (older events are not retained past one rotation —
 //! matches the Go tier exactly).
 
+use crate::contract;
 use axum::extract::{Query, State};
 use axum::Json;
 use serde::{Deserialize, Serialize};
@@ -111,6 +112,20 @@ pub struct AuditQuery {
     action: Option<String>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/audit",
+    summary = "The audit trail, newest first.",
+    params(
+        ("limit" = inline(Option<contract::AuditLimit>), Query, description = "How many entries; clamped to [1, 500] by the handler, default 100."),
+        ("action" = inline(Option<String>), Query, description = "Only entries with this action."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// GET /api/v1/audit?limit=&action= — newest first, optional action
 /// filter, limit clamped to [1, 500] (default 100), ported from
 /// serveSettingsAudit.

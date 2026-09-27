@@ -133,6 +133,21 @@ fn adb_recon_fingerprint(cmds: &[String]) -> bool {
     })
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/sessions/{id}",
+    summary = "One session: its events, commands and credentials.",
+    params(
+        ("id" = inline(String), Path, description = "Session id."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn detail(
     State(state): State<AppState>,
     Path(id): Path<String>,

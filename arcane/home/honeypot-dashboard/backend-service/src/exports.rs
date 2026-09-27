@@ -14,6 +14,7 @@
 //!   - events.csv omits Go's "provider" column (a classification this tier
 //!     has no confirmed source field for) — every other column present.
 
+use crate::contract;
 use axum::{
     extract::{Query, State},
     http::{header, StatusCode},
@@ -96,6 +97,46 @@ fn joined(value: &Value) -> String {
     value.as_array().into_iter().flatten().filter_map(|item| item.as_str()).collect::<Vec<_>>().join(" ")
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/export/events.csv",
+    summary = "The event explorer as CSV, same filters as /events.",
+    params(
+        ("offset" = inline(Option<contract::NonNegativeInt>), Query, description = "Result window start."),
+        ("size" = inline(Option<contract::PageSize>), Query, description = "Page size, clamped to 100 by the handler."),
+        ("ip" = inline(Option<String>), Query, description = "Single source address."),
+        ("ips" = inline(Option<String>), Query, description = "Comma-separated source addresses."),
+        ("sensor" = inline(Option<String>), Query, description = "Sensor name (honeypot.dionaea, suricata, ...)."),
+        ("country" = inline(Option<String>), Query, description = "ISO country code."),
+        ("city" = inline(Option<String>), Query, description = "City name, as bucketed on the overview map."),
+        ("port" = inline(Option<String>), Query, description = "Destination port."),
+        ("proto" = inline(Option<String>), Query, description = "Transport protocol."),
+        ("kind" = inline(Option<String>), Query, description = "honeypot.event kind (command, login, ...)."),
+        ("shasum" = inline(Option<String>), Query, description = "Captured-payload hash."),
+        ("community_id" = inline(Option<String>), Query, description = "One flow across every sensor that saw it."),
+        ("q" = inline(Option<String>), Query, description = "Free-text query_string, passed to Elasticsearch as-is."),
+        ("since" = inline(Option<String>), Query, description = "Go-style relative window (24h, 7d)."),
+        ("persona" = inline(Option<String>), Query, description = "Decoy persona id."),
+        ("site" = inline(Option<String>), Query, description = "Decoy site id."),
+        ("asset" = inline(Option<String>), Query, description = "Decoy asset id."),
+        ("fingerprint" = inline(Option<String>), Query, description = "Client fingerprint, matched across every field sensors record one in."),
+        ("cmd" = inline(Option<String>), Query, description = "Exact command text."),
+        ("cred" = inline(Option<String>), Query, description = "\"user / pass\" pair."),
+        ("path" = inline(Option<String>), Query, description = "Request path."),
+        ("session" = inline(Option<String>), Query, description = "Session id."),
+        ("asn" = inline(Option<String>), Query, description = "Source AS number."),
+        ("org" = inline(Option<String>), Query, description = "Source network organization."),
+        ("provider" = inline(Option<String>), Query, description = "Provider class."),
+        ("sig" = inline(Option<String>), Query, description = "IDS alert signature."),
+        ("cat" = inline(Option<String>), Query, description = "Detection category (Suricata alert category or honeypot.category)."),
+    ),
+    responses(
+        (status = 200, description = "CSV of the matching events.", body = inline(serde_json::Value), content_type = "text/csv"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// GET /api/v1/export/events.csv
 pub async fn events_csv(
     State(state): State<AppState>,
@@ -163,6 +204,46 @@ pub async fn events_csv(
     ))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/export/commands.csv",
+    summary = "Matching commands as CSV.",
+    params(
+        ("offset" = inline(Option<contract::NonNegativeInt>), Query, description = "Result window start."),
+        ("size" = inline(Option<contract::PageSize>), Query, description = "Page size, clamped to 100 by the handler."),
+        ("ip" = inline(Option<String>), Query, description = "Single source address."),
+        ("ips" = inline(Option<String>), Query, description = "Comma-separated source addresses."),
+        ("sensor" = inline(Option<String>), Query, description = "Sensor name (honeypot.dionaea, suricata, ...)."),
+        ("country" = inline(Option<String>), Query, description = "ISO country code."),
+        ("city" = inline(Option<String>), Query, description = "City name, as bucketed on the overview map."),
+        ("port" = inline(Option<String>), Query, description = "Destination port."),
+        ("proto" = inline(Option<String>), Query, description = "Transport protocol."),
+        ("kind" = inline(Option<String>), Query, description = "honeypot.event kind (command, login, ...)."),
+        ("shasum" = inline(Option<String>), Query, description = "Captured-payload hash."),
+        ("community_id" = inline(Option<String>), Query, description = "One flow across every sensor that saw it."),
+        ("q" = inline(Option<String>), Query, description = "Free-text query_string, passed to Elasticsearch as-is."),
+        ("since" = inline(Option<String>), Query, description = "Go-style relative window (24h, 7d)."),
+        ("persona" = inline(Option<String>), Query, description = "Decoy persona id."),
+        ("site" = inline(Option<String>), Query, description = "Decoy site id."),
+        ("asset" = inline(Option<String>), Query, description = "Decoy asset id."),
+        ("fingerprint" = inline(Option<String>), Query, description = "Client fingerprint, matched across every field sensors record one in."),
+        ("cmd" = inline(Option<String>), Query, description = "Exact command text."),
+        ("cred" = inline(Option<String>), Query, description = "\"user / pass\" pair."),
+        ("path" = inline(Option<String>), Query, description = "Request path."),
+        ("session" = inline(Option<String>), Query, description = "Session id."),
+        ("asn" = inline(Option<String>), Query, description = "Source AS number."),
+        ("org" = inline(Option<String>), Query, description = "Source network organization."),
+        ("provider" = inline(Option<String>), Query, description = "Provider class."),
+        ("sig" = inline(Option<String>), Query, description = "IDS alert signature."),
+        ("cat" = inline(Option<String>), Query, description = "Detection category (Suricata alert category or honeypot.category)."),
+    ),
+    responses(
+        (status = 200, description = "CSV of matching commands.", body = inline(serde_json::Value), content_type = "text/csv"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// GET /api/v1/export/commands.csv — see module doc: exports the same
 /// `events?kind=command` scope commands.tsx itself renders.
 pub async fn commands_csv(
@@ -195,6 +276,21 @@ pub async fn commands_csv(
     Ok(csv_response("honeypot-commands.csv", csv_body(&["time", "sensor", "source_ip", "command", "session"], &rows)))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/export/ips.csv",
+    summary = "Every source address in the window as CSV.",
+    params(
+        ("offset" = inline(Option<contract::NonNegativeInt>), Query, description = "Result window start."),
+        ("size" = inline(Option<contract::PositiveInt>), Query, description = "Page size."),
+    ),
+    responses(
+        (status = 200, description = "CSV of source addresses.", body = inline(serde_json::Value), content_type = "text/csv"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// GET /api/v1/export/ips.csv — same aggregation aggregates::sources
 /// backs /ips with, just a higher cap (that endpoint's own 1000-row cap,
 /// already well above the page's 25-row pagination).
@@ -227,6 +323,21 @@ pub async fn ips_csv(State(state): State<AppState>) -> Result<impl IntoResponse,
     ))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/export/campaigns.csv",
+    summary = "Campaigns as CSV.",
+    params(
+        ("offset" = inline(Option<contract::NonNegativeInt>), Query, description = "Result window start."),
+        ("size" = inline(Option<contract::PositiveInt>), Query, description = "Page size."),
+    ),
+    responses(
+        (status = 200, description = "CSV of campaigns.", body = inline(serde_json::Value), content_type = "text/csv"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// GET /api/v1/export/campaigns.csv
 pub async fn campaigns_csv(State(state): State<AppState>) -> Result<impl IntoResponse, (StatusCode, String)> {
     let result = state
@@ -288,6 +399,20 @@ pub struct ClustersExportQuery {
     kind: String,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/export/clusters.csv",
+    summary = "Attacker clusters as CSV, by cluster kind.",
+    params(
+        ("kind" = inline(Option<contract::ClusterKind>), Query, description = "Cluster kind to export."),
+    ),
+    responses(
+        (status = 200, description = "CSV of attacker clusters.", body = inline(serde_json::Value), content_type = "text/csv"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// GET /api/v1/export/clusters.csv — same ?kind= post-aggregation
 /// narrowing the /clusters page itself applies client-side, applied here
 /// server-side over the full result set.
@@ -314,6 +439,46 @@ pub async fn clusters_csv(
     Ok(csv_response("honeypot-clusters.csv", csv_body(&["kind", "value", "sources", "events", "sensors"], &rows)))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/export/history.json",
+    summary = "The behaviour-search slice as JSON.",
+    params(
+        ("offset" = inline(Option<contract::NonNegativeInt>), Query, description = "Result window start."),
+        ("size" = inline(Option<contract::PageSize>), Query, description = "Page size, clamped to 100 by the handler."),
+        ("ip" = inline(Option<String>), Query, description = "Single source address."),
+        ("ips" = inline(Option<String>), Query, description = "Comma-separated source addresses."),
+        ("sensor" = inline(Option<String>), Query, description = "Sensor name (honeypot.dionaea, suricata, ...)."),
+        ("country" = inline(Option<String>), Query, description = "ISO country code."),
+        ("city" = inline(Option<String>), Query, description = "City name, as bucketed on the overview map."),
+        ("port" = inline(Option<String>), Query, description = "Destination port."),
+        ("proto" = inline(Option<String>), Query, description = "Transport protocol."),
+        ("kind" = inline(Option<String>), Query, description = "honeypot.event kind (command, login, ...)."),
+        ("shasum" = inline(Option<String>), Query, description = "Captured-payload hash."),
+        ("community_id" = inline(Option<String>), Query, description = "One flow across every sensor that saw it."),
+        ("q" = inline(Option<String>), Query, description = "Free-text query_string, passed to Elasticsearch as-is."),
+        ("since" = inline(Option<String>), Query, description = "Go-style relative window (24h, 7d)."),
+        ("persona" = inline(Option<String>), Query, description = "Decoy persona id."),
+        ("site" = inline(Option<String>), Query, description = "Decoy site id."),
+        ("asset" = inline(Option<String>), Query, description = "Decoy asset id."),
+        ("fingerprint" = inline(Option<String>), Query, description = "Client fingerprint, matched across every field sensors record one in."),
+        ("cmd" = inline(Option<String>), Query, description = "Exact command text."),
+        ("cred" = inline(Option<String>), Query, description = "\"user / pass\" pair."),
+        ("path" = inline(Option<String>), Query, description = "Request path."),
+        ("session" = inline(Option<String>), Query, description = "Session id."),
+        ("asn" = inline(Option<String>), Query, description = "Source AS number."),
+        ("org" = inline(Option<String>), Query, description = "Source network organization."),
+        ("provider" = inline(Option<String>), Query, description = "Provider class."),
+        ("sig" = inline(Option<String>), Query, description = "IDS alert signature."),
+        ("cat" = inline(Option<String>), Query, description = "Detection category (Suricata alert category or honeypot.category)."),
+    ),
+    responses(
+        (status = 200, description = "Behaviour-search rows as JSON.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// GET /api/v1/export/history.json — the same honeypot-v2-*/suricata-v2-*
 /// query events::list serves, just forced to the export cap and marked as
 /// a download. Mirrors elastic.go's history(attachment=true).

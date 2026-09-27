@@ -34,6 +34,16 @@ pub struct Storage {
     pub store_bytes: u64,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/settings/storage",
+    summary = "Index sizes and document counts.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// /api/v1/settings/storage — the ES storage summary the legacy settings
 /// modal's storage pane shows.
 pub async fn storage(State(state): State<AppState>) -> Result<Json<Storage>, (StatusCode, String)> {
@@ -325,6 +335,16 @@ fn sensor_state(age_s: i64, recent_7d: u64) -> &'static str {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/source-health",
+    summary = "Per-source ingestion health, the page behind \"Source & pipeline health\".",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn source_health(State(state): State<AppState>) -> Result<Json<SourceHealth>, (StatusCode, String)> {
     let body = json!({
         "size": 0,

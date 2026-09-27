@@ -83,6 +83,15 @@ fn type_info(token_type: &str) -> Option<&'static TokenType> {
     TYPES.iter().find(|entry| entry.id == token_type)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/canarytokens/types",
+    summary = "The canarytoken types this build can mint.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn types() -> Json<Value> {
     Json(json!(TYPES
         .iter()
@@ -126,6 +135,22 @@ pub struct CreatedToken {
     pub created_at: String,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/canarytokens",
+    summary = "Mint a canarytoken.",
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `CreateBody`. The shape is left open here on purpose -- see the module doc."),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 500, description = "The handler failed in a way it does not model as a 4xx.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 503, description = "A dependency this route needs is not configured or not reachable.", body = String, content_type = "text/plain"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn create(
     State(state): State<AppState>,
     Json(body): Json<CreateBody>,
@@ -252,6 +277,16 @@ fn redact_record(mut record: Value) -> Value {
     record
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/canarytokens",
+    summary = "Minted canarytokens, with their management token redacted.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// GET /api/v1/canarytokens — every created token's history record, newest
 /// first, for the Settings pane's history table and credentials'
 /// link-token id validation. auth_token is the platform's own management
@@ -289,6 +324,23 @@ pub async fn list(State(state): State<AppState>) -> Result<Json<Value>, (StatusC
     Ok(Json(json!({"tokens": records})))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/canarytokens/{id}/download",
+    summary = "The canarytoken's landing URL, as a redirect.",
+    params(
+        ("id" = inline(String), Path, description = "Canarytoken id."),
+    ),
+    responses(
+        (status = 302, description = "Redirect to the token's landing URL."),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 500, description = "The handler failed in a way it does not model as a 4xx.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 503, description = "A dependency this route needs is not configured or not reachable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// GET /api/v1/canarytokens/{id}/download — proxy the token's artifact.
 /// web_image never goes through /download (fetching the trigger URL
 /// server-side would itself fire the token).

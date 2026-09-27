@@ -38,6 +38,16 @@ pub struct GpuJob {
     pub result: serde_json::Value,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/gpu-queue",
+    summary = "The GPU analysis queue as it stands.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<GpuJob>>, (StatusCode, String)> {
     let body = json!({
         "size": 500,
@@ -75,6 +85,19 @@ pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<GpuJob>>, (S
     Ok(Json(jobs))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/gpu-queue/{job_id}/abort",
+    summary = "Abort a queued or running GPU job.",
+    params(
+        ("job_id" = inline(String), Path, description = "GPU job to abort."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// POST /api/v1/gpu-queue/{job_id}/abort — request cancellation of a queued job.
 ///
 /// This is the exact equivalent of gpu_queue.py's `request_abort`: set

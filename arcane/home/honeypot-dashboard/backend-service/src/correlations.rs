@@ -222,6 +222,20 @@ fn missing_community() -> (StatusCode, String) {
     (StatusCode::NOT_FOUND, "no such flow".into())
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/connections/{community_id}",
+    summary = "Every record that shares one community_id flow hash.",
+    params(
+        ("community_id" = inline(String), Path, description = "network.community_id flow hash, as computed independently by each sensor."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// One materialized link, by community_id.
 pub async fn flow_by_id(
     State(state): State<AppState>,
@@ -234,6 +248,21 @@ pub async fn flow_by_id(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/event/{id}/connections",
+    summary = "The same-flow summary and re-used-wordlist edges for one event.",
+    params(
+        ("id" = inline(String), Path, description = "Event document id."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// The materialized form of one event's connection: resolves the event's
 /// own community_id first, then reads its link. Events whose flow never
 /// reached two families have no link — a 404 here means exactly that, not
@@ -290,6 +319,16 @@ pub struct CredEdge {
     pub last: String,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/cred-reuse",
+    summary = "Credential pairs reused across more than one address.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// Most-shared credentials first — the re-used-wordlist signal at its most
 /// concentrated.
 pub async fn cred_reuse(State(state): State<AppState>) -> Result<Json<Vec<CredEdge>>, (StatusCode, String)> {

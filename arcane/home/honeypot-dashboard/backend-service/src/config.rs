@@ -29,6 +29,7 @@
 //! - GET /api/v1/users — the known-operators roster (subjects, roles,
 //!   seen timestamps; per-user preference blobs stay out of the list).
 
+use crate::contract;
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
@@ -61,6 +62,16 @@ pub(crate) async fn load_config(state: &AppState) -> anyhow::Result<Option<Value
     Ok(result["hits"]["hits"].as_array().and_then(|hits| hits.first()).map(|hit| hit["_source"].clone()))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/config",
+    summary = "The whole operator-authored dashboard configuration.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn get_config(State(state): State<AppState>) -> Result<Json<Value>, (StatusCode, String)> {
     let doc = load_config(&state)
         .await
@@ -189,6 +200,27 @@ async fn put_config_field(
     Ok(Json(doc).into_response())
 }
 
+#[utoipa::path(
+    put,
+    path = "/api/v1/config/presentation",
+    summary = "Replace the presentation block (branding, theme, landing copy).",
+    params(
+        ("actor_subject" = inline(Option<String>), Query, description = "OIDC subject recorded on the audit/history entry."),
+        ("actor_username" = inline(Option<String>), Query, description = "Operator name recorded on the audit/history entry."),
+        ("If-Match" = inline(Option<String>), Header, description = "Optional optimistic-concurrency revision, as a weak ETag (`W/\"7\"`). A mismatch answers 409."),
+    ),
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `serde_json::Value`. The shape is left open here on purpose -- see the module doc."),
+    responses(
+        (status = 200, description = "The stored presentation block and its new revision."),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 409, description = "The record changed since the revision the caller presented.", body = String, content_type = "text/plain"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn put_presentation(
     State(state): State<AppState>,
     Query(actor): Query<ActorQuery>,
@@ -213,6 +245,28 @@ fn config_section_key(section: &str) -> Option<&'static str> {
     }
 }
 
+#[utoipa::path(
+    put,
+    path = "/api/v1/config/{section}",
+    summary = "Replace one settings section.",
+    params(
+        ("section" = inline(contract::ConfigSection), Path, description = "Settings section to replace."),
+        ("actor_subject" = inline(Option<String>), Query, description = "OIDC subject recorded on the audit/history entry."),
+        ("actor_username" = inline(Option<String>), Query, description = "Operator name recorded on the audit/history entry."),
+        ("If-Match" = inline(Option<String>), Header, description = "Optional optimistic-concurrency revision, as a weak ETag (`W/\"7\"`). A mismatch answers 409."),
+    ),
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `serde_json::Value`. The shape is left open here on purpose -- see the module doc."),
+    responses(
+        (status = 200, description = "The stored section and its new revision."),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 409, description = "The record changed since the revision the caller presented.", body = String, content_type = "text/plain"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// PUT /api/v1/config/{section} — identical in shape to put_presentation,
 /// just parameterized over which `payload.*` block it replaces. Backs the
 /// three settings.tsx admin panes that were previously entirely missing
@@ -239,6 +293,15 @@ pub async fn put_config_section(
     put_config_field(&state, actor, expected, payload_key, value).await
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/config/history",
+    summary = "The revision history the rollback picker reads (payloads excluded).",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// configHistoryView-equivalent: everything needed for review and rollback
 /// selection, without the retained payload snapshot itself.
 pub async fn history(State(state): State<AppState>) -> Json<Value> {
@@ -269,6 +332,25 @@ pub struct RollbackBody {
     actor_username: String,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/config/rollback",
+    summary = "Restore a past configuration revision.",
+    params(
+        ("If-Match" = inline(Option<String>), Header, description = "Optional optimistic-concurrency revision, as a weak ETag (`W/\"7\"`). A mismatch answers 409."),
+    ),
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `RollbackBody`. The shape is left open here on purpose -- see the module doc."),
+    responses(
+        (status = 200, description = "The restored configuration and its new revision."),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 409, description = "The record changed since the revision the caller presented.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// Restores one retained revision's full payload as a NEW revision —
 /// history is append-only, rollback never rewrites the past. Accepts the
 /// same optional `If-Match: <revision>` precondition as the PUT handlers.
@@ -332,6 +414,16 @@ pub async fn rollback(
     Ok(Json(doc).into_response())
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/users",
+    summary = "Dashboard users, as the ES-side user store reports them.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn users(State(state): State<AppState>) -> Result<Json<Value>, (StatusCode, String)> {
     let result = state
         .es
@@ -360,6 +452,19 @@ pub async fn users(State(state): State<AppState>) -> Result<Json<Value>, (Status
     Ok(Json(json!({"users": rows})))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/config/validate",
+    summary = "Check a candidate configuration without storing it.",
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `serde_json::Value`. The shape is left open here on purpose -- see the module doc."),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// POST /api/v1/config/validate — persist-nothing preview, mirroring Go's
 /// serveSettingsConfigValidate at the depth this Value-level tier can
 /// honestly claim: the body is an object of config sections (the same

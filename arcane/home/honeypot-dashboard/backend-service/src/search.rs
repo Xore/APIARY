@@ -83,6 +83,20 @@ const GROUPS: &[GroupSpec] = &[
     GroupSpec { title: "Personas", agg: "personas", field: "honeypot.persona_id", url: |v| format!("/events?persona={}", crate::services_control::urlencode(v)) },
 ];
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/search",
+    summary = "Cross-surface search for the omnibox.",
+    params(
+        ("q" = inline(Option<String>), Query, description = "What to search for."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn search(
     State(state): State<AppState>,
     Query(query): Query<SearchQuery>,

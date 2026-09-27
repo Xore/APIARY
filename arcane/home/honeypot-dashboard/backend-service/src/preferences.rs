@@ -124,6 +124,22 @@ pub struct PreferencesQuery {
     timezone: String,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/preferences",
+    summary = "One user's saved preferences.",
+    params(
+        ("subject" = inline(Option<String>), Query, description = "OIDC subject. Required -- an empty value is a 400."),
+        ("username" = inline(Option<String>), Query, description = "Operator name."),
+        ("role" = inline(Option<String>), Query, description = "Operator role."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn get(
     State(state): State<AppState>,
     axum::extract::Query(query): axum::extract::Query<PreferencesQuery>,
@@ -384,6 +400,21 @@ pub struct PreferencesWriteBody {
     patch: PreferencesPatch,
 }
 
+#[utoipa::path(
+    put,
+    path = "/api/v1/preferences",
+    summary = "Replace one user's saved preferences.",
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `PreferencesWriteBody`. The shape is left open here on purpose -- see the module doc."),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn put(
     State(state): State<AppState>,
     Json(body): Json<PreferencesWriteBody>,
@@ -433,6 +464,21 @@ pub struct PreferencesResetBody {
     timezone: String,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/preferences/reset",
+    summary = "Drop one user's saved preferences back to the defaults.",
+    request_body(content = inline(serde_json::Value), description = "Deserialized by the handler into `PreferencesResetBody`. The shape is left open here on purpose -- see the module doc."),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 404, description = "No such record, store, or route for the values given.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 415, description = "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran.", body = String, content_type = "text/plain"),
+        (status = 422, description = "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the reference it was asked to resolve (the reports store answers this for an unresolvable scope or an unexpected storage failure).", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn reset(
     State(state): State<AppState>,
     Json(body): Json<PreferencesResetBody>,

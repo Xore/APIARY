@@ -4,6 +4,7 @@
 //! classify.go deliberately collapses into one-line summaries). Same
 //! caps and 48h window as the Go loaders.
 
+use crate::contract;
 use axum::{extract::State, http::StatusCode, Json};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -270,6 +271,16 @@ fn tanner_requests(hits: &[Value]) -> Vec<TannerRequest> {
         .collect()
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/sensors",
+    summary = "Per-sensor counts, last-seen, and state.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn detail(State(state): State<AppState>) -> Result<Json<SensorDetail>, (StatusCode, String)> {
     let (mailoney, http, tanner) = tokio::try_join!(
         query_sensor_raw(&state, "mailoney", false),
@@ -374,6 +385,16 @@ const CATALOG_WINDOW: &str = "now-14d";
 const EVENT_LIMIT_DEFAULT: u64 = 200;
 const EVENT_LIMIT_MAX: u64 = 1000;
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/sensors/catalog",
+    summary = "The sensor catalog the setup pages read.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn catalog(State(state): State<AppState>) -> Result<Json<SensorCatalog>, (StatusCode, String)> {
     let body = json!({
         "size": 0,
@@ -413,6 +434,21 @@ pub async fn catalog(State(state): State<AppState>) -> Result<Json<SensorCatalog
     Ok(Json(SensorCatalog { window: CATALOG_WINDOW.to_string(), sensors }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/sensors/{sensor}/events",
+    summary = "Recent events from one sensor.",
+    params(
+        ("sensor" = inline(contract::SensorName), Path, description = "Sensor name; the handler rejects an empty value or one over 128 characters."),
+        ("limit" = inline(Option<String>), Query, description = "How many events to return; clamped by the handler."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn events(
     State(state): State<AppState>,
     axum::extract::Path(sensor): axum::extract::Path<String>,
@@ -624,6 +660,20 @@ fn measures_for(sensor: &str) -> Vec<(&'static str, &'static str, &'static str)>
 
 const OVERVIEW_WINDOW: &str = "now-7d";
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/sensors/{sensor}/overview",
+    summary = "Protocols, ports and fingerprints for one sensor.",
+    params(
+        ("sensor" = inline(contract::SensorName), Path, description = "Sensor name; the handler rejects an empty value or one over 128 characters."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn overview(
     State(state): State<AppState>,
     axum::extract::Path(sensor): axum::extract::Path<String>,

@@ -2,7 +2,7 @@
   "components": {
     "securitySchemes": {
       "serviceToken": {
-        "description": "The shared secret the Nitro BFF presents on every /api/v1 call (SERVICE_TOKEN; main.rs's require_service_token, #2183). Compared in constant time, and a wrong or missing value is a 401 before the route is even resolved. Browsers never reach this service directly.",
+        "description": "The shared secret the Nitro BFF presents on every /api/v1 call (SERVICE_TOKEN; lib.rs's require_service_token, #2183). Compared in constant time, and a wrong or missing value is a 401 before the route is even resolved. Browsers never reach this service directly.",
         "in": "header",
         "name": "X-Service-Token",
         "type": "apiKey"

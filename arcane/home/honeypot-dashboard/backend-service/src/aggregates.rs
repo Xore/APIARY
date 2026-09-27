@@ -4,6 +4,7 @@
 //! passes through to the routes.
 
 // (filter_values below also lives here — small shared aggregation helpers.)
+use crate::contract;
 use axum::{
     extract::{Query, State},
     http::StatusCode,
@@ -53,6 +54,21 @@ pub struct SourcesPage {
     pub rows: Vec<SourceRow>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/sources",
+    summary = "Known source addresses with their event counts.",
+    params(
+        ("offset" = inline(Option<contract::NonNegativeInt>), Query, description = "Result window start."),
+        ("size" = inline(Option<contract::PositiveInt>), Query, description = "Page size."),
+    ),
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+        (status = 400, description = "Rejected: the request was understood but its input is not acceptable.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 pub async fn sources(
     State(state): State<AppState>,
     Query(q): Query<PageQuery>,
@@ -140,6 +156,16 @@ pub struct FilterValues {
     pub kinds: Vec<String>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/filter-values",
+    summary = "Distinct values behind every explorer filter dropdown.",
+    responses(
+        (status = 200, description = "Success.", body = inline(serde_json::Value), content_type = "application/json"),
+        (status = 502, description = "Elasticsearch (or a sibling it proxies) refused or failed the query.", body = String, content_type = "text/plain"),
+    ),
+    security(("serviceToken" = [])),
+)]
 /// /api/v1/filter-values — the filter bar's autocomplete vocabularies,
 /// mirroring the Go tier's /api/filter-values (live terms over the event
 /// window).
