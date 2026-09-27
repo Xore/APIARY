@@ -11,6 +11,18 @@ curl -fsS -X PUT "$es_url/_snapshot/honeypot-fs" \
   -H 'Content-Type: application/json' \
   --data-binary '{"type":"fs","settings":{"location":"/snapshots","compress":true}}' >/dev/null
 
+# #3283: the per-node shard ceiling stays at Elasticsearch's 1000 default, and
+# is deliberately NOT pinned here. The 1000 default is what stopped every new
+# index being created on 2026-09-21, dead-lettering all sensor ingest -- but the
+# fix is that every shard family is bounded, not that the ceiling moves. Raising
+# it in the repo hides the next unbounded family instead of failing it.
+#
+# tests/docs/test_3283_shard_budget.py projects the real steady state from the
+# filebeat routing rules and the ILM min_ages (467 shards at 21d, 656 at 30d)
+# and fails if that projection ever approaches 1000. If a future run ever needs
+# more than 1000, the answer is a shorter retention window and fewer index
+# families, not a larger ceiling. test_3283_fix.py asserts this file does not
+# pin the ceiling, so the two tests cannot drift apart again.
 # Bounded retention prevents a noisy internet-wide scan or IDS signature from
 # filling the homeserver disk. Daily Filebeat names already provide rollover
 # for suricata/portbridge/dead-letter/analysis-results (a fresh, plain
