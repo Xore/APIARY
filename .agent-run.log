@@ -1,0 +1,1613 @@
+[0m
+> build · stealth
+I'll start by reading the brief.
+[0m→ [0mRead BRIEF.md 
+> build · stealth
+Now let me establish the authoritative counts first, since everything depends on them.
+[0m$ [0mgit branch --show-current; git log --oneline -3; echo "---STACKS---"; git ls-files arcane/home | cut -d/ -f3 | sort -u | tee /home/xore/.hermes/cache/scratch/opencode/stacks.txt | nl
+docs/3399-core-graphs
+ea59406d ci(docs): make mermaid parse errors and whole-tree link rot fail CI
+9d3b569f fix(arkime): translate Arkime's legacy templates into composable ones so they apply (#3346)
+df4a2474 ci(docs): every doc must be reachable from docs/README.md (#3350)
+---STACKS---
+     1	honeypot-agent-intrusion-worker
+     2	honeypot-attacker-identity-worker
+     3	honeypot-beelzebub
+     4	honeypot-canarytokens
+     5	honeypot-cisco-asa-honeypot
+     6	honeypot-citrix-honeypot
+     7	honeypot-conpot
+     8	honeypot-correlator-worker
+     9	honeypot-cowrie
+    10	honeypot-dashboard
+    11	honeypot-dashboard-backend
+    12	honeypot-dicompot
+    13	honeypot-dionaea
+    14	honeypot-dnp3
+    15	honeypot-dns-honeypot
+    16	honeypot-elasticpot
+    17	honeypot-elk
+    18	honeypot-endlessh
+    19	honeypot-galah
+    20	honeypot-hellpot
+    21	honeypot-http
+    22	honeypot-init
+    23	honeypot-keycloak
+    24	honeypot-mailoney
+    25	honeypot-multipot
+    26	honeypot-payload-analysis
+    27	honeypot-payload-inventory-worker
+    28	honeypot-rdp-honeypot
+    29	honeypot-sentrypeer
+    30	honeypot-sonicwall-sma
+    31	honeypot-tanner
+    32	honeypot-utilities
+    33	rex86-eval
+    34	unsloth
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && python3 -c "
+import json
+m=json.load(open('arcane/manifests/home-production.json'))
+print(type(m))
+print(json.dumps(m, indent=1)[:3000])
+"
+<class 'list'>
+[
+ {
+  "syncName": "honeypot-init",
+  "gitRepo": "apiary",
+  "branch": "production",
+  "dockerComposePath": "arcane/home/honeypot-init/compose.yml",
+  "autoSync": false,
+  "syncDirectory": true,
+  "syncInterval": 300
+ },
+ {
+  "syncName": "honeypot-elk",
+  "gitRepo": "apiary",
+  "branch": "production",
+  "dockerComposePath": "arcane/home/honeypot-elk/compose.yml",
+  "autoSync": true,
+  "syncDirectory": true,
+  "syncInterval": 300
+ },
+ {
+  "syncName": "honeypot-keycloak",
+  "gitRepo": "apiary",
+  "branch": "production",
+  "dockerComposePath": "arcane/home/honeypot-keycloak/compose.yml",
+  "autoSync": true,
+  "syncDirectory": true,
+  "syncInterval": 300
+ },
+ {
+  "syncName": "honeypot-conpot",
+  "gitRepo": "apiary",
+  "branch": "production",
+  "dockerComposePath": "arcane/home/honeypot-conpot/compose.yml",
+  "autoSync": false,
+  "syncDirectory": true,
+  "syncInterval": 300
+ },
+ {
+  "syncName": "honeypot-cowrie",
+  "gitRepo": "apiary",
+  "branch": "production",
+  "dockerComposePath": "arcane/home/honeypot-cowrie/compose.yml",
+  "autoSync": false,
+  "syncDirectory": true,
+  "syncInterval": 300
+ },
+ {
+  "syncName": "honeypot-multipot",
+  "gitRepo": "apiary",
+  "branch": "production",
+  "dockerComposePath": "arcane/home/honeypot-multipot/compose.yml",
+  "autoSync": false,
+  "syncDirectory": true,
+  "syncInterval": 300
+ },
+ {
+  "syncName": "honeypot-http",
+  "gitRepo": "apiary",
+  "branch": "production",
+  "dockerComposePath": "arcane/home/honeypot-http/compose.yml",
+  "autoSync": false,
+  "syncDirectory": true,
+  "syncInterval": 300
+ },
+ {
+  "syncName": "honeypot-dnp3",
+  "gitRepo": "apiary",
+  "branch": "production",
+  "dockerComposePath": "arcane/home/honeypot-dnp3/compose.yml",
+  "autoSync": false,
+  "syncDirectory": true,
+  "syncInterval": 300
+ },
+ {
+  "syncName": "honeypot-dionaea",
+  "gitRepo": "apiary",
+  "branch": "production",
+  "dockerComposePath": "arcane/home/honeypot-dionaea/compose.yml",
+  "autoSync": false,
+  "syncDirectory": true,
+  "syncInterval": 300
+ },
+ {
+  "syncName": "honeypot-tanner",
+  "gitRepo": "apiary",
+  "branch": "production",
+  "dockerComposePath": "arcane/home/honeypot-tanner/compose.yml",
+  "autoSync": false,
+  "syncDirectory": true,
+  "syncInterval": 300
+ },
+ {
+  "syncName": "honeypot-dicompot",
+  "gitRepo": "apiary",
+  "branch": "production",
+  "dockerComposePath": "arcane/home/honeypot-dicompot/compose.yml",
+  "autoSync": false,
+  "syncDirectory": true,
+  "syncInterval": 300
+ },
+ {
+  "syncName": "honeypot-dns-honeypot",
+  "gitRepo": "apiary",
+  "branch": "production",
+  "dockerComposePath": "arcane/home/honeypot-dns-honeypot/compose.yml",
+  "autoSync": false,
+  "syncDirectory": true,
+  "syncInterval": 300
+ },
+ {
+  "syncName": "honeypot-citrix-honeypot",
+  "gitRepo": "apiary",
+  "branch": "production",
+  "dockerComposePath": "arcane/home/honeypot-citrix-honeypot/compose.yml",
+  "autoSync": false,
+  "syncDirectory": true,
+  "syncInterval": 300
+ },
+ {
+  "syncName": "honeypot-sonicwall-sma",
+  "gitRepo": "apiary",
+  "branch
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && python3 -c "
+import json
+m=json.load(open('arcane/manifests/home-production.json'))
+print('MANIFEST ENTRIES:', len(m))
+names=[e['syncName'] for e in m]
+print('unique syncName:', len(set(names)))
+import subprocess
+fs=set(open('/home/xore/.hermes/cache/scratch/opencode/stacks.txt').read().split())
+print('FS stacks:', len(fs))
+print('in fs not manifest:', sorted(fs-set(names)))
+print('in manifest not fs:', sorted(set(names)-fs))
+"
+MANIFEST ENTRIES: 39
+unique syncName: 39
+FS stacks: 34
+in fs not manifest: ['rex86-eval']
+in manifest not fs: ['auth-events-worker', 'ghidra', 'ghosts', 'llm-worker', 'ml-worker', 'technitium']
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && python3 -c "
+import json
+m=json.load(open('arcane/manifests/home-production.json'))
+import os
+for e in m:
+    p=e['dockerComposePath']
+    print(('EXISTS ' if os.path.exists(p) else 'MISSING'), e['syncName'], p, '| autoSync=',e['autoSync'], '| repo=',e['gitRepo'])
+"
+EXISTS  honeypot-init arcane/home/honeypot-init/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-elk arcane/home/honeypot-elk/compose.yml | autoSync= True | repo= apiary
+EXISTS  honeypot-keycloak arcane/home/honeypot-keycloak/compose.yml | autoSync= True | repo= apiary
+EXISTS  honeypot-conpot arcane/home/honeypot-conpot/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-cowrie arcane/home/honeypot-cowrie/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-multipot arcane/home/honeypot-multipot/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-http arcane/home/honeypot-http/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-dnp3 arcane/home/honeypot-dnp3/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-dionaea arcane/home/honeypot-dionaea/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-tanner arcane/home/honeypot-tanner/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-dicompot arcane/home/honeypot-dicompot/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-dns-honeypot arcane/home/honeypot-dns-honeypot/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-citrix-honeypot arcane/home/honeypot-citrix-honeypot/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-sonicwall-sma arcane/home/honeypot-sonicwall-sma/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-cisco-asa-honeypot arcane/home/honeypot-cisco-asa-honeypot/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-rdp-honeypot arcane/home/honeypot-rdp-honeypot/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-endlessh arcane/home/honeypot-endlessh/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-beelzebub arcane/home/honeypot-beelzebub/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-hellpot arcane/home/honeypot-hellpot/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-elasticpot arcane/home/honeypot-elasticpot/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-galah arcane/home/honeypot-galah/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-sentrypeer arcane/home/honeypot-sentrypeer/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-mailoney arcane/home/honeypot-mailoney/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-canarytokens arcane/home/honeypot-canarytokens/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-agent-intrusion-worker arcane/home/honeypot-agent-intrusion-worker/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-payload-analysis arcane/home/honeypot-payload-analysis/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-dashboard arcane/home/honeypot-dashboard/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-dashboard-backend arcane/home/honeypot-dashboard-backend/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-utilities arcane/home/honeypot-utilities/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-attacker-identity-worker arcane/home/honeypot-attacker-identity-worker/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-correlator-worker arcane/home/honeypot-correlator-worker/compose.yml | autoSync= False | repo= apiary
+EXISTS  honeypot-payload-inventory-worker arcane/home/honeypot-payload-inventory-worker/compose.yml | autoSync= False | repo= apiary
+EXISTS  auth-events-worker auth-events-worker/docker-compose.yml | autoSync= False | repo= apiary
+EXISTS  llm-worker llm-worker/docker-compose.captured-data-deploy.yml | autoSync= False | repo= apiary
+EXISTS  ml-worker ml-worker/docker-compose.yml | autoSync= False | repo= apiary
+EXISTS  ghosts sandbox/ghosts/compose.yml | autoSync= False | repo= apiary
+EXISTS  technitium technitium/compose.yml | autoSync= True | repo= apiary
+EXISTS  ghidra analysis/ghidra/docker-compose.ghidra.yml | autoSync= False | repo= apiary
+EXISTS  unsloth arcane/home/unsloth/compose.yml | autoSync= False | repo= apiary
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && git ls-files arcane/home | cut -d/ -f3 | sort -u | grep -c '^honeypot-'; echo "--- unsloth/rex86 present? ---"; git ls-files arcane/home/unsloth arcane/home/rex86-eval | head -5; echo "=== ARCHITECTURE.md count lines ==="; grep -n -E '\b(3[0-9]|2[0-9]|4[0-9])\b' docs/ARCHITECTURE.md | head -80
+32
+--- unsloth/rex86 present? ---
+arcane/home/rex86-eval/.env.example
+arcane/home/rex86-eval/compose.yml
+arcane/home/rex86-eval/setup.sh
+arcane/home/unsloth/.env.example
+arcane/home/unsloth/compose.yml
+=== ARCHITECTURE.md count lines ===
+12:dashboard cutover (#1628, completed 2026-08-22) — the Go dashboard is
+28:a homeserver running **31 Arcane-managed sensor/worker/utility stacks**
+29:(plus 6 more at repository-root paths; 37 sync entries in
+59:    sensors["Sensor stacks ×22<br/>each its own single-member network"]
+185:  subgraph sg["Sensor stacks ×21 (isolated networks)"]
+> build · stealth
+[0m→ [0mRead docs/ARCHITECTURE.md 
+> build · stealth
+[0m→ [0mRead docs/NETWORK.md 
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== published ports across arcane/home ===" && grep -rn 'ports:' --include='compose*.yml' arcane/home | wc -l && echo "=== compose files under arcane/home ===" && git ls-files 'arcane/home/*compose*.yml' | sort && echo "=== count ===" && git ls-files 'arcane/home/*compose*.yml' | wc -l
+=== published ports across arcane/home ===
+40
+=== compose files under arcane/home ===
+arcane/home/honeypot-agent-intrusion-worker/compose.yml
+arcane/home/honeypot-attacker-identity-worker/compose.yml
+arcane/home/honeypot-beelzebub/compose.yml
+arcane/home/honeypot-canarytokens/compose.yml
+arcane/home/honeypot-cisco-asa-honeypot/compose.yml
+arcane/home/honeypot-citrix-honeypot/compose.yml
+arcane/home/honeypot-conpot/compose.yml
+arcane/home/honeypot-correlator-worker/compose.yml
+arcane/home/honeypot-cowrie/compose.yml
+arcane/home/honeypot-cowrie/cowrie/honeyfs/opt/nexusai-inference/docker-compose.yml
+arcane/home/honeypot-dashboard-backend/compose.yml
+arcane/home/honeypot-dashboard/compose.yml
+arcane/home/honeypot-dicompot/compose.yml
+arcane/home/honeypot-dionaea/compose.yml
+arcane/home/honeypot-dnp3/compose.yml
+arcane/home/honeypot-dns-honeypot/compose.yml
+arcane/home/honeypot-elasticpot/compose.yml
+arcane/home/honeypot-elk/compose.yml
+arcane/home/honeypot-endlessh/compose.yml
+arcane/home/honeypot-galah/compose.yml
+arcane/home/honeypot-hellpot/compose.yml
+arcane/home/honeypot-http/compose.yml
+arcane/home/honeypot-init/compose.yml
+arcane/home/honeypot-keycloak/compose.yml
+arcane/home/honeypot-mailoney/compose.yml
+arcane/home/honeypot-multipot/compose.yml
+arcane/home/honeypot-payload-analysis/compose.yml
+arcane/home/honeypot-payload-inventory-worker/compose.yml
+arcane/home/honeypot-rdp-honeypot/compose.yml
+arcane/home/honeypot-sentrypeer/compose.yml
+arcane/home/honeypot-sonicwall-sma/compose.yml
+arcane/home/honeypot-tanner/compose.yml
+arcane/home/honeypot-utilities/compose.yml
+arcane/home/rex86-eval/compose.yml
+arcane/home/unsloth/compose.yml
+=== count ===
+35
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && for f in $(git ls-files 'arcane/home/*/compose.yml'); do out=$(python3 - "$f" <<'EOF'
+import sys,re
+p=sys.argv[1]
+lines=open(p).read().split('\n')
+cur=None
+res=[]
+i=0
+while i < len(lines):
+    l=lines[i]
+    m=re.match(r'^  ([A-Za-z0-9_.-]+):\s*$', l)
+    if m: cur=m.group(1)
+    if re.match(r'^\s+ports:', l) or re.match(r'^    ports:', l):
+        # gather block
+        j=i
+        blk=[]
+        indent=len(l)-len(l.lstrip())
+        j+=1
+        while j < len(lines):
+            l2=lines[j]
+            if l2.strip()=='' :
+                j+=1; continue
+            if (len(l2)-len(l2.lstrip()))<=indent: break
+            blk.append(l2.strip())
+            j+=1
+        for b in blk:
+            res.append((cur,b))
+    i+=1
+for c,b in res:
+    print(f"{c}\t{b}")
+EOF
+); if [ -n "$out" ]; then echo "### $f"; echo "$out"; fi; done 2>/dev/null | head -200
+### arcane/home/honeypot-beelzebub/compose.yml
+beelzebub	- ${HP_BIND:-10.8.0.2}:2200:2200
+beelzebub	- ${HP_BIND:-10.8.0.2}:389:389
+beelzebub	- ${HP_BIND:-10.8.0.2}:8000:8000
+beelzebub	- ${HP_BIND:-10.8.0.2}:8880:8880
+### arcane/home/honeypot-canarytokens/compose.yml
+canarytokens-frontend	- ${HP_BIND:-10.8.0.2}:19426:8082
+canarytokens-http-router	- ${HP_BIND:-10.8.0.2}:19427:8083
+### arcane/home/honeypot-cisco-asa-honeypot/compose.yml
+cisco-asa-honeypot	- ${HP_BIND:-10.8.0.2}:8443:8443
+cisco-asa-honeypot	- ${HP_BIND:-10.8.0.2}:500:500/udp
+### arcane/home/honeypot-citrix-honeypot/compose.yml
+citrix-honeypot	- ${HP_BIND:-10.8.0.2}:443:443
+### arcane/home/honeypot-conpot/compose.yml
+conpot	- ${HP_BIND:-10.8.0.2}:102:102
+conpot	- ${HP_BIND:-10.8.0.2}:502:502
+conpot	- ${HP_BIND:-10.8.0.2}:19161:161/udp
+conpot	- ${HP_BIND:-10.8.0.2}:47808:47808/udp
+conpot	- ${HP_BIND:-10.8.0.2}:623:623/udp
+conpot	- ${HP_BIND:-10.8.0.2}:44818:44818
+conpot-s7-1200	- ${HP_BIND:-10.8.0.2}:1102:102
+conpot-s7-1200	- ${HP_BIND:-10.8.0.2}:1502:502
+conpot-s7-1500	- ${HP_BIND:-10.8.0.2}:2102:102
+conpot-s7-1500	- ${HP_BIND:-10.8.0.2}:2502:502
+conpot-kamstrup	- ${HP_BIND:-10.8.0.2}:1025:1025
+conpot-kamstrup	- ${HP_BIND:-10.8.0.2}:50100:50100
+### arcane/home/honeypot-cowrie/compose.yml
+cowrie	- ${HP_BIND:-10.8.0.2}:19022:2222
+cowrie	- ${HP_BIND:-10.8.0.2}:19023:2223
+honeyfs-implant	- ${HP_BIND:-10.8.0.2}:19428:8091
+### arcane/home/honeypot-dashboard/compose.yml
+dashboard-next	- "${HP_BIND:-10.8.0.2}:19090:8080"
+dashboard-next	- "${HP_BIND:-10.8.0.2}:19092:8080"
+### arcane/home/honeypot-dicompot/compose.yml
+dicompot	- ${HP_BIND:-10.8.0.2}:11112:11112
+### arcane/home/honeypot-dionaea/compose.yml
+dionaea	- ${HP_BIND:-10.8.0.2}:21:21
+dionaea	- ${HP_BIND:-10.8.0.2}:445:445
+dionaea	- ${HP_BIND:-10.8.0.2}:1433:1433
+dionaea	- ${HP_BIND:-10.8.0.2}:3306:3306
+dionaea	- ${HP_BIND:-10.8.0.2}:27017:27017
+dionaea	- ${HP_BIND:-10.8.0.2}:1723:1723
+dionaea	- ${HP_BIND:-10.8.0.2}:5060:5060
+dionaea	- ${HP_BIND:-10.8.0.2}:5060:5060/udp
+dionaea	- ${HP_BIND:-10.8.0.2}:135:135
+dionaea	- ${HP_BIND:-10.8.0.2}:1883:1883
+dionaea	- ${HP_BIND:-10.8.0.2}:9100:9100
+dionaea	- ${HP_BIND:-10.8.0.2}:11211:11211
+dionaea	- ${HP_BIND:-10.8.0.2}:69:69/udp
+dionaea	- ${HP_BIND:-10.8.0.2}:1900:1900/udp
+tftp-relay	- ${HP_BIND:-10.8.0.2}:1069:1069/udp
+### arcane/home/honeypot-dnp3/compose.yml
+dnp3	- ${HP_BIND:-10.8.0.2}:20000:20000
+### arcane/home/honeypot-dns-honeypot/compose.yml
+dns-honeypot	- ${HP_BIND:-10.8.0.2}:53:53/udp
+### arcane/home/honeypot-elasticpot/compose.yml
+elasticpot	- ${HP_BIND:-10.8.0.2}:9201:9200
+### arcane/home/honeypot-elk/compose.yml
+kibana	- ${HP_BIND:-10.8.0.2}:19601:5601
+evebox	- ${HP_BIND:-10.8.0.2}:19636:5636
+arkime-viewer	- ${HP_BIND:-10.8.0.2}:19080:8005
+### arcane/home/honeypot-endlessh/compose.yml
+endlessh	- ${HP_BIND:-10.8.0.2}:19024:2222
+### arcane/home/honeypot-galah/compose.yml
+galah	- ${HP_BIND:-10.8.0.2}:8888:8888
+galah	# #1891: the Traefik-only door (see config.yaml). Bound to the same
+galah	# tunnel address as 8888, so it is reachable from the VPS and from
+galah	# nowhere else.
+galah	- ${HP_BIND:-10.8.0.2}:8890:8890
+### arcane/home/honeypot-hellpot/compose.yml
+hellpot	- ${HP_BIND:-10.8.0.2}:8080:8080
+hellpot	# #1908: the Traefik-only door. Same server and same routes -- a
+hellpot	# second listener exists purely so the two ways in stop sharing a
+hellpot	# port, which is what left the source address up to a guess. Bound to
+hellpot	# the tunnel address like 8080, and no portbridge rule points at it,
+hellpot	# so socat-hp-hellpot is its only possible caller.
+hellpot	# (Both halves agree with xff_trust_patch.py's HELLPOT_PROXIED_PORT;
+hellpot	# hellpot/tests/test_xff_trust_patch.py asserts it -- #2192.)
+hellpot	- ${HP_BIND:-10.8.0.2}:8090:8090
+### arcane/home/honeypot-http/compose.yml
+http-honeypot	- ${HP_BIND:-10.8.0.2}:19081:8080
+api-honeypot	- ${HP_BIND:-10.8.0.2}:18083:8080
+### arcane/home/honeypot-keycloak/compose.yml
+keycloak	- ${HP_BIND:-10.8.0.2}:${KEYCLOAK_PORT:-18080}:8080
+### arcane/home/honeypot-mailoney/compose.yml
+mailoney	- ${HP_BIND:-10.8.0.2}:25:25
+### arcane/home/honeypot-multipot/compose.yml
+multipot	- ${HP_BIND:-10.8.0.2}:5432:5432
+multipot	- ${HP_BIND:-10.8.0.2}:5900:5900
+multipot	- ${HP_BIND:-10.8.0.2}:6379:6379
+multipot	- ${HP_BIND:-10.8.0.2}:9200:9200
+multipot	- ${HP_BIND:-10.8.0.2}:2375:2375
+multipot	# #238
+multipot	- ${HP_BIND:-10.8.0.2}:110:110
+multipot	- ${HP_BIND:-10.8.0.2}:143:143
+multipot	- ${HP_BIND:-10.8.0.2}:1080:1080
+multipot	- ${HP_BIND:-10.8.0.2}:2575:2575
+multipot	- ${HP_BIND:-10.8.0.2}:5555:5555
+### arcane/home/honeypot-rdp-honeypot/compose.yml
+rdp-honeypot	- ${HP_BIND:-10.8.0.2}:3389:3389
+### arcane/home/honeypot-sentrypeer/compose.yml
+sentrypeer	- ${HP_BIND:-10.8.0.2}:5070:5060
+sentrypeer	- ${HP_BIND:-10.8.0.2}:5070:5060/udp
+### arcane/home/honeypot-sonicwall-sma/compose.yml
+sonicwall-sma-honeypot	- ${HP_BIND:-10.8.0.2}:8543:8443
+### arcane/home/honeypot-tanner/compose.yml
+tanner_web	- ${HP_BIND:-10.8.0.2}:19091:8091
+snare	- ${HP_BIND:-10.8.0.2}:19082:8080
+### arcane/home/unsloth/compose.yml
+unsloth-studio	- "${UNSLOTH_BIND:-10.8.0.2}:8899:8000"
+unsloth-studio	- "${UNSLOTH_BIND:-10.8.0.2}:8888:8888"
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && python3 - <<'EOF'
+import re,subprocess,os
+files=subprocess.run(['git','ls-files','arcane/home/*/compose.yml'],capture_output=True,text=True).stdout.split()
+tot=0; stacks_with_ports=0; bad=[]
+for p in files:
+    txt=open(p).read()
+    # find published port mapping lines
+    lines=txt.split('\n')
+    got=False
+    for i,l in enumerate(lines):
+        s=l.strip()
+        if s.startswith('- ') and re.search(r'^\-\s+"?[\d.:{}\-$A-Z_]+:\d+', s):
+            # heuristic: port mapping
+            m=re.match(r'^-\s+"?([^:"]+):', s)
+            if m and m.group(1) not in ('127.0.0.1','0.0.0.0','localhost'):
+                tot+=1
+                got=True
+                if 'HP_BIND' not in s:
+                    bad.append((p,s))
+    if got: stacks_with_ports+=1
+print('total stacks under arcane/home:', len(files))
+print('stacks with published ports:', stacks_with_ports)
+print('total published port mappings:', tot)
+print('mappings NOT using HP_BIND:')
+for b in bad: print('  ',b)
+EOF
+total stacks under arcane/home: 34
+stacks with published ports: 25
+total published port mappings: 75
+mappings NOT using HP_BIND:
+   ('arcane/home/unsloth/compose.yml', '- "${UNSLOTH_BIND:-10.8.0.2}:8899:8000"')
+   ('arcane/home/unsloth/compose.yml', '- "${UNSLOTH_BIND:-10.8.0.2}:8888:8888"')
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && for f in $(git ls-files 'arcane/home/*/compose.yml'); do nets=$(python3 -c "
+import sys,re
+p='$f'
+lines=open(p).read().split('\n')
+top=lines[0] if lines else ''
+names=[]
+# top-level networks: under '^networks:'
+inblk=False
+for l in lines:
+    if re.match(r'^networks:\s*\$', l): inblk=True; continue
+    if inblk:
+        if re.match(r'^[A-Za-z]', l): inblk=False; continue
+        m=re.match(r'^  ([A-Za-z0-9_.-]+):', l)
+        if m: names.append(m.group(1))
+print(' '.join(names))
+"); echo "$(echo $f | cut -d/ -f3): ${nets:-<none>}"; done
+honeypot-agent-intrusion-worker: honeynet
+honeypot-attacker-identity-worker: honeynet
+honeypot-beelzebub: beelzebub_net
+honeypot-canarytokens: canarytokens_net
+honeypot-cisco-asa-honeypot: cisco_asa_honeypot_net
+honeypot-citrix-honeypot: citrix_honeypot_net
+honeypot-conpot: conpot_net conpot_s7_1200_net conpot_s7_1500_net conpot_iec104_net conpot_guardian_net conpot_kamstrup_net
+honeypot-correlator-worker: honeynet
+honeypot-cowrie: cowrie_net
+honeypot-dashboard-backend: honeynet honeypot-llm
+honeypot-dashboard: oidc-session honeynet
+honeypot-dicompot: dicompot_net
+honeypot-dionaea: dionaea_net
+honeypot-dnp3: dnp3_net
+honeypot-dns-honeypot: dns_honeypot_net
+honeypot-elasticpot: elasticpot_net
+honeypot-elk: honeynet llm-data
+honeypot-endlessh: endlessh_net
+honeypot-galah: galah_net llm_clients
+honeypot-hellpot: hellpot_net
+honeypot-http: http_honeypot_net api_honeypot_net
+honeypot-init: honeynet
+honeypot-keycloak: keycloak-data keycloak-egress
+honeypot-mailoney: mailoney_net
+honeypot-multipot: multipot_net
+honeypot-payload-analysis: <none>
+honeypot-payload-inventory-worker: honeynet
+honeypot-rdp-honeypot: rdp_honeypot_net
+honeypot-sentrypeer: sentrypeer_net
+honeypot-sonicwall-sma: sonicwall_sma_honeypot_net
+honeypot-tanner: tanner_local
+honeypot-utilities: honeynet docker-socket-proxy_net
+rex86-eval: <none>
+unsloth: <none>
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && for s in honeypot-beelzebub honeypot-canarytokens honeypot-cisco-asa-honeypot honeypot-citrix-honeypot honeypot-conpot honeypot-cowrie honeypot-dicompot honeypot-dionaea honeypot-dnp3 honeypot-dns-honeypot honeypot-elasticpot honeypot-endlessh honeypot-galah honeypot-hellpot honeypot-http honeypot-mailoney honeypot-multipot honeypot-rdp-honeypot honeypot-sentrypeer honeypot-sonicwall-sma; do svcs=$(python3 -c "
+import re
+lines=open('arcane/home/$s/compose.yml').read().split('\n')
+inblk=False; names=[]
+for l in lines:
+    if re.match(r'^services:\s*\$', l): inblk=True; continue
+    if inblk:
+        if re.match(r'^[A-Za-z]', l): inblk=False; continue
+        m=re.match(r'^  ([A-Za-z0-9_.-]+):\s*\$', l)
+        if m: names.append(m.group(1))
+print(' '.join(names))
+"); echo "$s => $svcs"; done
+honeypot-beelzebub => beelzebub
+honeypot-canarytokens => canarytokens-redis canarytokens-frontend canarytokens-switchboard canarytokens-http-router canarytokens-adapter
+honeypot-cisco-asa-honeypot => cisco-asa-honeypot
+honeypot-citrix-honeypot => citrix-honeypot
+honeypot-conpot => conpot conpot-s7-1200 conpot-s7-1500 conpot-iec104 conpot-guardian conpot-kamstrup
+honeypot-cowrie => cowrie honeyfs-implant
+honeypot-dicompot => dicompot
+honeypot-dionaea => dionaea tftp-relay
+honeypot-dnp3 => dnp3
+honeypot-dns-honeypot => dns-honeypot
+honeypot-elasticpot => elasticpot
+honeypot-endlessh => endlessh
+honeypot-galah => galah galah-llm-broker
+honeypot-hellpot => hellpot
+honeypot-http => http-honeypot api-honeypot
+honeypot-mailoney => mailoney
+honeypot-multipot => multipot
+honeypot-rdp-honeypot => rdp-honeypot
+honeypot-sentrypeer => sentrypeer
+honeypot-sonicwall-sma => sonicwall-sma-honeypot
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== wordpot refs ==="; git ls-files | grep -i wordpot; grep -rni 'wordpot' --include='*.md' docs README.md 2>/dev/null | head -20; echo; echo "=== README count claims ==="; grep -n -E 'deployment pieces|arcane/home|3[0-9] (stack|deployment|sensor)|sensors' README.md | head -40
+=== wordpot refs ===
+docs/ARCANE-GIT-SYNC.md:145:as they were. #2813/#2814 (wordpot's retirement in #2381) both surfaced
+docs/ARCANE-GIT-SYNC.md:464:wordpot and f139fe24 retired the Go ip-enrichment-worker). For any
+docs/ARCANE-GIT-SYNC.md:472:  rows (the 37 manifest stacks plus #2577's dangling `honeypot-wordpot`
+docs/ARCANE-GIT-SYNC.md:503:#2577 closed (PR #2704) having done only the wordpot-orphan half of its own
+docs/CGNAT-DEPLOYMENT.md:30:  under `arcane/home/<name>/` (`honeypot-wordpot` sat here until #2381
+docs/DECEPTION-EXTENSIONS.md:62:| WordPot | Retired 2026-08-27 (#2381) — attacker-facing Python 2.7 runtime, noise-floor traffic; its WordPress/CMS probe duty stays covered by http-honeypot's wp-login/readme/xmlrpc pages and beelzebub's HTTP decoy | removed (`arcane/home/honeypot-wordpot/` deleted) | #1421; routed-path decision in #1512; retirement in #2381 |
+README.md:41:| `honeypot-dicompot`, `honeypot-dns-honeypot`, `honeypot-citrix`, `honeypot-cisco-asa`, `honeypot-rdp`, `honeypot-endlessh`, `honeypot-beelzebub`, `honeypot-hellpot`, `honeypot-elasticpot`, `honeypot-galah`, `honeypot-sentrypeer`, `honeypot-mailoney` (`arcane/home/honeypot-<name>/compose.yml`, one directory each) | **home** | more sensors: DICOM medical-imaging decoy, DNS UDP reflection bait (response-capped, never a real amplification vector), Citrix ADC/NetScaler Gateway decoy (CVE-2019-19781), Cisco ASA WebVPN+IKE decoy (CVE-2018-0101), RDP decoy, SSH pre-auth tarpit, vendored multi-protocol deception runtime (SSH/LDAP/MCP/HTTP, #1418), vendored HTTP bot tarpit (#1419), vendored Elasticsearch decoy distinct from multipot's own (#1423), vendored LLM-powered HTTP honeypot behind its own broker-guarded bridge onto the shared Ollama instance (#1420), vendored SIP/VoIP fraud-detection honeypot (#1424), vendored SMTP honeypot taking over port 25 from multipot's own retired handler (#1422) — the row's `honeypot-wordpot` / WordPress/CMS decoy slot was removed when wordpot retired (#2381) |
+
+=== README count claims ===
+11:A full honeypot deployment that follows this repo's CGNAT pattern: the sensors
+28:**All core sensors run without compose profiles.** The only profile is the
+29:optional on-demand `geoip-update` maintenance job. 38 deployment pieces —
+30:32 independent Arcane-managed stacks under `arcane/home/` plus 6 more at
+38:| `honeypot-keycloak` ([arcane/home/honeypot-keycloak/compose.yml](arcane/home/honeypot-keycloak/compose.yml)) | **home** | Arcane-managed Keycloak/PostgreSQL identity stack; only Keycloak is reachable from VPS Traefik over WireGuard |
+39:| `honeypot-init` ([arcane/home/honeypot-init/compose.yml](arcane/home/honeypot-init/compose.yml)) | **home** | one-shot bootstrap jobs: log paths, Elasticsearch templates, Arkime schema, persona validation |
+40:| `honeypot-cowrie`, `honeypot-dionaea`, `honeypot-conpot`, `honeypot-dnp3`, `honeypot-http`, `honeypot-multipot` (`arcane/home/honeypot-<name>/compose.yml`, one directory each) | **home** | the sensors: Cowrie, Dionaea (+ TFTP relay), Conpot personas, DNP3, HTTP/API honeypots, multipot |
+41:| `honeypot-dicompot`, `honeypot-dns-honeypot`, `honeypot-citrix`, `honeypot-cisco-asa`, `honeypot-rdp`, `honeypot-endlessh`, `honeypot-beelzebub`, `honeypot-hellpot`, `honeypot-elasticpot`, `honeypot-galah`, `honeypot-sentrypeer`, `honeypot-mailoney` (`arcane/home/honeypot-<name>/compose.yml`, one directory each) | **home** | more sensors: DICOM medical-imaging decoy, DNS UDP reflection bait (response-capped, never a real amplification vector), Citrix ADC/NetScaler Gateway decoy (CVE-2019-19781), Cisco ASA WebVPN+IKE decoy (CVE-2018-0101), RDP decoy, SSH pre-auth tarpit, vendored multi-protocol deception runtime (SSH/LDAP/MCP/HTTP, #1418), vendored HTTP bot tarpit (#1419), vendored Elasticsearch decoy distinct from multipot's own (#1423), vendored LLM-powered HTTP honeypot behind its own broker-guarded bridge onto the shared Ollama instance (#1420), vendored SIP/VoIP fraud-detection honeypot (#1424), vendored SMTP honeypot taking over port 25 from multipot's own retired handler (#1422) — the row's `honeypot-wordpot` / WordPress/CMS decoy slot was removed when wordpot retired (#2381) |
+42:| `honeypot-canarytokens` ([arcane/home/honeypot-canarytokens/compose.yml](arcane/home/honeypot-canarytokens/compose.yml)) | **home** | self-hosted honeytoken platform (#1426) -- planted-artifact deception, not a listening protocol decoy; `canarytokens-adapter` translates its webhook alerts into this repo's shared JSON event shape. The dashboard's Settings > Canarytokens pane (#1487) creates PDF/Word/Excel/custom-image/Windows-Folder/QR tokens on demand for use *outside* this honeypot (#1662 dropped the stale design doc that described the pre-cutover plan; the shipped pane is authoritative) |
+43:| `honeypot-tanner` ([arcane/home/honeypot-tanner/compose.yml](arcane/home/honeypot-tanner/compose.yml)) | **home** | SNARE + TANNER application-emulation boundary |
+44:| `honeypot-elk` ([arcane/home/honeypot-elk/compose.yml](arcane/home/honeypot-elk/compose.yml)) | **home** | Filebeat, Elasticsearch, Kibana, EveBox, Arkime |
+45:| `honeypot-agent-intrusion-worker` ([arcane/home/honeypot-agent-intrusion-worker/compose.yml](arcane/home/honeypot-agent-intrusion-worker/compose.yml)) | **home** | correlates sensor/Suricata events into campaigns, scores them against deterministic criticality rules, writes the `agent-intrusion-campaigns` index the dashboard's `/agent-campaigns` route reads |
+46:| `honeypot-attacker-identity-worker`, `honeypot-correlator-worker`, `honeypot-payload-inventory-worker` (`arcane/home/honeypot-<name>/compose.yml`, one directory each) | **home** | three more workers that had their own top-level compose file but had drifted out of the deploy/installer inventory before #1502's audit caught it (same class of gap #560 and #891 each fixed once before) -- attacker-identity correlation, cross-sensor campaign correlation, and payload inventory tracking |
+47:| `honeypot-dashboard` ([arcane/home/honeypot-dashboard/compose.yml](arcane/home/honeypot-dashboard/compose.yml)) | **home** | the live investigation dashboard: TanStack Start frontend (`dashboard-next`) in front of the Rust axum `backend-service` API tier, plus its worker containers (importer, networkless enrichment, the `WORKER_LOOPS` aggregation loops) and the services-adapter Docker control surface. Live since #1628's cutover completed 2026-08-22 -- the Go dashboard is deleted; see [docs/DASHBOARD-CUTOVER.md](docs/DASHBOARD-CUTOVER.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+48:| `honeypot-dashboard-backend` ([arcane/home/honeypot-dashboard-backend/compose.yml](arcane/home/honeypot-dashboard-backend/compose.yml)) | **home** | the write-capable, host-mounted `backend-service` instance (:8082), split out from `honeypot-dashboard` by #1622 -- same route table plus the analysis request-spool mounts; only this instance can dispatch `analysis/ghidra`/sandbox jobs |
+49:| `honeypot-payload-analysis` ([arcane/home/honeypot-payload-analysis/compose.yml](arcane/home/honeypot-payload-analysis/compose.yml)) | **home** | payload dedup + YARA scanning |
+50:| `honeypot-utilities` ([arcane/home/honeypot-utilities/compose.yml](arcane/home/honeypot-utilities/compose.yml)) | **home** | autoheal, log rotation, disk-space monitoring, reporting |
+63:existing repository-root path instead of moving under `arcane/home/`, since
+115:The honeypot now runs **on your home network**. Higher-interaction sensors
+119:- Keep `HP_BIND=10.8.0.2` — sensors bind the WireGuard interface only, never the
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== profiles blocks (whole repo) ===" && grep -rn -A6 '^\s*profiles:' --include='*.yml' . 2>/dev/null | grep -v node_modules | head -100
+=== profiles blocks (whole repo) ===
+./analysis/ghidra/docker-compose.ghidra.yml:216:    profiles: ['revdeck']
+./analysis/ghidra/docker-compose.ghidra.yml-217-    build:
+./analysis/ghidra/docker-compose.ghidra.yml-218-      # Upstream's own main branch (the "Rev·Deck" rebrand -- real
+./analysis/ghidra/docker-compose.ghidra.yml-219-      # tokens/layout/components theme, Mermaid diagrams, citations, a much
+./analysis/ghidra/docker-compose.ghidra.yml-220-      # richer Ghidra REST client than either the old build or #1's fork),
+./analysis/ghidra/docker-compose.ghidra.yml-221-      # with #1's exclusive recovery pipeline (symbol/type/class recovery,
+./analysis/ghidra/docker-compose.ghidra.yml-222-      # the Analysis workbench's Recovery subtab) re-ported onto it --
+--
+./arcane/home/honeypot-agent-intrusion-worker/compose.yml:51:    profiles: ["legacy"]
+./arcane/home/honeypot-agent-intrusion-worker/compose.yml-52-    networks:
+./arcane/home/honeypot-agent-intrusion-worker/compose.yml-53-      - honeynet
+./arcane/home/honeypot-agent-intrusion-worker/compose.yml-54-    environment:
+./arcane/home/honeypot-agent-intrusion-worker/compose.yml-55-      ES_HOST: http://elasticsearch:9200
+./arcane/home/honeypot-agent-intrusion-worker/compose.yml-56-      POLL_INTERVAL: "300"
+./arcane/home/honeypot-agent-intrusion-worker/compose.yml-57-      FETCH_WINDOW_DAYS: "10"
+--
+./arcane/home/honeypot-attacker-identity-worker/compose.yml:37:    profiles: ["legacy"]
+./arcane/home/honeypot-attacker-identity-worker/compose.yml-38-    networks:
+./arcane/home/honeypot-attacker-identity-worker/compose.yml-39-      - honeynet
+./arcane/home/honeypot-attacker-identity-worker/compose.yml-40-    environment:
+./arcane/home/honeypot-attacker-identity-worker/compose.yml-41-      - ELASTICSEARCH_URL=http://elasticsearch:9200
+./arcane/home/honeypot-attacker-identity-worker/compose.yml-42-      - EVIDENCE_WINDOW=6h
+./arcane/home/honeypot-attacker-identity-worker/compose.yml-43-      - RUN_INTERVAL=15m
+--
+./arcane/home/honeypot-correlator-worker/compose.yml:52:    profiles: ["legacy"]
+./arcane/home/honeypot-correlator-worker/compose.yml-53-    networks:
+./arcane/home/honeypot-correlator-worker/compose.yml-54-      - honeynet
+./arcane/home/honeypot-correlator-worker/compose.yml-55-    environment:
+./arcane/home/honeypot-correlator-worker/compose.yml-56-      - ELASTICSEARCH_URL=http://elasticsearch:9200
+./arcane/home/honeypot-correlator-worker/compose.yml-57-      - CORRELATION_WINDOW=168h
+./arcane/home/honeypot-correlator-worker/compose.yml-58-      - RUN_INTERVAL=15m
+--
+./arcane/home/honeypot-init/compose.yml:483:    profiles: [geoip-update]
+./arcane/home/honeypot-init/compose.yml-484-    restart: unless-stopped
+./arcane/home/honeypot-init/compose.yml-485-    environment:
+./arcane/home/honeypot-init/compose.yml-486-      - GEOIPUPDATE_ACCOUNT_ID=${MAXMIND_ACCOUNT_ID:-}
+./arcane/home/honeypot-init/compose.yml-487-      - GEOIPUPDATE_LICENSE_KEY=${MAXMIND_LICENSE_KEY:-}
+./arcane/home/honeypot-init/compose.yml-488-      # #2713: GeoLite2-Country added so Arkime (geoLite2Country in
+./arcane/home/honeypot-init/compose.yml-489-      # arkime/config.ini) has its own dedicated database rather than
+--
+./arcane/home/honeypot-init/compose.yml:530:    profiles: [threat-intel]
+./arcane/home/honeypot-init/compose.yml-531-    restart: unless-stopped
+./arcane/home/honeypot-init/compose.yml-532-    environment:
+./arcane/home/honeypot-init/compose.yml-533-      - TZ=Europe/Berlin
+./arcane/home/honeypot-init/compose.yml-534-      # Daily: comfortably inside Spamhaus's own stated polling-cadence rule
+./arcane/home/honeypot-init/compose.yml-535-      # (no more than once per hour) -- see refresh-threat-cidrs.sh's header.
+./arcane/home/honeypot-init/compose.yml-536-      - THREAT_INTEL_REFRESH_INTERVAL=86400
+--
+./arcane/home/honeypot-payload-inventory-worker/compose.yml:44:    profiles: ["legacy"]
+./arcane/home/honeypot-payload-inventory-worker/compose.yml-45-    networks:
+./arcane/home/honeypot-payload-inventory-worker/compose.yml-46-      - honeynet
+./arcane/home/honeypot-payload-inventory-worker/compose.yml-47-    environment:
+./arcane/home/honeypot-payload-inventory-worker/compose.yml-48-      - ELASTICSEARCH_URL=http://elasticsearch:9200
+./arcane/home/honeypot-payload-inventory-worker/compose.yml-49-      - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
+./arcane/home/honeypot-payload-inventory-worker/compose.yml-50-      - SCAN_INTERVAL=5m
+--
+./docker-compose.sandbox.yml:98:    profiles: ["mitm"]
+./docker-compose.sandbox.yml-99-    image: mitmproxy/mitmproxy:latest@sha256:00b77b5d8804c8ad18cb6caefbf9d5849e895e8986c5ce011f4ae30f4385962f
+./docker-compose.sandbox.yml-100-    container_name: sbx-mitmproxy
+./docker-compose.sandbox.yml-101-    networks:
+./docker-compose.sandbox.yml-102-      sandbox:
+./docker-compose.sandbox.yml-103-        ipv4_address: 10.10.10.3
+./docker-compose.sandbox.yml-104-    command: >
+--
+./sandbox/ghosts/compose.yml:156:    profiles: ["test"]
+./sandbox/ghosts/compose.yml-157-    networks:
+./sandbox/ghosts/compose.yml-158-      - ghosts_net
+./sandbox/ghosts/compose.yml-159-    depends_on:
+./sandbox/ghosts/compose.yml-160-      ghosts-api:
+./sandbox/ghosts/compose.yml-161-        condition: service_started
+./sandbox/ghosts/compose.yml-162-    restart: "no"
+--
+./vps/docker-compose.yml:242:    profiles: ["file-extract"]
+./vps/docker-compose.yml-243-    command:
+./vps/docker-compose.yml-244-      - sh
+./vps/docker-compose.yml-245-      - -c
+./vps/docker-compose.yml-246-      - |
+./vps/docker-compose.yml-247-        cap=$${ZEEK_EXTRACT_MAX_BYTES:-2147483648}
+./vps/docker-compose.yml-248-        while true; do
+--
+./vps/docker-compose.yml:616:    profiles: ["blackhole"]
+./vps/docker-compose.yml-617-    deploy:
+./vps/docker-compose.yml-618-      resources: { limits: { cpus: "0.25", memory: 128M } }
+./vps/docker-compose.yml-619-
+./vps/docker-compose.yml-620-  # #914: keeps portbridge's manual (operator-triggered) blackhole list
+./vps/docker-compose.yml-621-  # current, pulling from the dashboard over the WireGuard tunnel that
+./vps/docker-compose.yml-622-  # already exists rather than the VPS accepting a new inbound write channel
+--
+./vps/docker-compose.yml:642:    profiles: ["blackhole"]
+./vps/docker-compose.yml-643-    deploy:
+./vps/docker-compose.yml-644-      resources: { limits: { cpus: "0.25", memory: 128M } }
+./vps/docker-compose.yml-645-
+./vps/docker-compose.yml-646-  # Bounds the portbridge connection log (copytruncate: the writer keeps its
+./vps/docker-compose.yml-647-  # O_APPEND fd). The threshold is the home dashboard's tail-read cap (8 MiB),
+./vps/docker-compose.yml-648-  # not an arbitrary size: above it the oldest entries in the live file are
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== distinct profile groups repo-wide (tracked files) ===" && git ls-files '*.yml' '*.yaml' | xargs grep -ho '^\s*profiles:\s*\[.*\]\s*$' 2>/dev/null | sed 's/.*\[\(.*\)\].*/\1/' | tr -d " '\"\t" | tr ',' '\n' | sort -u | nl
+=== distinct profile groups repo-wide (tracked files) ===
+     1	blackhole
+     2	file-extract
+     3	geoip-update
+     4	legacy
+     5	mitm
+     6	revdeck
+     7	test
+     8	threat-intel
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== rex86-eval compose head ===" && head -25 arcane/home/rex86-eval/compose.yml && echo && echo "=== unsloth compose head ===" && head -20 arcane/home/unsloth/compose.yml && echo && echo "=== manifest history ===" && git log --oneline -6 -- arcane/manifests/home-production.json
+=== rex86-eval compose head ===
+# rex86-eval -- the evaluation container every script in
+# analysis/ghidra/benchmarks/model-quant-benchmark/ drives.
+#
+# #847: this stack was built on the homeserver by hand and is not in version
+# control, so when the box was rebuilt every rex86_*.sh script became inert --
+# they all begin with `docker exec rex86-eval` against
+# /var/dockge/stacks/rex86-eval/work, and neither the container nor that
+# directory existed any more. This file restores it reproducibly.
+#
+# The scripts assume, per model-quant-benchmark/README.md's "Deployment
+# layout":
+#   - llama.cpp built at /work/llama.cpp
+#   - model files under /work/other-models/
+#   - corpus_eval.py + manifest.json + rev_cases_v2_rubric.json copied
+#     flat into /work/
+#
+# The three Python/rubric files are bind-mounted from the repo rather than
+# copied, so an edit to the scoring harness is the same edit everywhere and
+# cannot drift from the committed one. That is the one deviation from the
+# README's "copy them in": the README predates these being version-controlled,
+# and a copy is a stale copy waiting to happen.
+#
+# GPU: exposed because llama-server needs it. Only one GPU on this host, and
+# every driver in that directory serialises behind the rex86_wait_for_gpu_drivers
+# guard in rex86_common.sh -- do not run two of them at once.
+
+=== unsloth compose head ===
+# unsloth -- Unsloth Studio, the web UI onto the round-7 training work area (#3080).
+#
+# This is the *interactive* leg. The batch leg lives in
+# analysis/ghidra/training/compose.yaml and stays `run --rm` only (no restart,
+# no daemon) so it releases VRAM between cold-benchmark legs. Nothing here
+# changes that file; this stack is a second, separate way into the same
+# /var/training directory and the same HF cache.
+#
+# Deployed through Arcane like every other homeserver stack (manifest entry
+# "unsloth" in arcane/manifests/home-production.json). Never `docker compose
+# up` by hand -- see analysis/ghidra/training/TOOLCHAIN.md.
+#
+# Deliberately NO `restart:` policy: the operator starts this stack in Arcane
+# when they want Studio and stops it again. The cold benchmark protocol
+# (round7_coldrun.sh) needs an empty card, so this stack must be stopped while
+# a cold leg runs.
+#
+# Image: the `studio` variant, NOT the `core` digest the batch leg pins. Only
+# `studio` ships /usr/local/bin/unsloth-studio-launch and exposes 8000; `core`
+# has Cmd ["python"] and would start and exit. Both are Apache-2.0. Pinned by
+
+=== manifest history ===
+7e171723 feat(honeypots): citrix AAA/SAML surface, sonicwall-sma decoy stack, decoy reachability fixes (#3131)
+5b82c77e feat(benchmarks): round 7 Unsloth training toolchain (#3092)
+cb563b49 fix(reinstall): repair the Rocky 10/9 bare-OS rebuild — installer, VPS, runners, DNS, Arkime, cowrie (#2949)
+c9b0077d Replace Pi-hole with Technitium DNS on the homeserver (#2911)
+b7892a12 fix(arcane): scope ghosts gitops sync to exclude the vendored upstream tree (#2793)
+91ea6ddd chore(sensors): retire wordpot — attacker-facing py2.7 runtime draws noise-floor traffic (#2381) (#2469)
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== SENSORS.md headings ===" && grep -n '^#\{2,3\} ' docs/SENSORS.md | head -40 && echo && echo "=== SENSORS.md sensor table rows ===" && grep -n -E 'honeypot-[a-z-]+' docs/SENSORS.md | head -40
+=== SENSORS.md headings ===
+74:## Runtime resource budgets
+85:## HTTPS investigation UIs (each its own subdomain, all Keycloak-gated)
+111:## SNARE + TANNER
+127:## Suricata — analysing all the traffic
+154:## Arkime — full packet capture search
+
+=== SENSORS.md sensor table rows ===
+7:| **cowrie** | SSH 22, Telnet 23 | raw tunnel | seeded NexusAI Ubuntu GPU node ([cowrie/README-fs.md](../arcane/home/honeypot-cowrie/cowrie/README-fs.md)) |
+17:| **dicompot** | DICOM 11112 | raw tunnel + PROXY | vendored `nsmfoo/dicompot` medical-imaging decoy (C-ECHO/C-FIND/C-MOVE/C-GET/C-STORE) — ES-only from day one (#238, #413). #3155 sensor-fidelity audit (tier 3b) found 5 fingerprint tells; the wrapper (`arcane/home/honeypot-dicompot/dicompot/aetitle.go`) closes 3 of them below `RunProviderForConn` without forking upstream: the A-ASSOCIATE-AC now carries an Implementation Class UID/Version Name (tell 1), Max PDU Length in the AC is a fixed 16384 persona constant (never echoed from the SCU's proposal) instead of a hardcoded 4194304 (tell 3), and an unrecognized Called AE Title gets a real A-ASSOCIATE-RJ instead of a silent close (tell 4); a first PDU that isn't a well-formed A-ASSOCIATE-RQ now gets a real A-ABORT instead of falling through to a silent close. Tells 2 (any SOP Class UID accepted, including invalid ones) and 5 (C-FIND/C-MOVE/C-GET always return success) live inside the vendored library's own DIMSE handling, unreachable from the wrapper without forking `nsmfoo/dicompot` — tracked as a separate decision, see the issue linked from #3155 |
+27:| **beelzebub** | SSH 2200 (2nd, LLM-capable listener, static-only here), LDAP 389, MCP 8000, HTTP 8880 | raw tunnel | vendored `beelzebub-labs/beelzebub` deception runtime (#1418) -- LDAP/MCP fill real protocol gaps, SSH is a second differently-fingerprinted listener alongside Cowrie, HTTP is a WordPress decoy; no Ollama wiring (would cross the `honeypot-llm` network's sensors-never-reach-the-model boundary, see arcane/home/honeypot-beelzebub/compose.yml) and no Traefik hostname (beelzebub can't parse PROXY protocol or read X-Forwarded-For, so a hostname-fronted copy would have an unattributable source IP) -- ES-only from day one |
+29:| **elasticpot** | HTTP 9201 (own port -- multipot's own hand-rolled Elasticsearch decoy already owns 9200, see arcane/home/honeypot-elasticpot/compose.yml) | raw tunnel | vendored `gitlab.com/bontchev/elasticpot` (#1423), a second, deliberately distinct Elasticsearch decoy (own persona/asset_id, own container name, own port -- see arcane/home/honeypot-elasticpot/compose.yml's naming-care note; multipot's pre-existing 9200 decoy is itself self-written, flagged as a separate follow-up decision rather than replaced here); patched (`elasticpot/no_egress_patch.py`) to stop an unconditional startup call to `https://ident.me` that crashed the process outright when outbound internet wasn't reachable -- ES-only from day one |
+30:| **galah** | HTTP 8888 (home), public 8889, plus Traefik `hub.<domain>` (#1511 -- galah's raw port isn't on Cloudflare's proxied non-standard-port allowlist, confirmed live unreachable through the domain otherwise) | raw tunnel + Traefik | vendored `0x4d31/galah` LLM-powered HTTP honeypot (#1420) -- generates a realistic fake response to any request via the shared Ollama instance, reached only through `galah-llm-broker`, a small purpose-built reverse proxy that's the sole bridge onto `honeypot-llm` for this sensor (galah's own container never joins that network, same invariant beelzebub's static-only choice preserved); model `qwen2.5:7b-instruct-q4_K_M`, not any already-pulled Qwen3/3.5 model -- galah's vendored LLM client has no way to send Ollama's `think: false` field, and a live test showed Qwen3.5's thinking mode running for 90s+ without stopping. `timeout_patch.py` raises galah's own hardcoded 10s response deadline to 100s and `galah-llm-broker`'s `UPSTREAM_TIMEOUT_SECONDS` to 90 (#1513) -- a cold-loaded model (Ollama's default 5-minute idle unload, the normal case for a honeypot) measured 15.1s of load_duration alone in one live sample and over 40s in a second sample under real GPU contention, comfortably past the original 8-10s ceiling and the actual cause of every real hit returning HTTP 500 instead of a decoy response; the new timeouts are set with real margin past either observed sample, not just the first. `xff_trust_patch.py` (#1511) trusts `X-Forwarded-For` from the WireGuard tunnel peer only, needed now that galah is reachable both raw-port (via_port resolution, unchanged) and Traefik-routed (XFF resolution, new) -- ES-only from day one |
+64:Filebeat writes sensor events to versioned `honeypot-v2-*` data streams. The
+100:home (`honeypot-keycloak`, `arcane/home/honeypot-keycloak/compose.yml`). There is no
+106:this up: deploy the Keycloak stack (`arcane/home/honeypot-keycloak/compose.yml`, Dockge-managed,
+122:`snare` (`:8080`). The page source lives under [snare/persona](../arcane/home/honeypot-tanner/snare/persona)
+135:  [analysis/filebeat.yml](../arcane/home/honeypot-elk/analysis/filebeat.yml)).
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && sed -n '1,70p' docs/SENSORS.md | cut -c1-160
+# Sensors
+
+[← back to README](../README.md)
+
+| Sensor | Ports | Exposed via | Notes |
+|---|---|---|---|
+| **cowrie** | SSH 22, Telnet 23 | raw tunnel | seeded NexusAI Ubuntu GPU node ([cowrie/README-fs.md](../arcane/home/honeypot-cowrie/cowrie/README-fs.md)) |
+| **multipot** | Postgres 5432, VNC 5900, Redis 6379, ES 9200, Docker 2375, POP3 110, IMAP 143, SOCKS5 1080, HL7/MLLP 2575, ADB 5555 | raw tunnel | light Go mul
+| **dionaea** | FTP 21, TFTP 69/udp, MSRPC 135, SMB 445, MSSQL 1433, PPTP 1723, MQTT 1883, UPnP 1900/udp, MySQL 3306, SIP 5060 tcp/udp, printer 9100, Memcached 
+| **conpot** | S7 102, Modbus 502, SNMP 161/udp, BACnet 47808/udp, IPMI 623/udp, ENIP 44818 | raw tunnel | **ICS/SCADA** (Siemens S7-200) |
+| **conpot-s7-1200** | S7 1102, Modbus 1502 | raw tunnel | S7-1215C water-treatment persona |
+| **conpot-s7-1500** | S7 2102, Modbus 2502 | raw tunnel | S7-1516 chemical-process persona |
+| **conpot-iec104** | IEC-104 2404 | raw tunnel | S7-300 substation / IEC-60870-5-104 |
+| **conpot-guardian** | Guardian AST 10001 | raw tunnel | fuel and tank-monitor attack surface |
+| **conpot-kamstrup** | Kamstrup 1025, 50100 | raw tunnel | smart-meter data and management protocols |
+| **dnp3** | DNP3 20000 | raw tunnel | ElbeGrid substation RTU -- decodes the link-layer function code plus, when the frame carries a transport+application-laye
+| **dicompot** | DICOM 11112 | raw tunnel + PROXY | vendored `nsmfoo/dicompot` medical-imaging decoy (C-ECHO/C-FIND/C-MOVE/C-GET/C-STORE) — ES-only from day one
+| **dns-honeypot** | DNS 53/udp | raw tunnel | from-scratch UDP reflection bait, response capped in code to at most 1.5x request size — never contacts a real re
+| **citrix-honeypot** | raw 4443 (→ container 443) | raw tunnel + PROXY | Citrix ADC/NetScaler Gateway decoy (CVE-2019-19781 path traversal), Go port of `t3chn0
+| **cisco-asa-honeypot** | WebVPN 8443, IKE 500/udp | raw tunnel + PROXY (8443) | Cisco ASA WebVPN + IKE decoy (CVE-2018-0101), Go port of `t3chn0m4g3/ciscoasa_
+| **sonicwall-sma-honeypot** | raw 8543 (→ container 8443) | raw tunnel + PROXY | SonicWall SMA1000 Work Place/AMC decoy for the CVE-2026-83548 Work Place SSRF 
+| **rdp-honeypot** | RDP 3389 | raw tunnel + PROXY | RDP decoy, Go port of `CommunityHoneyNetwork/rdphoney` — reads the initial X.224 Connection Request, captur
+| **http-honeypot** | `decoy.<domain>` (+ catch-all, + raw :8081 with PROXY protocol — portbridge rule carries the `pp` flag, same as citrix/cisco/rdp/dicom) | 
+| **api-honeypot** | raw 8888 | raw tunnel + PROXY | cloud metadata, Kubernetes, registry, DevOps and LLM API probes — same binary as http-honeypot, same tarpit
+| **snare + tanner** | `www-portal.<domain>` | Traefik | fictional Meridian portal → payload analysis |
+| **endlessh** | SSH 19024 (own port, not cowrie's) | raw tunnel + PROXY, public **2022** (#1509 -- not 2222, which is this VPS's own real sshd, confirmed live 
+| **beelzebub** | SSH 2200 (2nd, LLM-capable listener, static-only here), LDAP 389, MCP 8000, HTTP 8880 | raw tunnel | vendored `beelzebub-labs/beelzebub` decep
+| **hellpot** | HTTP 8080 | raw tunnel + Traefik (`www`/bare-domain/`static`, #1509 -- deliberately routed here, replacing a long-dead `socat-static` bridge; no
+| **elasticpot** | HTTP 9201 (own port -- multipot's own hand-rolled Elasticsearch decoy already owns 9200, see arcane/home/honeypot-elasticpot/compose.yml) | r
+| **galah** | HTTP 8888 (home), public 8889, plus Traefik `hub.<domain>` (#1511 -- galah's raw port isn't on Cloudflare's proxied non-standard-port allowlist, c
+| **sentrypeer** | SIP 5070 (public), 5060 internally -- a port shift, not a collision: dionaea already binds host 5060 for its own generic SIP banner-grab, sen
+| **mailoney** | SMTP 25 | raw tunnel | vendored `awhitehatter/mailoney` (#1422), takes over port 25 from multipot's own retired self-written SMTP handler -- re
+| **canarytokens** | management UI/API 19426 (WireGuard-tunnel only); HTTP-channel 19427 also public via VPS Traefik `HostRegexp(\`^[a-z0-9]+\.honeypot\.example
+| **suricata** | (sniffs all traffic, runs on the **VPS**) | — | IDS over every honeypot packet → eve.json → ELK, pcap → Arkime |
+
+multipot cedes FTP/MySQL/MSSQL/Mongo to Dionaea, and SMTP to mailoney, automatically
+(`MULTIPOT_DISABLE`), so ports never clash.
+
+Dionaea enables `log_json`, `log_incident`, and `store` at startup. Connection
+summaries go to `logs/dionaea/dionaea.json`, complete incident records go to
+`logs/dionaea/dionaea_incident.json`, and captured payloads are stored by hash
+in the persistent `dionaea-lib` volume for the dashboard's `/payloads` page.
+Cowrie's hash-addressed upload/download directory is persisted under
+`logs/cowrie/downloads`, so script payloads (shell, PowerShell, VBS, Python,
+JavaScript, PHP, Perl, and arbitrary binaries) survive container recreation.
+Inline script commands are additionally retained as inert SHA-256 artifacts in
+the dashboard state volume. The dashboard `/payloads` page inventories all
+three stores recursively, identifies each contributing source, and offers
+per-source filters while deduplicating identical hash-addressed artifacts.
+Captured content is never executed.
+The `payload-dedupe` service scans these stores hourly and atomically replaces
+same-filesystem duplicates with hard links. Existing event/download URLs remain
+valid while duplicate disk blocks are reclaimed; its last-run report is stored
+at `state/dedupe/payload-dedupe.json`.
+Its diagnostic logger is limited to `info,warning,error` so debug chatter cannot
+consume the data disk. The `log-maintenance` sidecar copy-truncates and gzips
+human-readable Dionaea, Conpot, and Cowrie logs at 256 MiB (four archives).
+Structured JSON event streams are deliberately never rotated by that sidecar,
+which preserves Filebeat offsets and dashboard ingestion.
+Because RFC 1350 TFTP switches to a dynamic transfer-ID port, the internal
+`tftp-relay` keeps public UDP 69 stable while forwarding that exchange to
+Dionaea inside `honeynet`; it is infrastructure and is not shown as a sensor.
+
+Filebeat writes sensor events to versioned `honeypot-v2-*` data streams. The
+`elasticsearch-setup` one-shot maps each original `honeypot` object as
+`flattened`, so heterogeneous Dionaea/Conpot/Cowrie fields cannot reject one
+another due to type conflicts. Non-indexable events also fall back to
+`dead-letter-honeypot` instead of being silently discarded.
+GeoIP enrichment is best-effort: empty or malformed addresses are skipped, but
+the original event is always retained.
+> build · stealth
+Authoritative numbers established. Now let me fix ARCHITECTURE.md.
+[0m← [0mEdit docs/ARCHITECTURE.md
+Index: docs/ARCHITECTURE.md
+===================================================================
+--- docs/ARCHITECTURE.md
++++ docs/ARCHITECTURE.md
+@@ -24,10 +24,10 @@
+ 
+ A public VPS terminates attacker traffic — Suricata sniffs it, Traefik
+ routes HTTP through Keycloak-backed auth, portbridge relays raw protocol
+ ports — and forwards everything over a home-initiated WireGuard tunnel to
+-a homeserver running **31 Arcane-managed sensor/worker/utility stacks**
+-(plus 6 more at repository-root paths; 37 sync entries in
++a homeserver running **33 Arcane-managed sensor/worker/utility stacks**
++(plus 6 more at repository-root paths; 39 sync entries in
+ [`arcane/manifests/home-production.json`](../arcane/manifests/home-production.json),
+ which is authoritative — not `.github/workflows/deploy.yml`). Sensors
+ write JSON logs to shared host directories; Filebeat ships them into
+ Elasticsearch through one normalizing/enriching ingest pipeline; worker
+
+> build · stealth
+[0m← [0mEdit docs/ARCHITECTURE.md
+Index: docs/ARCHITECTURE.md
+===================================================================
+--- docs/ARCHITECTURE.md
++++ docs/ARCHITECTURE.md
+@@ -55,9 +55,9 @@
+   subgraph home["Home server (CGNAT)"]
+     direction TB
+     kc["honeypot-keycloak<br/>Keycloak + private PostgreSQL"]
+     init["honeypot-init<br/>bootstrap jobs → *.done markers"]
+-    sensors["Sensor stacks ×22<br/>each its own single-member network"]
++    sensors["Sensor stacks ×20<br/>each its own single-member network"]
+     tanner["honeypot-tanner<br/>SNARE+TANNER+nested Docker"]
+     elk["honeypot-elk<br/>Filebeat · Elasticsearch · Kibana<br/>EveBox · Arkime · zeek-proxy"]
+     dash["honeypot-dashboard (+ -backend)<br/>frontend-next · backend-service ×2<br/>worker loops · services-adapter"]
+     payloads["honeypot-payload-analysis<br/>dedupe · YARA · ML/LLM scoring"]
+
+> build · stealth
+[0m← [0mEdit docs/ARCHITECTURE.md
+Index: docs/ARCHITECTURE.md
+===================================================================
+--- docs/ARCHITECTURE.md
++++ docs/ARCHITECTURE.md
+@@ -181,11 +181,11 @@
+   end
+   markers[("state/init-markers/*.done")]
+   loginit & esinit & arkinit & snareclone --> markers
+ 
+-  subgraph sg["Sensor stacks ×21 (isolated networks)"]
++  subgraph sg["Sensor stacks ×20 (isolated networks)"]
+     direction LR
+-    cow["cowrie"] & dion["dionaea+tftp"] & conp["conpot ×6"] & rest["dnp3 · dicompot · dns · citrix<br/>cisco-asa · rdp · endlessh · http/api<br/>multipot · mailoney · beelzebub · hellpot<br/>elasticpot · galah · sentrypeer<br/>canarytokens"]
++    cow["cowrie"] & dion["dionaea+tftp"] & conp["conpot ×6"] & rest["dnp3 · dicompot · dns · citrix<br/>cisco-asa · sonicwall-sma · rdp · endlessh<br/>http/api · multipot · mailoney · beelzebub<br/>hellpot · elasticpot · galah · sentrypeer<br/>canarytokens"]
+   end
+ 
+   logsT[("logs/&lt;sensor&gt;")]
+   enrichW["enrichment worker (networkless)"] --> enrichedT[("logs/enriched")]
+
+> build · stealth
+Now README.md and NETWORK.md:
+[0m→ [0mRead README.md [90m[offset=20, limit=20][0m
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== '37 sync' / '38 deployment' / '32 stacks' / '31 Arcane' across all docs ===" && grep -rn -E '(37 sync|38 deployment|32 (independent )?(Arcane-managed )?stacks|31 Arcane|zero exceptions across all 32|×2[12]|sensor stacks ×)' --include='*.md' . | grep -v node_modules | grep -v graphify-out
+=== '37 sync' / '38 deployment' / '32 stacks' / '31 Arcane' across all docs ===
+./README.md:29:optional on-demand `geoip-update` maintenance job. 38 deployment pieces —
+./README.md:30:32 independent Arcane-managed stacks under `arcane/home/` plus 6 more at
+./docs/NETWORK.md:66:  repo-wide during the #1960 review: zero exceptions across all 32 stacks.
+./BRIEF.md:44:- ARCHITECTURE.md says "31 Arcane-managed sensor/worker/utility stacks", "37 sync
+./BRIEF.md:45:  entries", "Sensor stacks ×22", "Sensor stacks ×21 (isolated networks)" in two
+./BRIEF.md:46:  different diagrams. README.md says "38 deployment pieces — 32 under
+./BRIEF.md:50:- NETWORK.md says "zero exceptions across all 32 stacks" for the HP_BIND rule.
+> build · stealth
+[0m← [0mEdit README.md
+Index: README.md
+===================================================================
+--- README.md
++++ README.md
+@@ -25,10 +25,10 @@
+   wg --> home["home APIARY stacks<br/>@ 10.8.0.2"]
+ ```
+ 
+ **All core sensors run without compose profiles.** The only profile is the
+-optional on-demand `geoip-update` maintenance job. 38 deployment pieces —
+-32 independent Arcane-managed stacks under `arcane/home/` plus 6 more at
++optional on-demand `geoip-update` maintenance job. 39 deployment pieces —
++33 independent Arcane-managed stacks under `arcane/home/` plus 6 more at
+ their own repository-root paths, all at home, plus the VPS (see
+ [docs/ARCANE-GIT-SYNC.md](docs/ARCANE-GIT-SYNC.md) for how a repo commit
+ reaches the live host, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for
+ why the home side split into this many Compose stacks):
+
+> build · stealth
+Now the missing `sonicwall-sma` and `unsloth` rows in the README table:
+[0m← [0mEdit README.md
+Index: README.md
+===================================================================
+--- README.md
++++ README.md
+@@ -37,9 +37,9 @@
+ |---|---|---|
+ | `honeypot-keycloak` ([arcane/home/honeypot-keycloak/compose.yml](arcane/home/honeypot-keycloak/compose.yml)) | **home** | Arcane-managed Keycloak/PostgreSQL identity stack; only Keycloak is reachable from VPS Traefik over WireGuard |
+ | `honeypot-init` ([arcane/home/honeypot-init/compose.yml](arcane/home/honeypot-init/compose.yml)) | **home** | one-shot bootstrap jobs: log paths, Elasticsearch templates, Arkime schema, persona validation |
+ | `honeypot-cowrie`, `honeypot-dionaea`, `honeypot-conpot`, `honeypot-dnp3`, `honeypot-http`, `honeypot-multipot` (`arcane/home/honeypot-<name>/compose.yml`, one directory each) | **home** | the sensors: Cowrie, Dionaea (+ TFTP relay), Conpot personas, DNP3, HTTP/API honeypots, multipot |
+-| `honeypot-dicompot`, `honeypot-dns-honeypot`, `honeypot-citrix`, `honeypot-cisco-asa`, `honeypot-rdp`, `honeypot-endlessh`, `honeypot-beelzebub`, `honeypot-hellpot`, `honeypot-elasticpot`, `honeypot-galah`, `honeypot-sentrypeer`, `honeypot-mailoney` (`arcane/home/honeypot-<name>/compose.yml`, one directory each) | **home** | more sensors: DICOM medical-imaging decoy, DNS UDP reflection bait (response-capped, never a real amplification vector), Citrix ADC/NetScaler Gateway decoy (CVE-2019-19781), Cisco ASA WebVPN+IKE decoy (CVE-2018-0101), RDP decoy, SSH pre-auth tarpit, vendored multi-protocol deception runtime (SSH/LDAP/MCP/HTTP, #1418), vendored HTTP bot tarpit (#1419), vendored Elasticsearch decoy distinct from multipot's own (#1423), vendored LLM-powered HTTP honeypot behind its own broker-guarded bridge onto the shared Ollama instance (#1420), vendored SIP/VoIP fraud-detection honeypot (#1424), vendored SMTP honeypot taking over port 25 from multipot's own retired handler (#1422) — the row's `honeypot-wordpot` / WordPress/CMS decoy slot was removed when wordpot retired (#2381) |
++| `honeypot-dicompot`, `honeypot-dns-honeypot`, `honeypot-citrix`, `honeypot-cisco-asa`, `honeypot-sonicwall-sma`, `honeypot-rdp`, `honeypot-endlessh`, `honeypot-beelzebub`, `honeypot-hellpot`, `honeypot-elasticpot`, `honeypot-galah`, `honeypot-sentrypeer`, `honeypot-mailoney` (`arcane/home/honeypot-<name>/compose.yml`, one directory each) | **home** | more sensors: DICOM medical-imaging decoy, DNS UDP reflection bait (response-capped, never a real amplification vector), Citrix ADC/NetScaler Gateway decoy (CVE-2019-19781), Cisco ASA WebVPN+IKE decoy (CVE-2018-0101), SonicWall SMA1000 Work Place/AMC decoy (CVE-2026-83548 Work Place SSRF), RDP decoy, SSH pre-auth tarpit, vendored multi-protocol deception runtime (SSH/LDAP/MCP/HTTP, #1418), vendored HTTP bot tarpit (#1419), vendored Elasticsearch decoy distinct from multipot's own (#1423), vendored LLM-powered HTTP honeypot behind its own broker-guarded bridge onto the shared Ollama instance (#1420), vendored SIP/VoIP fraud-detection honeypot (#1424), vendored SMTP honeypot taking over port 25 from multipot's own retired handler (#1422) — the row's `honeypot-wordpot` / WordPress/CMS decoy slot was removed when wordpot retired (#2381) |
+ | `honeypot-canarytokens` ([arcane/home/honeypot-canarytokens/compose.yml](arcane/home/honeypot-canarytokens/compose.yml)) | **home** | self-hosted honeytoken platform (#1426) -- planted-artifact deception, not a listening protocol decoy; `canarytokens-adapter` translates its webhook alerts into this repo's shared JSON event shape. The dashboard's Settings > Canarytokens pane (#1487) creates PDF/Word/Excel/custom-image/Windows-Folder/QR tokens on demand for use *outside* this honeypot (#1662 dropped the stale design doc that described the pre-cutover plan; the shipped pane is authoritative) |
+ | `honeypot-tanner` ([arcane/home/honeypot-tanner/compose.yml](arcane/home/honeypot-tanner/compose.yml)) | **home** | SNARE + TANNER application-emulation boundary |
+ | `honeypot-elk` ([arcane/home/honeypot-elk/compose.yml](arcane/home/honeypot-elk/compose.yml)) | **home** | Filebeat, Elasticsearch, Kibana, EveBox, Arkime |
+ | `honeypot-agent-intrusion-worker` ([arcane/home/honeypot-agent-intrusion-worker/compose.yml](arcane/home/honeypot-agent-intrusion-worker/compose.yml)) | **home** | correlates sensor/Suricata events into campaigns, scores them against deterministic criticality rules, writes the `agent-intrusion-campaigns` index the dashboard's `/agent-campaigns` route reads |
+
+> build · stealth
+[0m→ [0mRead README.md [90m[limit=10, offset=49][0m
+> build · stealth
+[0m← [0mEdit README.md
+Index: README.md
+===================================================================
+--- README.md
++++ README.md
+@@ -47,8 +47,9 @@
+ | `honeypot-dashboard` ([arcane/home/honeypot-dashboard/compose.yml](arcane/home/honeypot-dashboard/compose.yml)) | **home** | the live investigation dashboard: TanStack Start frontend (`dashboard-next`) in front of the Rust axum `backend-service` API tier, plus its worker containers (importer, networkless enrichment, the `WORKER_LOOPS` aggregation loops) and the services-adapter Docker control surface. Live since #1628's cutover completed 2026-08-22 -- the Go dashboard is deleted; see [docs/DASHBOARD-CUTOVER.md](docs/DASHBOARD-CUTOVER.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+ | `honeypot-dashboard-backend` ([arcane/home/honeypot-dashboard-backend/compose.yml](arcane/home/honeypot-dashboard-backend/compose.yml)) | **home** | the write-capable, host-mounted `backend-service` instance (:8082), split out from `honeypot-dashboard` by #1622 -- same route table plus the analysis request-spool mounts; only this instance can dispatch `analysis/ghidra`/sandbox jobs |
+ | `honeypot-payload-analysis` ([arcane/home/honeypot-payload-analysis/compose.yml](arcane/home/honeypot-payload-analysis/compose.yml)) | **home** | payload dedup + YARA scanning |
+ | `honeypot-utilities` ([arcane/home/honeypot-utilities/compose.yml](arcane/home/honeypot-utilities/compose.yml)) | **home** | autoheal, log rotation, disk-space monitoring, reporting |
++| `unsloth` ([arcane/home/unsloth/compose.yml](arcane/home/unsloth/compose.yml)) | **home** | Unsloth Studio, the interactive leg of the round-7 training work area (#3080); operator starts and stops it in Arcane so it can release VRAM between cold-benchmark legs |
+ | [`vps/`](vps/) | **VPS** | Traefik, portbridge raw tunnels, Suricata, WireGuard HTTP bridges, and isolated Keycloak OIDC gateways |
+ 
+ Every stack above is a directory-aware Arcane Git sync driven by
+ [`arcane/manifests/home-production.json`](arcane/manifests/home-production.json)
+
+> build · stealth
+Now NETWORK.md's HP_BIND claim — the stack count plus the one literal exception I found:
+[0m← [0mEdit docs/NETWORK.md
+Index: docs/NETWORK.md
+===================================================================
+--- docs/NETWORK.md
++++ docs/NETWORK.md
+@@ -62,9 +62,12 @@
+   listener.
+ - **Home firewall**: none to reason about — the home server has no inbound
+   exposure at all. Every published container port binds `${HP_BIND}`
+   (normally `10.8.0.2`, the WireGuard address), never `0.0.0.0`. Verified
+-  repo-wide during the #1960 review: zero exceptions across all 32 stacks.
++  repo-wide during the #1960 review: no `0.0.0.0` bind anywhere under
++  `arcane/home/`. The one stack that spells the variable differently is
++  `unsloth`, whose two published ports use `${UNSLOTH_BIND:-10.8.0.2}` —
++  same tunnel-only default, different name.
+ 
+ ## Ingress paths
+ 
+ Two ways in, chosen per protocol:
+
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== explicit 0.0.0.0 / bare-port binds under arcane/home ===" && grep -rn -E '^\s*-\s+"?0\.0\.0\.0' --include='compose*.yml' arcane/home ; echo "exit=$?"; echo "=== any ports line without HP_BIND/UNSLOTH_BIND/127.0.0.1/localhost ==="; python3 - <<'EOF'
+import re,subprocess
+files=subprocess.run(['git','ls-files','arcane/home/*/compose.yml'],capture_output=True,text=True).stdout.split()
+for p in files:
+    for i,l in enumerate(open(p).read().split('\n'),1):
+        s=l.strip()
+        if re.match(r'^-\s+"?.+:\d+', s) or re.match(r'^-\s+\d+:\d+', s):
+            if not any(k in s for k in ('HP_BIND','UNSLOTH_BIND')):
+                print(f'{p}:{i}: {s}')
+EOF
+echo "--- done ---"
+=== explicit 0.0.0.0 / bare-port binds under arcane/home ===
+arcane/home/honeypot-elk/compose.yml:270:      - 0.0.0.0
+exit=0
+=== any ports line without HP_BIND/UNSLOTH_BIND/127.0.0.1/localhost ===
+arcane/home/honeypot-attacker-identity-worker/compose.yml:41: - ELASTICSEARCH_URL=http://elasticsearch:9200
+arcane/home/honeypot-canarytokens/compose.yml:308: - LISTEN_ADDR=:8083
+arcane/home/honeypot-canarytokens/compose.yml:309: - SWITCHBOARD_URL=http://canarytokens-switchboard:8083
+arcane/home/honeypot-canarytokens/compose.yml:310: - REDIS_ADDR=canarytokens-redis:6379
+arcane/home/honeypot-canarytokens/compose.yml:311: - ADAPTER_URL=http://canarytokens-adapter.internal:8090/
+arcane/home/honeypot-cisco-asa-honeypot/compose.yml:26: - HTTPS_LISTEN_ADDR=:8443
+arcane/home/honeypot-cisco-asa-honeypot/compose.yml:27: - IKE_LISTEN_ADDR=:500
+arcane/home/honeypot-citrix-honeypot/compose.yml:23: - LISTEN_ADDR=:443
+arcane/home/honeypot-correlator-worker/compose.yml:56: - ELASTICSEARCH_URL=http://elasticsearch:9200
+arcane/home/honeypot-dashboard-backend/compose.yml:95: - LISTEN_ADDR=0.0.0.0:8081
+arcane/home/honeypot-dashboard-backend/compose.yml:96: - ELASTICSEARCH_URL=http://elasticsearch:9200
+arcane/home/honeypot-dashboard-backend/compose.yml:109: - OLLAMA_URL=http://ollama:11434
+arcane/home/honeypot-dashboard-backend/compose.yml:118: - LLM_MODEL=${LLM_MODEL:-qwen3:14b}
+arcane/home/honeypot-dashboard-backend/compose.yml:183: - FILEBEAT_URL=${FILEBEAT_URL:-http://filebeat:5066}
+arcane/home/honeypot-dashboard/compose.yml:169: - LISTEN_ADDR=0.0.0.0:8082
+arcane/home/honeypot-dashboard/compose.yml:170: - ELASTICSEARCH_URL=http://elasticsearch:9200
+arcane/home/honeypot-dashboard/compose.yml:283: - LISTEN_ADDR=127.0.0.1:8099
+arcane/home/honeypot-dashboard/compose.yml:284: - ELASTICSEARCH_URL=http://elasticsearch:9200
+arcane/home/honeypot-dashboard/compose.yml:387: - FILEBEAT_URL=${FILEBEAT_URL:-http://filebeat:5066}
+arcane/home/honeypot-dashboard/compose.yml:470: - BACKEND_URL=http://backend-service:8081
+arcane/home/honeypot-dashboard/compose.yml:478: - BACKEND_MOUNTED_URL=http://backend-service-mounted:8082
+arcane/home/honeypot-dashboard/compose.yml:507: - OIDC_SESSION_REDIS_URL=redis://oidc-sessions:6379/0
+arcane/home/honeypot-dashboard/compose.yml:630: - LISTEN_ADDR=127.0.0.1:8098
+arcane/home/honeypot-dashboard/compose.yml:631: - ELASTICSEARCH_URL=http://elasticsearch:9200
+arcane/home/honeypot-dashboard/compose.yml:812: - LISTEN_ADDR=127.0.0.1:8097
+arcane/home/honeypot-dashboard/compose.yml:813: - ELASTICSEARCH_URL=http://elasticsearch:9200
+arcane/home/honeypot-dionaea/compose.yml:202: - TFTP_TARGET=dionaea:69
+arcane/home/honeypot-dnp3/compose.yml:32: - LISTEN_ADDR=:20000
+arcane/home/honeypot-dns-honeypot/compose.yml:30: - LISTEN_ADDR=:53
+arcane/home/honeypot-elk/compose.yml:87: - curl -sf http://localhost:9200/_cluster/health || exit 1
+arcane/home/honeypot-elk/compose.yml:139: - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+arcane/home/honeypot-elk/compose.yml:262: - http://elasticsearch:9200
+arcane/home/honeypot-elk/compose.yml:630: - ARKIME__elasticsearch=http://elasticsearch:9200
+arcane/home/honeypot-elk/compose.yml:738: - ARKIME__elasticsearch=http://elasticsearch:9200
+arcane/home/honeypot-elk/compose.yml:796: - ES_URL=http://elasticsearch:9200
+arcane/home/honeypot-endlessh/compose.yml:51: - LISTEN_ADDR=:2222
+arcane/home/honeypot-galah/compose.yml:65: - LLM_MODEL=qwen2.5:7b-instruct-q4_K_M
+arcane/home/honeypot-galah/compose.yml:66: - LLM_SERVER_URL=http://galah-llm-broker:11434
+arcane/home/honeypot-galah/compose.yml:111: - OLLAMA_URL=http://ollama:11434
+arcane/home/honeypot-galah/compose.yml:112: - LISTEN_ADDR=:11434
+arcane/home/honeypot-http/compose.yml:36: - LISTEN_ADDR=:8080
+arcane/home/honeypot-http/compose.yml:88: - LISTEN_ADDR=:8080
+arcane/home/honeypot-init/compose.yml:222: - ELASTICSEARCH_URL=http://elasticsearch:9200
+arcane/home/honeypot-init/compose.yml:274: - KIBANA_URL=http://kibana:5601
+arcane/home/honeypot-init/compose.yml:406: - ARKIME__elasticsearch=http://elasticsearch:9200
+arcane/home/honeypot-payload-inventory-worker/compose.yml:48: - ELASTICSEARCH_URL=http://elasticsearch:9200
+arcane/home/honeypot-rdp-honeypot/compose.yml:28: - LISTEN_ADDR=:3389
+arcane/home/honeypot-sonicwall-sma/compose.yml:23: - LISTEN_ADDR=:8443
+arcane/home/honeypot-sonicwall-sma/compose.yml:31: - AMC_RELAY_URL=http://10.8.0.2:18083/latest/meta-data/iam/security-credentials/worker-node
+arcane/home/honeypot-tanner/compose.yml:211: - DOCKER_HOST=tcp://tanner_docker:2375
+arcane/home/honeypot-utilities/compose.yml:235: - ELASTICSEARCH_URL=http://elasticsearch:9200
+arcane/home/honeypot-utilities/compose.yml:282: - DOCKER_SOCK=tcp://docker-socket-proxy:2375
+arcane/home/honeypot-utilities/compose.yml:325: - DOCKER_PROXY_URL=http://docker-socket-proxy:2375
+--- done ---
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && sed -n '240,290p' arcane/home/honeypot-elk/compose.yml
+# PUT collides because ES 8.x forbids creating a legacy template whose
+  # pattern overlaps an existing composable one, and our suricata-events
+  # template (analysis/elasticsearch-setup.sh) already matches `suricata-*`.
+  # Confirmed zero actual impact: that same template already sets
+  # `index.mapping.total_fields.limit: 5000` -- the exact value EveBox is
+  # trying to set -- so nothing is under-provisioned. EveBox also logs the
+  # 400 as "Successfully updated" regardless, because it never checks the
+  # response status; that's an upstream logging bug, not a sign anything
+  # failed twice. Do not try to pre-create a legacy suricata-v2 template to
+  # silence this -- it would hit the identical collision, since the
+  # overlap is with our composable template's pattern, not EveBox's.
+  evebox:
+    <<: *runtime-defaults
+    image: jasonish/evebox:latest@sha256:216ef6eb5bfcc1d8d9b13a41ba38eb067060e68c3970fa4579d07c8f5d5a9326
+    container_name: hp-evebox
+    restart: unless-stopped
+    command:
+      - evebox
+      - server
+      - --database
+      - elasticsearch
+      - --elasticsearch
+      - http://elasticsearch:9200
+      - --index
+      - suricata-v2
+      # Filebeat nests each EVE record under suricata.eve.* and the
+      # geoip-honeypot pipeline promotes the addresses into ECS
+      # source/destination fields. --ecs is how EveBox reads that layout.
+      - --ecs
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5636"
+      - --no-tls
+      - --no-auth
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19636:5636
+    volumes:
+      # The image declares VOLUME /var/lib/evebox, so a volume is created here
+      # either way; name it so it is visible rather than anonymous. It now
+      # holds only config.sqlite — saved filters, comments, and escalations,
+      # a few hundred kilobytes. The event store that used to live beside it
+      # is gone: events are read from Elasticsearch.
+      - evebox-config:/var/lib/evebox
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - honeynet
+    # #118: measured (2026-08-02). Publishes only the unprivileged 5636 and
+    # owns nothing but its own config.sqlite volume. cap_drop: ALL with no
+> build · stealth
+[0m← [0mEdit docs/NETWORK.md
+Index: docs/NETWORK.md
+===================================================================
+--- docs/NETWORK.md
++++ docs/NETWORK.md
+@@ -62,12 +62,12 @@
+   listener.
+ - **Home firewall**: none to reason about — the home server has no inbound
+   exposure at all. Every published container port binds `${HP_BIND}`
+   (normally `10.8.0.2`, the WireGuard address), never `0.0.0.0`. Verified
+-  repo-wide during the #1960 review: no `0.0.0.0` bind anywhere under
+-  `arcane/home/`. The one stack that spells the variable differently is
+-  `unsloth`, whose two published ports use `${UNSLOTH_BIND:-10.8.0.2}` —
+-  same tunnel-only default, different name.
++  repo-wide during the #1960 review: no published port binds `0.0.0.0`
++  anywhere under `arcane/home/`. The one stack that spells the variable
++  differently is `unsloth`, whose two published ports use
++  `${UNSLOTH_BIND:-10.8.0.2}` — same tunnel-only default, different name.
+ 
+ ## Ingress paths
+ 
+ Two ways in, chosen per protocol:
+
+> build · stealth
+Now let me verify the ARCHITECTURE.md dashboard-tier claims against main.rs before committing batch 1.
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && R=arcane/home/honeypot-dashboard/backend-service/src/main.rs && ls -la $R && echo "=== route registrations ===" && grep -cE '\.route\(' $R && echo "=== /api/v1 count ===" && grep -oE '"/api/v1[^"]*"' $R | sort -u | wc -l && echo "=== top-level prefix ===" && grep -oE 'nest\("/api/v[0-9]+"' $R | sort -u
+-rw-r--r--. 1 xore xore 26964 Sep 27 12:28 arcane/home/honeypot-dashboard/backend-service/src/main.rs
+=== route registrations ===
+129
+=== /api/v1 count ===
+127
+=== top-level prefix ===
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && R=arcane/home/honeypot-dashboard/backend-service/src/main.rs && grep -nE 'api/v[0-9]|nest\(|Router::new' $R | head -30 && echo "=== worker loop roles ===" && grep -rn 'WORKER_LOOPS' arcane/home/honeypot-dashboard/compose.yml | head
+3://! Serves /api/v1 JSON to the Nitro BFF. This is the foundation slice:
+133:                "which would leave every /api/v1 route open to unauthenticated requests ",
+181:/// Every /api/v1 route requires the BFF's service token (constant-time
+254:                 every /api/v1 route accepts unauthenticated requests. Local development only."
+279:    let api = Router::new()
+280:        .route("/api/v1/overview/kpis", get(overview::kpis))
+281:        .route("/api/v1/overview/dashboard", get(dashboard::dashboard))
+282:        .route("/api/v1/events", get(events::list))
+283:        .route("/api/v1/export/events.csv", get(exports::events_csv))
+284:        .route("/api/v1/export/commands.csv", get(exports::commands_csv))
+285:        .route("/api/v1/export/ips.csv", get(exports::ips_csv))
+286:        .route("/api/v1/export/campaigns.csv", get(exports::campaigns_csv))
+287:        .route("/api/v1/export/clusters.csv", get(exports::clusters_csv))
+288:        .route("/api/v1/export/history.json", get(exports::history_json))
+289:        .route("/api/v1/live", get(live::stream))
+290:        .route("/api/v1/mail/{session_id}", get(mail::get))
+291:        .route("/api/v1/ml-health", get(ml_health::list))
+292:        .route("/api/v1/gpu-queue", get(gpu_queue::list))
+293:        .route("/api/v1/gpu-queue/{job_id}/abort", post(gpu_queue::abort))
+294:        .route("/api/v1/sources", get(aggregates::sources))
+295:        .route("/api/v1/filter-values", get(aggregates::filter_values))
+296:        .route("/api/v1/investigate/ip/{ip}", get(investigate::ip))
+297:        .route("/api/v1/investigate/cidr/{cidr}", get(investigate::cidr))
+298:        .route("/api/v1/investigate/cluster", get(investigate::cluster))
+299:        .route("/api/v1/source-health", get(health::source_health))
+300:        .route("/api/v1/event/{id}", get(event_page::get))
+303:        .route("/api/v1/event/{id}/connections", get(correlations::event_connections))
+304:        .route("/api/v1/connections/{community_id}", get(correlations::flow_by_id))
+305:        .route("/api/v1/cred-reuse", get(correlations::cred_reuse))
+306:        .route("/api/v1/sensors", get(sensors::detail))
+=== worker loop roles ===
+185:      - WORKER_LOOPS=workbench-reconcile
+260:  # Worker role (#1610): the same apiary-backend image with WORKER_LOOPS
+269:  # enabled there instead — see that stack's compose.yml WORKER_LOOPS= line
+332:      # fails CI if any WORKER_LOOPS consumer drops either half again.
+337:      - WORKER_LOOPS=alert-notifier,attacker-identity,agent-intrusion,correlator,dashboard-rollups,threat-intel,zeek-proxy-attribution
+611:  # backend-worker, not an extra WORKER_LOOPS entry bolted onto it: this
+647:      # fails CI if any WORKER_LOOPS consumer drops either half again.
+649:      - WORKER_LOOPS=es-results-importer
+730:      # fails CI if any WORKER_LOOPS consumer drops either half again.
+732:      - WORKER_LOOPS=ip-enrichment
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== dashboard stack: service names + network_mode + ports ===" && python3 - <<'EOF'
+import re
+for p in ['arcane/home/honeypot-dashboard/compose.yml','arcane/home/honeypot-dashboard-backend/compose.yml']:
+    print('###',p)
+    txt=open(p).read().split('\n')
+    inblk=False;cur=None
+    for i,l in enumerate(txt):
+        if re.match(r'^services:\s*$', l): inblk=True; continue
+        if inblk and re.match(r'^[A-Za-z]', l): inblk=False
+        if inblk:
+            m=re.match(r'^  ([A-Za-z0-9_.-]+):\s*$', l)
+            if m: cur=m.group(1)
+            if 'network_mode' in l or re.match(r'^\s+ports:\s*$', l) or (re.match(r'^\s+- "?\$\{?HP_BIND', l)):
+                print(f'  {i+1}: [{cur}] {l.strip()}')
+EOF
+=== dashboard stack: service names + network_mode + ports ===
+### arcane/home/honeypot-dashboard/compose.yml
+  543: [dashboard-next] ports:
+  544: [dashboard-next] - "${HP_BIND:-10.8.0.2}:19090:8080"
+  545: [dashboard-next] - "${HP_BIND:-10.8.0.2}:19092:8080"
+  705: [backend-worker-importer] # backend-worker-importer above -- network_mode: none is a deliberate
+  720: [backend-worker-enrichment] network_mode: none
+  722: [backend-worker-enrichment] # #2299: loop-only role (offline, network_mode: none), still subject
+  802: [backend-worker-enrichment] # backend-worker-enrichment just above, which is network_mode: none).
+  869: [services-adapter] network_mode: none
+### arcane/home/honeypot-dashboard-backend/compose.yml
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && python3 - <<'EOF'
+import re
+for p in ['arcane/home/honeypot-dashboard/compose.yml','arcane/home/honeypot-dashboard-backend/compose.yml']:
+    print('###',p)
+    lines=open(p).read().split('\n')
+    inblk=False;cur=None
+    for i,l in enumerate(lines):
+        if re.match(r'^services:\s*$', l): inblk=True; continue
+        if inblk and re.match(r'^[A-Za-z]', l): inblk=False
+        if inblk:
+            m=re.match(r'^  ([A-Za-z0-9_.-]+):\s*$', l)
+            if m:
+                cur=m.group(1); print(f'  service: {cur}')
+            if 'LISTEN_ADDR' in l or 'container_name' in l:
+                print(f'    {i+1}: [{cur}] {l.strip()}')
+EOF
+### arcane/home/honeypot-dashboard/compose.yml
+  service: oidc-sessions
+    66: [oidc-sessions] container_name: hp-dashboard-oidc-sessions
+    149: [oidc-sessions] # this one serves HTTP request/response for submissions (LISTEN_ADDR is
+  service: backend-service-mounted
+    166: [backend-service-mounted] container_name: hp-apiary-backend-mounted
+    169: [backend-service-mounted] - LISTEN_ADDR=0.0.0.0:8082
+  service: backend-worker
+    280: [backend-worker] container_name: hp-apiary-worker
+    283: [backend-worker] - LISTEN_ADDR=127.0.0.1:8099
+  service: dashboard-next
+    462: [dashboard-next] container_name: hp-dashboard-next
+  service: backend-worker-importer
+    627: [backend-worker-importer] container_name: hp-apiary-worker-importer
+    630: [backend-worker-importer] - LISTEN_ADDR=127.0.0.1:8098
+  service: backend-worker-enrichment
+    718: [backend-worker-enrichment] container_name: hp-apiary-worker-enrichment
+  service: backend-worker-payload-inventory
+    809: [backend-worker-payload-inventory] container_name: hp-apiary-worker-payload-inventory
+    812: [backend-worker-payload-inventory] - LISTEN_ADDR=127.0.0.1:8097
+  service: services-adapter
+    852: [services-adapter] container_name: hp-services-adapter
+### arcane/home/honeypot-dashboard-backend/compose.yml
+  service: backend-service
+    92: [backend-service] container_name: hp-apiary-backend
+    95: [backend-service] - LISTEN_ADDR=0.0.0.0:8081
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== FULL service list per dashboard stack ===" && python3 - <<'EOF'
+import re
+for p in ['arcane/home/honeypot-dashboard/compose.yml','arcane/home/honeypot-dashboard-backend/compose.yml']:
+    lines=open(p).read().split('\n')
+    inblk=False;svcs=[]
+    for l in lines:
+        if re.match(r'^services:\s*$', l): inblk=True; continue
+        if inblk and re.match(r'^[A-Za-z]', l): inblk=False
+        if inblk:
+            m=re.match(r'^  ([A-Za-z0-9_.-]+):\s*$', l)
+            if m: svcs.append(m.group(1))
+    print(p, '->', len(svcs), svcs)
+EOF
+echo; echo "=== volumes in dashboard-backend (proof it is the spools one?) ==="; grep -n -A25 '^volumes:' arcane/home/honeypot-dashboard-backend/compose.yml | head -35
+=== FULL service list per dashboard stack ===
+arcane/home/honeypot-dashboard/compose.yml -> 8 ['oidc-sessions', 'backend-service-mounted', 'backend-worker', 'dashboard-next', 'backend-worker-importer', 'backend-worker-enrichment', 'backend-worker-payload-inventory', 'services-adapter']
+arcane/home/honeypot-dashboard-backend/compose.yml -> 1 ['backend-service']
+
+=== volumes in dashboard-backend (proof it is the spools one?) ===
+242:volumes:
+243-  # Shared with honeypot-dashboard and the main APIARY stack (dionaea
+244-  # writes, this stack only reads) -- explicit fixed name, matching both of
+245-  # those files' own declarations exactly.
+246-  dionaea-lib:
+247-    name: dionaea-lib
+248-  # Shared with honeypot-dashboard (and, both ways, with the main APIARY
+249-  # stack's payload-dedupe/yara-scanner) -- explicit fixed name, matching
+250-  # honeypot-dashboard/compose.yml's own declaration exactly.
+251-  dashboard-state:
+252-    name: dashboard-state
+253-  # Newly given an explicit shared name by this #1622 split -- previously
+254-  # left project-scoped/unnamed in honeypot-dashboard/compose.yml because
+255-  # only services within that one project touched it. Now shared across
+256-  # this project and honeypot-dashboard's (dashboard and services-adapter
+257-  # both still mount it there) -- see this file's header for the full
+258-  # reasoning. honeypot-dashboard/compose.yml's own declaration was updated
+259-  # to the same explicit name in the same change so both projects resolve
+260-  # the identical underlying Docker volume.
+261-  services-adapter-socket:
+262-    name: services-adapter-socket
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && head -60 arcane/home/honeypot-dashboard-backend/compose.yml && echo "=== ...spool mounts in dashboard-backend ===" && grep -n -E 'requests|sandbox|ghidra|ghosts|revs|analysis/' arcane/home/honeypot-dashboard-backend/compose.yml | head -20 && echo "=== ...spool mounts in honeypot-dashboard ===" && grep -n -E 'requests|sandbox|ghidra|ghosts|revs' arcane/home/honeypot-dashboard/compose.yml | head -20
+# honeypot-dashboard-backend -- #1622: backend-service split out of
+# arcane/home/honeypot-dashboard/compose.yml into its own Arcane-managed
+# stack, deployed as /opt/stacks/honeypot-dashboard-backend. This is the
+# deployment-layer counterpart to #1608's SERVE_MODE=all|frontend|bff /
+# BFF_INTERNAL_URL application-code work: that issue made the frontend/BFF
+# tier able to run cross-host; this split is what lets Arcane actually
+# restart/redeploy the request/response backend tier without touching
+# dashboard-next (or vice versa), instead of both living behind one
+# `docker compose` invocation in the combined honeypot-dashboard stack.
+#
+# Scope, deliberately narrow (per the #1622 task): only `backend-service`
+# moved here. `backend-service-mounted`, `backend-worker`,
+# `backend-worker-importer`, `backend-worker-enrichment`, and `dashboard-next`
+# all stay in arcane/home/honeypot-dashboard/compose.yml for now -- splitting
+# those too is further work, not done in this pass. `backend-service` and
+# `dashboard-next` still resolve each other by bare service-name DNS
+# (BACKEND_URL=http://backend-service:8081 in dashboard-next's environment)
+# because both stacks attach to the same explicitly-named `honeynet` bridge
+# below -- the exact mechanism honeypot-attacker-identity-worker and every
+# other split-out stack already use to reach the main stack's services, and
+# already proven live (see honeypot-dashboard/compose.yml's own header).
+#
+# x-runtime-defaults is redefined locally (not inherited -- the anchor lived
+# in the old shared file, which this stack no longer reads) with the exact
+# same content as honeypot-dashboard/compose.yml's own copy, matching the
+# pattern every other split-out worker stack in arcane/home/ already uses
+# (see e.g. honeypot-attacker-identity-worker/compose.yml).
+#
+# Build context (`build: ../honeypot-dashboard/backend-service`): the Rust
+# crate source was deliberately NOT moved -- only this compose service
+# definition split out -- so the build context has to reach into the
+# sibling honeypot-dashboard stack's own directory. No existing arcane/home/
+# stack references a build context outside its own directory (grepped for
+# `build: ../` across every compose file here, found none), so there is no
+# established precedent to follow; this is a considered choice, not a
+# default. It works today because Arcane's directory-aware sync
+# materializes every stack under a shared parent (/var/dockge/stacks/<name>/,
+# see docs/ARCANE-GIT-SYNC.md), so `../honeypot-dashboard/backend-service`
+# resolves correctly as long as both stacks are synced to the SAME host --
+# true of the current single-host topology. It reintroduces exactly the
+# cross-stack coupling this split is otherwise meant to remove: this stack's
+# build breaks if honeypot-dashboard's directory is ever removed, renamed,
+# or (the actual motivating case from #1608/#1622) synced to a *different*
+# Docker host than this one. Genuinely deploying backend-service to a host
+# that doesn't also carry honeypot-dashboard's own directory needs the crate
+# source relocated to a shared/independent path first -- flagged here as a
+# follow-up, not resolved by this pass (see #1622's own report for the
+# on-the-day reasoning).
+#
+# services-adapter-socket: previously left project-scoped/unnamed in
+# honeypot-dashboard/compose.yml on the stated grounds that "nothing else
+# touches it" (see that file's header) -- no longer true once backend-service
+# lives in a different Compose project than services-adapter and dashboard.
+# Given an explicit shared `name:` here AND in honeypot-dashboard/compose.yml
+# (updated in the same #1622 change) so both projects resolve the same
+# underlying Docker volume, the same mechanism honeynet/dashboard-state/
+# dionaea-lib already use. dashboard-state and dionaea-lib were already
+# explicitly named for cross-stack sharing with the main APIARY stack, so
+# their declarations below are unchanged, just now also declared in this
+# second file.
+=== ...spool mounts in dashboard-backend ===
+105:      # "ollama" is the alias analysis/ghidra/docker-compose.ghidra.yml's
+117:      # shares a 20 GiB card with the ghidra/revdeck/session slots.
+226:  # #2329: shared with analysis/ghidra/docker-compose.ghidra.yml, which owns
+=== ...spool mounts in honeypot-dashboard ===
+140:  # #1612 mounted worker role (phase 3a/3b): sandbox/ghidra/github-analysis
+199:      - SANDBOX_REQUEST_DIR=/sandbox-requests
+208:      # is also fed by ghidra-worker.py's drain_revdeck() for the "ghidra"
+212:      - SANDBOX_RESULTS_DIR=/sandbox-results
+220:      # into the shared dashboard-backend-v1-* index family. Workbench/sandbox
+221:      # submissions are exactly the requests you'll want a line for.
+237:      - /var/lib/honeypot-sandbox/requests/pending:/sandbox-requests
+238:      - /var/lib/honeypot-windows-sandbox/requests/pending:/windows-sandbox-requests
+239:      - /var/lib/honeypot-ghosts-sandbox/requests/pending:/ghosts-sandbox-requests
+240:      - /var/lib/honeypot-windows-sandbox/export:/windows-sandbox-results:ro
+241:      - /var/lib/honeypot-ghosts-sandbox/export:/ghosts-sandbox-results:ro
+242:      - /var/lib/honeypot-ghidra/requests/pending:/ghidra-requests
+243:      - /var/lib/honeypot-ghidra/results:/ghidra-results:ro
+244:      - /var/lib/honeypot-github/requests/pending:/github-analysis-requests
+245:      - /var/lib/honeypot-revdeck/requests/pending:/revdeck-requests
+251:      - /var/lib/honeypot-sandbox/export:/sandbox-results:ro
+364:      # #1612 host-local alert signals: log-stream sizes, sandbox/ghidra/
+368:      # the same paths directly. Windows/GHOSTS sandbox and the three
+372:      - SANDBOX_RESULTS_DIR=/sandbox-results
+373:      - SANDBOX_REQUEST_DIR=/sandbox-requests
+> build · stealth
+[0m✗ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== 8082 / 8081 across docs ===" && grep -rn -E '808[12]' --include='*.md' docs README.md | grep -v graphify-out | cut -c1-220 failed
+[91m[1mError: [0mNo tool named "bash" is currently available. Please use a tool from the available tool list.
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== 8082 / 8081 across docs ===" && grep -rn -E ':?808[12]\b' --include='*.md' docs README.md | grep -v graphify-out | cut -c1-230
+=== 8082 / 8081 across docs ===
+docs/ARCHITECTURE.md:122:    bs["backend-service :8081<br/>Rust axum — the API surface<br/>100+ routes under /api/v1"]
+docs/ARCHITECTURE.md:123:    bsm["backend-service-mounted :8082<br/>same route table + host spool mounts<br/>write-capable instance"]
+docs/ARCHITECTURE.md:150:- **backend-service (:8081)** is the unprivileged API tier: constant-time
+docs/ARCHITECTURE.md:154:- **backend-service-mounted (:8082)** is the same code with the host-side
+docs/CGNAT-DEPLOYMENT.md:386:> direct `:8081` tunnel instead.
+docs/CI-CD.md:516:`BACKEND_URL=http://backend-service:8081` (and vice versa) because both
+docs/NETWORK.md:100:    bs["backend-service :8081"] --- fe["frontend-next :19090"]
+docs/NETWORK.md:101:    bs2["backend-service-mounted :8082<br/>(write-capable spools)"]
+docs/SENSORS.md:23:| **http-honeypot** | `decoy.<domain>` (+ catch-all, + raw :8081 with PROXY protocol — portbridge rule carries the `pp` flag, same as citrix/cisco/rdp/dicom) | Traefik | fake nginx / login pages — unrecognized s
+docs/research/2777-litellm-mcp-starlette.md:39:    uv run --no-sync python -m uvicorn app:app --host 0.0.0.0 --port 8082"
+docs/research/2777-litellm-mcp-starlette.md:138:- `canarytokens-frontend` publishes only `${HP_BIND:-10.8.0.2}:19426:8082` —
+docs/research/3011-sonicwall-cve.md:129:  cleartext HTTP decoys (`tcp:8081:10.8.0.2:19081:pp`,
+docs/research/3011-sonicwall-cve.md:144:  raw-tunnelled :8081 http honeypot and plain :80 decoy traffic are
+docs/research/3011-sonicwall-cve.md:167:the `:8081` / `:8888` cleartext streams is the cheapest available coverage and
+README.md:48:| `honeypot-dashboard-backend` ([arcane/home/honeypot-dashboard-backend/compose.yml](arcane/home/honeypot-dashboard-backend/compose.yml)) | **home** | the write-capable, host-mounted `backend-service` instance (:8082)
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== dashboard-backend: volumes: block of the service ===" && sed -n '160,240p' arcane/home/honeypot-dashboard-backend/compose.yml
+=== dashboard-backend: volumes: block of the service ===
+      # those mounts.
+      # #2301 confirmed this line is the two loops' only consumer: an audit
+      # that looked solely at honeypot-dashboard/compose.yml (pre-#1622,
+      # where backend-service used to live) found neither loop wired
+      # anywhere and proposed adding both to backend-worker there — which
+      # would have raced this one instead of fixing a real gap.
+      - WORKER_LOOPS=user-retention-sweep,reports-scheduler
+      # #1612 payload-bytes on-demand mirror self-heal (payload_bytes.rs):
+      # read-only access to the same capture sources main.go's PAYLOAD_DIRS
+      # wiring reads, so a hash dashboard-payload-bytes-v1 hasn't mirrored
+      # yet can still be served (mirrored on demand) instead of coming back
+      # empty until payload-inventory-worker's next scan. Read-only and
+      # single-instance-safe like the Phase-1 mounts above, so it stays on
+      # backend-service rather than the new backend-service-mounted below.
+      - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
+      - SCRIPT_PAYLOAD_DIR=/state/script-payloads
+      # #1682: /api/v1/source-health's "Pipeline status" card reads this
+      # -- serveWhoAmI's own container (backend-service, hp-apiary-backend)
+      # actually answers /api/v1/source-health (serviceJSON() with no
+      # `{mounted: true}` routes to BACKEND_URL, not BACKEND_MOUNTED_URL),
+      # not backend-service-mounted -- a first attempt wired this onto the
+      # wrong service in honeypot-dashboard/compose.yml and it silently
+      # read empty (reported "disabled" instead of failing loudly).
+      - FILEBEAT_URL=${FILEBEAT_URL:-http://filebeat:5066}
+      # #1972 durable per-request app log: obs.rs writes one JSONL line per
+      # served request here, onto the filebeat-tailed logs root, so an API
+      # incident can be reconstructed from Elasticsearch after the container
+      # json-file ring buffer (25m x3 above) has rotated it away. The file is
+      # opened per write and never held open, so a plain rename rotation
+      # works without any signal dance (next append recreates the path).
+      # Provisioned (mkdir + chown 65534) by honeypot-init's log-init step.
+      - DASHBOARD_LOG_FILE=${DASHBOARD_LOG_FILE:-/logs/dashboard-backend/app.jsonl}
+      - TZ=Europe/Berlin
+    volumes:
+      - dashboard-state:/state
+      - services-adapter-socket:/run/services-adapter
+      - dionaea-lib:/dionaea-lib:ro
+      - /opt/stacks/apiary/logs/cowrie/downloads:/cowrie-downloads:ro
+      # Read-write: this service CREATES app.jsonl. The logs root itself is
+      # mounted ro into the elk stack's filebeat; only producers mount their
+      # own subdirectory writable. backend-service-mounted gets its own
+      # sibling directory (honeypot-dashboard/compose.yml) so the two
+      # instances' streams stay separate files for filebeat's registry --
+      # they ship into one ES index family keyed by their logset values.
+      - /opt/stacks/apiary/logs/dashboard-backend:/logs/dashboard-backend
+    networks:
+      - honeynet
+      - honeypot-llm
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    # #2051: HEALTHCHECK is baked into backend-service/Dockerfile itself,
+    # invisible to a compose-only grep for healthcheck:.
+    labels:
+      - autoheal=true
+    deploy:
+      resources:
+        limits: {cpus: "4.0", memory: 1G}
+
+networks:
+  # Shared with the main honeypot-dashboard stack (and the wider APIARY
+  # stack) -- explicit fixed name, not project-prefixed, non-external. Same
+  # mechanism honeypot-dashboard/compose.yml's own header documents and
+  # every other split-out worker stack in arcane/home/ already relies on.
+  honeynet:
+    name: honeynet
+    driver: bridge
+  # #2329: shared with analysis/ghidra/docker-compose.ghidra.yml, which owns
+  # this network (internal: true there -- no internet egress for the LLM
+  # containers on it) and gives its ollama service the `ollama` alias
+  # OLLAMA_URL above depends on. Same fixed-name mechanism as honeynet
+  # above. backend-service only ever reaches Ollama's own /api/embed
+  # endpoint on it, for semantic search's query-time embedding call
+  # (llm_search.rs). honeypot-dashboard/compose.yml declared this same
+  # network back in #151, with a comment describing this exact intent --
+  # but never actually attached it to backend-service's own networks:
+  # list, so it sat dangling through the #1622 split that moved
+  # backend-service into this file. Declared here instead, where the real
+  # consumer now lives and can actually reach it.
+  honeypot-llm:
+    name: honeypot-llm
+    external: true
+> build · stealth
+Found a real factual inversion. Let me verify and fix the dashboard-tier stack membership:
+[0m← [0mEdit docs/ARCHITECTURE.md
+Index: docs/ARCHITECTURE.md
+===================================================================
+--- docs/ARCHITECTURE.md
++++ docs/ARCHITECTURE.md
+@@ -118,9 +118,8 @@
+   end
+ 
+   subgraph stack["honeypot-dashboard"]
+     fe["frontend-next :19090<br/>TanStack Start (Node cluster)<br/>server functions · SSE hub · BFF cookie"]
+-    bs["backend-service :8081<br/>Rust axum — the API surface<br/>100+ routes under /api/v1"]
+     bsm["backend-service-mounted :8082<br/>same route table + host spool mounts<br/>write-capable instance"]
+     loops["backend-worker loops<br/>role picked by WORKER_LOOPS:<br/>alert-notifier · attacker-identity ·<br/>agent-intrusion · correlator · dashboard-rollups ·<br/>threat-intel · zeek-proxy-attribution"]
+     imp["backend-worker importer<br/>es-results-importer, shard-partitionable"]
+     enr["backend-worker-enrichment<br/>network_mode: none — via_port join"]
+@@ -128,8 +127,12 @@
+     adapter["services-adapter<br/>unix socket · allowlist · cap_drop ALL"]
+     sock[("/var/run/docker.sock")]
+   end
+ 
++  subgraph stackbe["honeypot-dashboard-backend (#1622)"]
++    bs["backend-service :8081<br/>Rust axum — the API surface<br/>100+ routes under /api/v1<br/>+ user-retention-sweep · reports-scheduler"]
++  end
++
+   es[("Elasticsearch")]
+ 
+   analyst -->|"HTTPS"| t --> fe
+   fe -->|"serviceFetch/serviceJSON<br/>15s TTL cache + Redis share<br/>ConcurrencyLimiter"| bs
+
+> build · stealth
+[0m→ [0mRead docs/ARCHITECTURE.md [90m[limit=50, offset=112][0m
+> build · stealth
+[0m← [0mEdit docs/ARCHITECTURE.md
+Index: docs/ARCHITECTURE.md
+===================================================================
+--- docs/ARCHITECTURE.md
++++ docs/ARCHITECTURE.md
+@@ -149,16 +149,22 @@
+   `__Host-apiary_bff` cookie, session state in the valkey sidecar. All
+   backend access flows through typed server functions — the browser never
+   speaks to Elasticsearch or sees service tokens. Live updates ride one
+   shared SSE stream whose frames match the Rust emitter's `event` naming.
+-- **backend-service (:8081)** is the unprivileged API tier: constant-time
+-  service-token middleware, 30s ES timeouts, PIT + `search_after`
+-  pagination everywhere, CAS writes. It also hosts the embedded worker
+-  loops — the same image plays each role selected by `WORKER_LOOPS`.
++- **backend-service (:8081)** — the unprivileged API tier, and the only
++  service in the sibling `honeypot-dashboard-backend` stack (#1622 split it
++  out so Arcane can redeploy the API tier without touching `dashboard-next`).
++  Constant-time service-token middleware, 30s ES timeouts, PIT +
++  `search_after` pagination everywhere, CAS writes. It also hosts two
++  embedded worker loops of its own (`user-retention-sweep`,
++  `reports-scheduler`) — the same image plays each role selected by
++  `WORKER_LOOPS`.
+ - **backend-service-mounted (:8082)** is the same code with the host-side
+   request-spool mounts (CAPE/Ghidra/GitHub-analysis/GHOSTS/sandbox/
+-  Windows-sandbox/Rev·Deck). Only this instance can dispatch analysis
+-  jobs; frontend callers resolve it explicitly via `{mounted: true}`, so
++  Windows-sandbox/Rev·Deck), and it lives in `honeypot-dashboard` itself,
++  not in the sibling stack — the name that says "mounted" is the one that
++  carries the mounts. Only this instance can dispatch analysis jobs;
++  frontend callers resolve it explicitly via `{mounted: true}`, so
+   capability follows configuration, not URL guessing.
+ - **Worker containers**: importer mirrors root-owned result spools into
+   `*-analysis-v1` indices (read-only, never writes back — local JSON stays
+   authoritative); enrichment does the ingest-time source-IP join with no
+
+> build · stealth
+Now the inverted README row:
+[0m← [0mEdit README.md
+Index: README.md
+===================================================================
+--- README.md
++++ README.md
+@@ -44,9 +44,9 @@
+ | `honeypot-elk` ([arcane/home/honeypot-elk/compose.yml](arcane/home/honeypot-elk/compose.yml)) | **home** | Filebeat, Elasticsearch, Kibana, EveBox, Arkime |
+ | `honeypot-agent-intrusion-worker` ([arcane/home/honeypot-agent-intrusion-worker/compose.yml](arcane/home/honeypot-agent-intrusion-worker/compose.yml)) | **home** | correlates sensor/Suricata events into campaigns, scores them against deterministic criticality rules, writes the `agent-intrusion-campaigns` index the dashboard's `/agent-campaigns` route reads |
+ | `honeypot-attacker-identity-worker`, `honeypot-correlator-worker`, `honeypot-payload-inventory-worker` (`arcane/home/honeypot-<name>/compose.yml`, one directory each) | **home** | three more workers that had their own top-level compose file but had drifted out of the deploy/installer inventory before #1502's audit caught it (same class of gap #560 and #891 each fixed once before) -- attacker-identity correlation, cross-sensor campaign correlation, and payload inventory tracking |
+ | `honeypot-dashboard` ([arcane/home/honeypot-dashboard/compose.yml](arcane/home/honeypot-dashboard/compose.yml)) | **home** | the live investigation dashboard: TanStack Start frontend (`dashboard-next`) in front of the Rust axum `backend-service` API tier, plus its worker containers (importer, networkless enrichment, the `WORKER_LOOPS` aggregation loops) and the services-adapter Docker control surface. Live since #1628's cutover completed 2026-08-22 -- the Go dashboard is deleted; see [docs/DASHBOARD-CUTOVER.md](docs/DASHBOARD-CUTOVER.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+-| `honeypot-dashboard-backend` ([arcane/home/honeypot-dashboard-backend/compose.yml](arcane/home/honeypot-dashboard-backend/compose.yml)) | **home** | the write-capable, host-mounted `backend-service` instance (:8082), split out from `honeypot-dashboard` by #1622 -- same route table plus the analysis request-spool mounts; only this instance can dispatch `analysis/ghidra`/sandbox jobs |
++| `honeypot-dashboard-backend` ([arcane/home/honeypot-dashboard-backend/compose.yml](arcane/home/honeypot-dashboard-backend/compose.yml)) | **home** | the unprivileged read-only `backend-service` API tier (:8081), split out from `honeypot-dashboard` by #1622 so Arcane can redeploy the API tier without touching `dashboard-next`; the write-capable, host-spool-mounted instance is `backend-service-mounted` (:8082), which stayed in `honeypot-dashboard` |
+ | `honeypot-payload-analysis` ([arcane/home/honeypot-payload-analysis/compose.yml](arcane/home/honeypot-payload-analysis/compose.yml)) | **home** | payload dedup + YARA scanning |
+ | `honeypot-utilities` ([arcane/home/honeypot-utilities/compose.yml](arcane/home/honeypot-utilities/compose.yml)) | **home** | autoheal, log rotation, disk-space monitoring, reporting |
+ | `unsloth` ([arcane/home/unsloth/compose.yml](arcane/home/unsloth/compose.yml)) | **home** | Unsloth Studio, the interactive leg of the round-7 training work area (#3080); operator starts and stops it in Arcane so it can release VRAM between cold-benchmark legs |
+ | [`vps/`](vps/) | **VPS** | Traefik, portbridge raw tunnels, Suricata, WireGuard HTTP bridges, and isolated Keycloak OIDC gateways |
+
+> build · stealth
+Let me run the gates on what's done so far and commit batch 1.
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && echo "=== links ===" && python3 scripts/check-doc-links.py 2>&1 | tail -5; echo "=== paths ==="; python3 scripts/check-doc-paths-exist.py 2>&1 | tail -5; echo "=== stale ==="; python3 scripts/check-doc-stale-paths.py 2>&1 | tail -5; echo "=== reachable ==="; python3 scripts/check-docs-reachable.py 2>&1 | tail -5
+=== links ===
+OK — 389 local refs in 154 files all resolve
+=== paths ===
+doc path existence check passed (121 files, 462 tokens, 41 allowlisted)
+=== stale ===
+doc stale-path check passed
+=== reachable ===
+docs reachability check passed (85 reachable, 35 in exempt record trees)
+> build · stealth
+[0m$ [0mcd /home/xore/Github/APIARY/.grit/worktrees/3399-core-graphs && node scripts/check-mermaid.mjs 2>&1 | tail -20
+OK — 40 mermaid blocks in 154 files parse cleanly
+> build · stealth
+All five gates green. Committing batch 1:
