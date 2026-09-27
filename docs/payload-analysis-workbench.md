@@ -1,6 +1,6 @@
 # Payload analysis workbench
 
-The dashboard's `/payload-workbench` route selects captured evidence and `/payload-workbench/{sha256}` is the unified orchestration surface for issue #155. It is a separate page rather than an extension of `/ghidra`: recipes and parent runs span deterministic analysis, Ghidra, and two sandbox backends, while `/ghidra/{sha256}`, `/sandbox/{job}` and `/payload-analysis/{sha256}` remain the canonical native result renderers.
+The dashboard's `/payload-workbench/results` route is the owner-isolated review surface, and its `workbench-builder` section is the unified orchestration surface for issue #155. It is a separate page rather than an extension of `/ghidra`: recipes and parent runs span deterministic analysis, Ghidra, and two sandbox backends, while `/ghidra/{sha256}`, `/sandbox/{job}` and `/payload-analysis/{sha256}` remain the canonical native result renderers.
 
 ## Trust boundary
 
@@ -15,7 +15,7 @@ Run ownership is likewise never taken from client input. The Rust tier derives i
 ## Analyzer registry
 
 Seven analyzer IDs, one server-computed `workbenchAnalyzer` registry
-(`dashboard/workbench_domain.go`). A run selects 1-5 of them; the server
+(`backend-service/src/workbench_domain.rs`). A run selects 1-5 of them; the server
 rejects zero selections, more than 5, an unknown ID, or a duplicate.
 
 | ID | Applicability | Adapter | Result link | Concurrency class |
@@ -109,24 +109,27 @@ degraded to a stale local copy (#405 follow-up).
 
 ## HTTP contracts
 
-All APIs require a live administrator identity. Every mutation additionally requires a same-origin request, `application/json`, one document no larger than 64 KiB, and the closed Go schema (unknown fields are rejected). Create, read/list, reconcile, cancel, and retry are further scoped server-side to the caller's verified owner identity (see Trust boundary) — a request's `owner` field is ignored entirely, never an access decision (#3110).
+All APIs require a live administrator identity. Every mutation additionally requires a same-origin request, `application/json`, and the closed request schema. (A 64 KiB body cap and unknown-field rejection were part of the original Go contract; neither is present in the Rust tier, so do not rely on them.) Create, read/list, reconcile, cancel, and retry are further scoped server-side to the caller's verified owner identity (see Trust boundary) — a request's `owner` field is ignored entirely, never an access decision (#3110).
+
+Routes are registered in `backend-service/src/main.rs:456-468`. The hash is a **query** parameter on the registry and list routes, not a path parameter, and `cancel`/`retry` share one route via an `{action}` segment rather than being separate paths.
 
 | Method and route | Purpose |
 |---|---|
-| `GET /api/payload-workbench/registry/{sha256}` | server-derived registry, applicability, external-publication notice, and advisory model health |
-| `GET /api/payload-workbench/recipes` | visible private/shared recipe revisions |
-| `POST /api/payload-workbench/recipes` | append an immutable recipe revision |
-| `GET /api/payload-workbench/runs?sha256=...` | recent parent runs for the caller and payload |
-| `POST /api/payload-workbench/runs` | submit a saved revision or typed one-off selection |
-| `GET /api/payload-workbench/runs/{run_id}` | reconcile and return one parent run |
-| `POST /api/payload-workbench/runs/{run_id}/children/{analyzer_id}/retry` | bounded deliberate retry |
-| `POST /api/payload-workbench/runs/{run_id}/children/{analyzer_id}/cancel` | cancel an exact pending marker when supported |
+| `GET /api/v1/workbench/analyzers?hash=…` | server-derived registry, applicability, external-publication notice, and advisory model health |
+| `GET /api/v1/workbench/recipes` | visible private/shared recipe revisions |
+| `POST /api/v1/workbench/recipes` | append an immutable recipe revision |
+| `GET /api/v1/workbench/runs?hash=…&limit=…` | recent parent runs for the caller and payload |
+| `POST /api/v1/workbench/runs` | submit a saved revision or typed one-off selection |
+| `GET /api/v1/workbench/runs/{id}` | reconcile and return one parent run |
+| `POST /api/v1/workbench/runs/{id}/children/{analyzer_id}/{action}` | bounded deliberate retry, or cancel an exact pending marker when supported (`action` ∈ `retry`\|`cancel`) |
 
 Create, recipe-save, retry, and cancel outcomes use the existing dashboard audit sink. Audit fields name the contract fields but do not copy payload content, prompts, model replies, filenames, credentials, or tool output.
 
 ## Model-status adapter
 
-`/var/lib/honeypot-ghidra/model-status.json` remains root-owned mode `0600`. `honeypot-model-status-adapter.service` reads and re-validates it, strips every field outside schema v1, and serves only `GET /v1/status` over `/run/honeypot-model-status/status.sock`. The dashboard mounts that runtime directory read-only and uses `MODEL_STATUS_SOCKET=/model-status/status.sock`. There is no TCP listener and no write, pull, replace, promote, prompt, or model-selection route.
+`/var/lib/honeypot-ghidra/model-status.json` remains root-owned mode `0600`. `honeypot-model-status-adapter.service` reads and re-validates it, strips every field outside schema v1, and serves only `GET /v1/status` over `/run/honeypot-model-status/status.sock`. The dashboard is expected to mount that runtime directory read-only and use `MODEL_STATUS_SOCKET=/model-status/status.sock`. There is no TCP listener and no write, pull, replace, promote, prompt, or model-selection route.
+
+> **Undetermined:** `MODEL_STATUS_SOCKET` has no occurrence anywhere in the Rust backend, the compose files, or `.env.example` as of 2026-09-27 — the adapter half of this contract is real and installed, but the consumer side is not visible in the repository. Treat the socket wiring as intended-but-unwired rather than working, and confirm before relying on the advisory model-health field the registry returns.
 
 Re-run `sudo analysis/ghidra/install-analysis-host.sh` to install or update the adapter. Its failure only displays `unavailable`; it never disables a worker.
 
@@ -138,7 +141,7 @@ Deploy the dashboard normally after merging. Rollback is additive and safe:
 
 1. deploy the previous dashboard image;
 2. optionally disable `honeypot-model-status-adapter.service`;
-3. leave the workbench indices in Elasticsearch untouched (a rolled-back dashboard from before the #405 follow-up reads its own local `/state/analysis-workbench` copy instead and simply does not see runs created after the rollback).
+3. leave the workbench indices in Elasticsearch untouched (a rolled-back pre-workbench dashboard does not see runs created after the rollback).
 
 The old `/ghidra/submit` and `/sandbox/submit` routes remain compatible. No worker or native result schema is changed by the workbench.
 
