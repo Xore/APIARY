@@ -74,9 +74,12 @@ The fallback does not provide city, coordinates, ASN, organization, or IPv6.
 `country.csv` and downloaded `.mmdb` files are intentionally ignored by Git;
 credentials and licensed/generated databases must not be committed.
 
-The `.mmdb` files are mounted into two containers, so replacing one needs those
-two restarted: `hp-elasticsearch` (the `ingest-geoip` mount the
-`geoip-honeypot` processors read) and `hp-arkime-viewer` (`/opt/arkime/geo`).
+The `.mmdb` files are read by three containers, so replacing one needs all
+three restarted: `hp-elasticsearch` (the `ingest-geoip` mount the
+`geoip-honeypot` processors read), and both Arkime containers —
+`hp-arkime-capture` and `hp-arkime-viewer` (each mounts `/opt/arkime/geo`).
+A fourth container, `hp-geoipupdate` in the `honeypot-init` stack, is the
+writer, not a consumer.
 `threat-cidrs.csv` is mounted read-only into the dashboard's `backend-worker`
 container, so hand-editing it directly needs that one restarted. A
 `threat-cidrs.csv` refreshed by `refresh-threat-cidrs.sh` is the one exception:
