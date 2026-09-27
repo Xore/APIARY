@@ -100,44 +100,82 @@ that already exists** (home is reachable at `10.8.0.2`,
 `docs/CGNAT-DEPLOYMENT.md`), the same "pull, don't get pushed to" posture
 `portbridge-blackhole-refresh.sh` already uses against GitHub. Concretely:
 
-- The dashboard exposes the export as `GET /api/v1/ip-block-export`
-  (`backend-service/src/ip_block.rs`'s `export`) — plain text, one
+- The dashboard exposes `GET /export/portbridge-manual-blackhole.txt`
+  (then `dashboard/ip_block.go`'s `serveManualBlackholeExport`, now
+  `backend-service/src/ip_block.rs`'s `export`) — plain text, one
   IPv4 address per line, the exact format `blackhole.go`'s existing parser
-  already reads. No admin auth on the handler itself, the same posture every
-  other `/api/v1/export/*.csv` GET already takes (access control is the network
-  boundary — WireGuard-only reachability — not a second app-layer secret);
-  the data itself (a list of IPs an operator already chose to block) is no
-  more sensitive than the maltrail feed it sits alongside. Reachable from the
-  VPS at `10.8.0.2:19090` — the `dashboard` service's real published port
+  already reads. ~~No admin auth on the handler itself, the same posture every
+  other `/export/*.csv` GET already takes (access control is the network
+  boundary — WireGuard-only reachability — not a second app-layer secret)~~ —
+  **corrected by #3403:** that posture assumed the frontend's unauthenticated
+  passthrough, and it stopped being true. The route is now reached as
+  `/api/v1/ip-block-export` behind `require_service_token` (#2183), so the
+  puller authenticates with the dashboard's shared service token rather than
+  relying on reachability alone. The data itself (a list of IPs an operator
+  already chose to block) is still no more sensitive than the maltrail feed it
+  sits alongside; what changed is that the *route* is no longer open. Reachable
+  from the VPS at `10.8.0.2:19090` — the `dashboard` service's real published port
   (`arcane/home/honeypot-dashboard/compose.yml`, `${HP_BIND:-10.8.0.2}:19090:8080`), not an
   assumed default.
-  **The path moved at the Rust cutover and one caller was not carried across.**
-  This decision was written against the Go route
-  `GET /export/portbridge-manual-blackhole.txt` (then `dashboard/ip_block.go`'s
-  `serveManualBlackholeExport`); the Rust `export` keeps that handler's
-  *byte-compatible body* but is registered at `/api/v1/ip-block-export`, and
-  `backend-service/src/main.rs` has no `/export/portbridge-manual-blackhole.txt`
-  route at all. `vps/portbridge-manual-blackhole-refresh.sh` still defaults its
-  `MANUAL_BLACKHOLE_URL` to the **old** path
-  (`http://10.8.0.2:19090/export/portbridge-manual-blackhole.txt`), so on any
-  deployment that has not overridden that variable the sidecar is fetching a
-  404. Either the default needs repointing at `/api/v1/ip-block-export` or the
-  VPS `.env` must set `MANUAL_BLACKHOLE_URL` explicitly — worth confirming
-  against the live host before trusting that manual blocks are reaching
-  portbridge.
 - A new sidecar, `vps/portbridge-manual-blackhole-refresh.sh`, is a near-
   verbatim copy of `portbridge-blackhole-refresh.sh` pointed at that URL
   instead of GitHub's maltrail mirror, writing to a second local file
-  (atomic temp+rename, same as the original). It has no minimum-count sanity
+  (atomic temp+rename, same as the original). ~~It has no minimum-count sanity
   floor the way the maltrail refresh does (500 lines) — an empty manual list
   is a completely normal, expected state (no IP has been manually blocked
-  yet), not a sign of a broken download.
+  yet), not a sign of a broken download.~~ — **reversed by #3403:** an empty
+  body is no longer written, for the reason in the note below.
 - `blackhole.go` gains a second optional path, `BLACKHOLE_MANUAL_LIST`, and
   `reload()` unions both files into one blocked-set. The two sources are
   independently refreshed and independently sized, so a maltrail refresh can
   never silently wipe a manual block, and vice versa — this was the issue's
   own explicit "survive a feed refresh?" question, answered by construction
   rather than by carefully sequencing two writers against one file.
+
+### #3403 (2026-09-27): the puller's URL was not a route, and it could not tell
+
+The sidecar above shipped pointed at `/export/portbridge-manual-blackhole.txt`.
+That path is not served. The frontend answers an unknown path with an auth
+redirect, so the puller's `curl -fsSL` exited 0 on a 200 whose body was a login
+page, and every 300 seconds it replaced a working `manual.txt` with nothing
+while logging `updated (0 addresses)`. Operator blocks stopped reaching
+portbridge and nothing said so.
+
+Three corrections, all in `vps/portbridge-manual-blackhole-refresh.sh` and
+`vps/docker-compose.yml` — the export route itself is unchanged, including its
+status codes:
+
+1. **The URL is the real one.** `/bff/api/v1/ip-block-export`: the route is the
+   Rust tier's `/api/v1/ip-block-export`, reached through the BFF's `/bff/*`
+   proxy — the same seam
+   `scripts/github-ci-runner/dashboard-source-health.sh` already uses to call
+   the Rust tier from a shell, and the only one on the dashboard's published
+   port. Redirects are no longer followed, so a 307 is visible as a 307 instead
+   of quietly fetching whatever it pointed at.
+2. **The puller authenticates.** The route is service-token gated (#2183), so
+   the request carries `X-Service-Token: $DASHBOARD_SERVICE_TOKEN` — the same
+   shared secret the home stack maps to `SERVICE_TOKEN` for every tier. The VPS
+   copy lives in its own git-ignored, `chmod 600` `.env` (tracked template
+   `vps/.env.example`), which the deploy rsync excludes. It is handed to `curl`
+   through its stdin config (`-K -`) so it is never in argv, never in the
+   container's process list, and never in the log. No second auth mechanism was
+   invented and no token is committed. Unset is a loud refusal, not an
+   unauthenticated attempt: the unauthenticated answer is precisely the bug.
+3. **An empty body is refused, not written.** This reverses the
+   "no minimum-count sanity floor" decision above, and the reason is that the
+   decision's premise no longer holds. The original reasoning was that an empty
+   manual list is a normal steady state, not a broken download — true of the
+   *dashboard's* state, but over the wire it is indistinguishable from every
+   failure mode at once, and #3403 is that ambiguity made silent. A download is
+   now written only after it is proven to be a blocklist: HTTP 200, non-empty
+   body, `text/plain` content type, and every non-comment line an address —
+   the same shapes `blackhole.go`'s `readOne` consumes, so a legitimate IPv6
+   entry cannot refuse the whole export. Anything else — the 404 that always
+   worked, the 307 to `/auth/login`, a 0-byte 200, an HTML page — is refused
+   with a named `[E-*]` marker on every interval and the existing list is left
+   untouched. A genuinely empty list is still harmless: `blackhole.go` treats a
+   missing file as "no blocklist yet", and the first non-empty export replaces
+   the stale one.
 
 ## What "first step" deliberately leaves out
 

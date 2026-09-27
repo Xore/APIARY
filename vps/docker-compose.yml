@@ -626,6 +626,16 @@ services:
   # just polls BLACKHOLE_MANUAL_LIST on a timer (blackhole.go). Shares the
   # same portbridge-blackhole volume as the maltrail refresh -- both write
   # different filenames into the same directory portbridge reads both from.
+  #
+  # #3403: MANUAL_BLACKHOLE_URL pointed at /export/portbridge-manual-blackhole
+  # .txt, which the dashboard does not serve. The frontend answers an unknown
+  # path with an auth redirect, so curl -fsSL exited 0 on a 200 whose body was
+  # a login page and this sidecar replaced a working blocklist with nothing
+  # every 300s, with nothing in the log to say so. It now points at the route
+  # that actually serves the export -- backend-service's ip_block::export,
+  # reached through the BFF's /bff/* proxy, the same seam
+  # scripts/github-ci-runner/dashboard-source-health.sh uses to reach the Rust
+  # tier from a shell. That route is auth-gated (#2183), hence the token below.
   portbridge-manual-blackhole-refresh:
     image: curlimages/curl:8.21.0@sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13
     container_name: hp-portbridge-manual-blackhole-refresh
@@ -634,8 +644,20 @@ services:
     entrypoint: ["/bin/sh", "/usr/local/bin/portbridge-manual-blackhole-refresh.sh"]
     environment:
       - BLACKHOLE_MANUAL_LIST=/blackhole/manual.txt
-      - MANUAL_BLACKHOLE_URL=http://10.8.0.2:19090/export/portbridge-manual-blackhole.txt
+      - MANUAL_BLACKHOLE_URL=http://10.8.0.2:19090/bff/api/v1/ip-block-export
       - MANUAL_REFRESH_INTERVAL_SECONDS=300
+      # The dashboard's shared service token, by the name the home stack
+      # already uses for it: arcane/home/honeypot-dashboard/compose.yml maps
+      # the same DASHBOARD_SERVICE_TOKEN to SERVICE_TOKEN for every tier. Set
+      # it in vps/.env (git-ignored, chmod 600) to the identical value; it is
+      # never written to the list file and never printed. Passed with the
+      # same ${VAR:-} the home stack's own compose uses rather than ${VAR:?}:
+      # an unset value must not take down an unrelated compose profile, and
+      # the sidecar's own [E-NO-SERVICE-TOKEN] refusal is the loud signal --
+      # the same split the Rust and BFF tiers draw in #2183. Without it the
+      # request is refused rather than sent, because an unauthenticated one
+      # answers 307 to /auth/login -- the #3403 failure, re-created on purpose.
+      - DASHBOARD_SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
     volumes:
       - ./portbridge-manual-blackhole-refresh.sh:/usr/local/bin/portbridge-manual-blackhole-refresh.sh:ro
       - portbridge-blackhole:/blackhole
