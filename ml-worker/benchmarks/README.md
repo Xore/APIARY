@@ -63,6 +63,67 @@ For an offline verification, pass a complete local JSON array of ES-shaped
 hits to `--fixture`. The fixture includes open/legacy rows as well as closed
 rows so the two denominators can be tested without a network.
 
+## Tier 2 — disposition-corpus calibration (the deployment label source)
+
+[`evaluate_accuracy.py disposition`](evaluate_accuracy.py) is the other half of
+the pair above. `disposition_corpus.py` exports the closed-disposition
+population and stops at an eligibility gate; this subcommand consumes that exact
+NDJSON snapshot and produces the deployment-labelled Tier 2 numbers.
+
+```bash
+python3 ml-worker/benchmarks/evaluate_accuracy.py disposition \
+  --snapshot "$HOME/ml-worker-qualification/dispositions.ndjson" \
+  --output   "$HOME/ml-worker-qualification/disposition-tier2.json"
+```
+
+It fits Platt scaling (unpenalised logistic regression on `composite_score`) on
+a **group-disjoint** split — grouped by `model_state_id`, because two alerts
+scored by the same fitted checkpoint must not straddle the fit/evaluation
+boundary — and scores a held-out split once, over at least five fixed seeds.
+Only the *group assignment* is seeded; rows are never shuffled and temporal
+order is preserved inside each side.
+
+**Precision-only, and that is structural.** `write_anomaly()` returns before
+persistence below `ML_ALERT_THRESHOLD`, so this corpus cannot measure deployment
+recall or ordinary below-threshold calibration. The command therefore does not
+offer AUROC, AUPRC, recall, or point-adjusted F1 at all: on a truncated
+population a ranking metric would silently describe a different problem — the
+ranking of alerts among alerts — while wearing the deployed metric's name. The
+point-adjusted-F1 ban and the allowlist are enforced here through the same
+`ensure_metric_allowed` guard the BETH rail uses.
+
+What it does emit: within-alerts precision, precision bucketed by score,
+Brier, ECE, a reliability table, and seed variance as mean ± standard
+deviation. The comparison baseline is the cheapest honest competitor — a
+constant emitting the fit split's own positive rate.
+
+### The gates, and why none of them invents an expected value
+
+Choosing a target accuracy after seeing results is the failure this tier exists
+to prevent, so the assertions are structural or mathematical:
+
+| gate | rule | on failure |
+|---|---|---|
+| eligibility | both classes present, ≥2 distinct `model_state_id`, no group straddling the split | exit 2, refuses to score |
+| calibration | **every** seed's held-out Brier must beat the constant fit-split base rate | exit 1 |
+| monotonicity | where ≥3 reliability bins are populated, higher predicted probability must not mean lower observed precision | exit 1 |
+| precision regression | armed only by an explicit `--precision-floor` | exit 1 |
+
+A gate with fewer than three populated reliability bins reports **not
+exercised** rather than passed, on the same "a skip is not a pass" rule Tier 1
+uses. An unsupplied precision floor reports **unarmed**, never passed.
+
+### Proving the rail bites
+
+`ml-worker/tests/test_disposition_tier2.py` deliberately breaks each guard and
+asserts the failure, because a rail that cannot fail is decoration. Replacing
+the calibrator with a constant, reversing the calibration direction, feeding a
+zero-label or single-class snapshot, pointing every alert at one
+`model_state_id`, and submitting an out-of-range `composite_score` are all
+refused or gated. The test suite also includes the negative control: a genuinely
+separable snapshot must still **pass**, because there saturating to 0/1 is
+correct and a rail that refused it would be wrong rather than strict.
+
 ## Safety properties
 
 - Fixtures are the per-sensor documents from `ml-worker/tests/fixtures.py` —
@@ -71,7 +132,11 @@ rows so the two denominators can be tested without a network.
 - The Tier 1 benchmark never trains, downloads, or deploys anything. It calls
   the candidate's scoring path and nothing else. The separate BETH Tier 2 rail
   is offline and also performs no deployment writes.
-- No Elasticsearch, no network. Everything is in-process.
+- The Tier 1 and both Tier 2 paths make no network call and touch no
+  Elasticsearch. The one exception is `disposition_corpus.py`, which is
+  deliberately an ES client — but it issues search and PIT-lifecycle requests
+  only, is read-only, and never updates a document or synthesises a verdict.
+
 
 ## Run
 

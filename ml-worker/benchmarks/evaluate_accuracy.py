@@ -163,7 +163,45 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N,N,N,N,N",
         help="comma-separated seeds (default: 1,2,3,4,5; at least five)",
     )
+    disposition = subparsers.add_parser(
+        "disposition",
+        help="Tier 2 calibration over the #1968/#2395 operator-disposition corpus",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    disposition.add_argument(
+        "--snapshot",
+        required=True,
+        type=Path,
+        help="labelled NDJSON snapshot written by disposition_corpus.py",
+    )
+    disposition.add_argument(
+        "--output",
+        required=True,
+        help="path for the hashed JSON run report (must be outside the repository)",
+    )
+    disposition.add_argument(
+        "--seeds",
+        type=parse_disposition_seeds,
+        default=DEFAULT_SEEDS,
+        metavar="N,N,N,N,N",
+        help="comma-separated seeds (default: 1,2,3,4,5; at least five)",
+    )
+    disposition.add_argument(
+        "--precision-floor",
+        type=float,
+        default=None,
+        help="optional operator-supplied within-alerts precision floor; "
+             "unarmed (reported, not gated) when omitted",
+    )
     return parser
+
+
+def parse_disposition_seeds(value: str) -> tuple[int, ...]:
+    """Same >=5-seed rule as the BETH rail, reported in disposition terms."""
+    try:
+        return validate_seeds(int(part.strip()) for part in value.split(",") if part.strip())
+    except (ValueError, BethError) as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _repository_root() -> Path:
@@ -675,9 +713,52 @@ def _print_dataset_error(exc: Exception) -> None:
     )
 
 
+def _run_disposition_command(args: argparse.Namespace) -> int:
+    """Tier 2 over the operator-disposition corpus.
+
+    Imported lazily so the BETH rail stays usable, and testable, without the
+    disposition path being imported at module load. The parent directory goes on
+    `sys.path` first so the same code resolves whether this file is run as a
+    script or imported as `benchmarks.evaluate_accuracy`.
+    """
+    root = str(Path(__file__).resolve().parents[1])
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    try:
+        from benchmarks.disposition_tier2 import (
+            DispositionError,
+            print_report as print_disposition_report,
+            run_disposition,
+        )
+    except ImportError:
+        # Already the __main__ copy: import the sibling module directly rather
+        # than instantiating a second copy of this harness.
+        from disposition_tier2 import (  # type: ignore[no-redef]
+            DispositionError,
+            print_report as print_disposition_report,
+            run_disposition,
+        )
+
+    try:
+        report, digest = run_disposition(
+            args.snapshot, args.output, args.seeds, args.precision_floor
+        )
+    except (DispositionError, BannedMetricError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print_disposition_report(report)
+    print(json.dumps({
+        "report_sha256": digest,
+        "written": str(Path(args.output).resolve()),
+    }))
+    return 0 if report["gates"]["passed"] else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "disposition":
+        return _run_disposition_command(args)
     try:
         report, digest = run_beth(args.data_dir, args.output, args.seeds, args.archive)
     except (BethError, BannedMetricError, ValueError) as exc:
