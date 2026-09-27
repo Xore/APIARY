@@ -610,6 +610,71 @@ jobs:
           path: .ci-artifacts/frontend-next-unit-junit.xml
           if-no-files-found: warn
           retention-days: 7
+      # #3318: this tier collected no coverage at all, so there was no
+      # baseline and nothing here could catch a change that deleted tested
+      # behaviour. The tests that remained would keep passing over code that
+      # had stopped being tested, and the job would stay green -- the tests
+      # that assert the deleted behaviour would be the thing a reviewer has
+      # to notice is missing.
+      #
+      # Two gates, both compared against the committed
+      # arcane/home/honeypot-dashboard/frontend-next/coverage-baseline.json
+      # and both computed from this run's own measurement. Neither is a
+      # threshold somebody chose:
+      #
+      #   coverage:ratchet  the non-regression floor. The baseline is what the
+      #                      suite measures today -- 806/7359 lines (10.95%)
+      #                      and 346/7250 branches (4.77%) across 127 files of
+      #                      src/ -- measured on this job's own #3331 node:22
+      #                      image. It is a floor, not a target, and the number
+      #                      in the file is a measurement rather than an
+      #                      aspiration on purpose: an importable 60% would
+      #                      have made this gate red on the day it landed and
+      #                      bought nothing. Raising it is a separate,
+      #                      deliberate commit.
+      #   test:discovery    a test-shaped file that no configured runner
+      #                      collects. Its own step so a coverage failure
+      #                      cannot hide a discovery failure.
+      #
+      # `npm test` above is untouched and stays uninstrumented: a second full
+      # run of the suite is the honest price of keeping the command deploy.yml,
+      # the README and a developer's own loop free of coverage, and it is
+      # cheap here -- 6.9s uninstrumented against 6.9s with the v8 provider on
+      # the image this job runs (the cost is transform/import, not
+      # instrumentation), against a 45-minute budget.
+      #
+      # `set -euo pipefail` so a failing coverage run cannot be followed by a
+      # ratchet that then reports on a missing report and takes the blame for
+      # it.
+      - name: "Coverage report and ratchet (#3318)"
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+        run: |
+          set -euo pipefail
+          npm run test:coverage
+          npm run coverage:ratchet
+      - name: "Test discovery guard (#3318)"
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+        run: npm run test:discovery
+      # Same per-(run, attempt) name as the JUnit upload above, for the same
+      # reason: run_id alone still collides on a re-run of the same run, and a
+      # name two uploads share is not "newest wins" under v4 -- it is the
+      # second uploader deleting the first one's evidence. No overwrite here
+      # either, and the retention matches.
+      #
+      # `coverage/` is named as a directory rather than file-by-file because
+      # it is not hidden -- the .ci-artifacts caveat that forces the JUnit
+      # upload to name its file does not apply, and a directory keeps the
+      # report extensible (adding the lcov html view later is a config change
+      # here, not a workflow change). The contents stay a closed set: only the
+      # files the coverage reporter wrote, from the run above, can land here.
+      - name: Upload unit test coverage
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-next-coverage-${{ github.run_id }}-${{ github.run_attempt }}
+          path: arcane/home/honeypot-dashboard/frontend-next/coverage/
+          if-no-files-found: warn
+          retention-days: 7
       # No live-ES smoke suite here on purpose: port-tests/ needs the real
       # cluster over an SSH tunnel to the homeserver (see its README) --
       # not reachable from a GitHub-hosted runner, and not appropriate to
@@ -697,6 +762,30 @@ jobs:
         with:
           name: frontend-next-unit-junit-${{ github.run_id }}-${{ github.run_attempt }}
           path: .ci-artifacts/frontend-next-unit-junit.xml
+          if-no-files-found: warn
+          retention-days: 7
+      # #3318: twin of the homeserver copy's coverage + ratchet + discovery
+      # steps. Present here for the reason the header comment gives: steps stay
+      # byte-identical across the twins so a red result means the same thing
+      # wherever it ran. A ratchet that only ran on the self-hosted executor
+      # would let a regression through on every degraded day, which is exactly
+      # the day the fallback twin exists for. (Full rationale, and the measured
+      # baseline, live on the homeserver copy above.)
+      - name: "Coverage report and ratchet (#3318)"
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+        run: |
+          set -euo pipefail
+          npm run test:coverage
+          npm run coverage:ratchet
+      - name: "Test discovery guard (#3318)"
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+        run: npm run test:discovery
+      - name: Upload unit test coverage
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-next-coverage-${{ github.run_id }}-${{ github.run_attempt }}
+          path: arcane/home/honeypot-dashboard/frontend-next/coverage/
           if-no-files-found: warn
           retention-days: 7
       # No live-ES smoke suite here on purpose -- see the homeserver twin.

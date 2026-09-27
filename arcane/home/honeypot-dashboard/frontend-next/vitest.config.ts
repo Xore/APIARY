@@ -42,5 +42,46 @@ export default defineConfig({
           outputFile: { junit: join(artifactsDir, 'frontend-next-unit-junit.xml') },
         }
       : {}),
+    // #3318: the tier had no coverage number at all, so nothing here could
+    // tell a change that deleted tested behaviour from one that did not.
+    //
+    // Not `enabled: true` on purpose: coverage instruments every module it
+    // loads and writes a report tree to disk, and `npm test` is the command
+    // deploy.yml, the README and a developer's own loop all run. It stays
+    // uninstrumented and report-free. `npm run test:coverage` -- the one
+    // command that turns this on -- is what CI and the ratchet use.
+    //
+    // `include` is the whole point: the scope is src/ and only src/. Not the
+    // tests themselves (they are 100% covered by construction and would
+    // inflate every total), not the configs or scripts, not e2e/, and not
+    // node_modules. What is left is the code the dashboard actually ships,
+    // which is the only thing a coverage number should be about.
+    coverage: {
+      provider: 'v8',
+      reportsDirectory: 'coverage',
+      // json-summary is what scripts/coverage-ratchet.mjs reads; lcovonly is
+      // what a reviewer loads into an external coverage viewer; text is what
+      // the CI log shows. `lcov` rather than `lcovonly` would also emit the
+      // self-contained html report, and that is 5.9MB of per-file assets on a
+      // run that uploads its coverage to a 7-day artifact -- so it is
+      // deliberately not the one that generates it.
+      reporter: ['text', 'json-summary', 'lcovonly'],
+      include: ['src/**/*.ts', 'src/**/*.tsx'],
+      exclude: [
+        // The tests, the type-only declaration, and the generated route tree
+        // -- the same three exclusions the test-level `exclude` above already
+        // reasons about, so "what counts as source" is one list, not two that
+        // can disagree. Written out rather than inherited: vitest 4 dropped
+        // its coverage `exclude` defaults (coverageConfigDefaults.exclude is
+        // now []), so there is nothing to spread.
+        '**/*.test.ts',
+        '**/*.test.tsx',
+        '**/*.spec.ts',
+        '**/*.spec.tsx',
+        '**/__tests__/**',
+        '**/*.d.ts',
+        'src/routeTree.gen.ts',
+      ],
+    },
   },
 })
