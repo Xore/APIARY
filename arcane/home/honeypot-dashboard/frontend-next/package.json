@@ -16,6 +16,10 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:discovery": "node scripts/test-discovery-guard.mjs",
+    "coverage:ratchet": "node scripts/coverage-ratchet.mjs",
+    "coverage:baseline": "node scripts/coverage-ratchet.mjs --update",
     "test:browser": "playwright test",
     "test:property": "vitest run src/lib/appearanceCookie.property.test.ts",
     "test:mutation": "stryker run"
@@ -46,6 +50,7 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react": "^6.1.1",
+    "@vitest/coverage-v8": "^4.1.11",
     "fast-check": "^4.10.2",
     "jsdom": "^30.0.1",
     "lru-cache": "^11.2.6",

@@ -75,6 +75,46 @@ for how a commit actually reaches the live host.
 `backend-api.sh`, `bff-load.sh`) — see `../port-tests/README.md`. Run
 against a real build, not `npm run dev`'s HMR server.
 
+### Unit tests, coverage and the ratchet (#3318)
+
+`npm test` is the unit suite and stays uninstrumented — no coverage, no
+report tree — so it stays the cheap command that `deploy.yml`, this README
+and your own loop all reach for. The coverage number lives in its own
+command:
+
+```bash
+npm run test:coverage     # vitest + v8 coverage for src/, into coverage/ (gitignored)
+npm run coverage:ratchet  # compare that measurement to the committed baseline; non-zero on a drop
+npm run test:discovery    # fail if a *.test.ts / *.spec.ts exists that no runner collects
+```
+
+`coverage-baseline.json` at this directory's root is the committed
+non-regression floor: **806/7359 lines (10.95%) and 346/7250 branches
+(4.77%)** across 127 files of `src/`, measured on the `node:22` image the
+tier ships. It is a measurement, not a target, and the low number is the
+real one — the tier's tests concentrate on `src/lib` server logic, and most
+of `src/routes` and `src/components` is covered by the Playwright matrix
+instead, which the v8 provider does not see. Do not hand-edit it, and do
+not regenerate it to turn a red run green.
+
+To move it on purpose, having first established the drop is intended
+rather than a lost test:
+
+```bash
+npm run test:coverage && npm run coverage:baseline   # commit both, together
+```
+
+The ratchet has two independent gates. `tolerance.coveredCount` is 0: no
+covered line or branch may stop being covered, which is what catches a
+change that deletes tested behaviour, and which no shrinking-denominator
+trick can satisfy. `tolerance.pctPoints` is 1.0: the overall percentage may
+not fall more than that, which catches a change that adds a lot of untested
+source. At a ~11% baseline the second is the coarse one — it needs several
+hundred new uncovered lines to move — which is the honest shape of a
+low-coverage ratchet and the reason the first one carries the weight.
+`scripts/tests/test_3318_coverage_ratchet.py` in the repository root pins
+both, so neither can be loosened without that test going red.
+
 ## New-page review checklist (capped-truth discipline, #2179)
 
 When authoring or reviewing a page, check the ways a number can quietly lie.
