@@ -415,11 +415,16 @@ Start-Service QEMU-GA -ErrorAction SilentlyContinue
 # and no 'Inbox' share at all -- a failed New-SmbShare here (e.g. the
 # share already existing under a stale name from a prior provisioner run)
 # produced no error and no trace in the packer log, and the image still
-# passed every check that doesn't inspect the actual share list. #2023's
-# post-build content check now inspects the registry directly and would
-# have caught this at build time instead of at first detonation attempt --
-# failing the build loudly here is the other half: don't let a silent
-# share-creation failure reach the point where that check even runs.
+# passed every check that doesn't inspect the actual share list. Failing
+# the build loudly here is the first half; the second half is
+# packer/verify-built-image-contents.sh, which runs the #2023 content
+# check against the finished qcow2 before build-with-retry.sh promotes it
+# (#3018). Both halves are needed and neither substitutes for the other:
+# this one catches it while the guest is still up and the fix is a re-run
+# of the provisioner, the offline one catches it against the actual
+# artifact -- which is the only thing that can notice an image built by a
+# provisioner old enough to predate this block entirely, as the restored
+# win11-analysis.qcow2 was.
 New-SmbShare -Name 'Inbox' -Path 'C:\Inbox' -FullAccess 'analyst'
 New-SmbShare -Name 'Logs'  -Path 'C:\Logs'  -ReadAccess 'analyst'
 foreach ($shareName in @('Inbox', 'Logs')) {
