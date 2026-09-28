@@ -17,7 +17,6 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"html"
 	"io"
 	stdlog "log"
 	"net"
@@ -127,7 +126,7 @@ func (l *logger) emit(e event) {
 	e.Sensor = "citrix-honeypot"
 	e.Persona = "nexusai-citrix-gw"
 	e.Site = "nexusai-eu-edge"
-	e.Asset = "citrixgw01"
+	e.Asset = personaAsset
 	e.Org = "NexusAI Research GmbH"
 	e.Proto = "https"
 	line, _ := json.Marshal(e)
@@ -311,7 +310,13 @@ func (h *handler) authSurfaceResponse(w http.ResponseWriter, r *http.Request, re
 	if len(p) > 1 {
 		p = strings.TrimRight(p, "/")
 	}
-	base := "https://" + r.Host
+	// #3446: the Host header is the one request value on this sensor that
+	// is reflected structurally rather than as a single escaped value --
+	// sanitiseAuthority accepts it only if it is actually a host, and
+	// falls back to this decoy's own persona asset otherwise. See
+	// reflect.go for the rule and why escaping alone is not the control
+	// here.
+	base := "https://" + sanitiseAuthority(r.Host)
 	switch p {
 	case "/oauth/idp/.well-known/openid-configuration":
 		writeJSON(w, oidcDiscoveryJSON(base, "idp"))
@@ -329,7 +334,10 @@ func (h *handler) authSurfaceResponse(w http.ResponseWriter, r *http.Request, re
 		writeApache(w, http.StatusOK, strings.ReplaceAll(citrixSAMLBounceTemplate, "{acs}", "/cgi/samlauth"))
 		return true
 	case "/wsfed/passive":
-		wctx := html.EscapeString(r.URL.Query().Get("wctx"))
+		// #3446: the wctx reflection is now bounded, not just escaped --
+		// see reflect.go for the rule and why the over-bound case drops
+		// the value rather than truncating it.
+		wctx := sanitiseHTML(r.URL.Query().Get("wctx"))
 		writeApache(w, http.StatusOK, strings.ReplaceAll(citrixWSFedTemplate, "{wctx}", wctx))
 		return true
 	}
@@ -436,13 +444,15 @@ func (h *handler) servePOST(w http.ResponseWriter, r *http.Request, reqPath stri
 // citrixForbiddenBody substitutes the requested path into the 403 page.
 // collapsed reaches here as exactly "/vpns" for every request the current
 // caller sends (the len==1 branch above only matches that literal value),
-// but it's still escaped defensively: the request path is fundamentally
-// attacker-controlled, and reflecting it unescaped into HTML (as
+// but it's still sanitised: the request path is fundamentally
+// attacker-controlled, and reflecting it into HTML without escaping (as
 // upstream's own Python does) would be a reflected-XSS vector against
 // whoever clicks a crafted link to this decoy if that constraint ever
-// loosens.
+// loosens. sanitiseHTML is the same helper the wctx reflection uses, so
+// the escaping and the bound are one rule with one definition (reflect.go)
+// rather than two calls to html.EscapeString that can drift apart.
 func citrixForbiddenBody(collapsed string) string {
-	return strings.ReplaceAll(citrix403Page, "{url}", html.EscapeString(collapsed))
+	return strings.ReplaceAll(citrix403Page, "{url}", sanitiseHTML(collapsed))
 }
 
 // splitNonEmpty mirrors Python's `filter(None, path.split('/'))`.
