@@ -1,0 +1,219 @@
+{
+  "_meta": {
+    "issue": 3199,
+    "question": "which #1947 roster models can colibri serve, and with which engine + quantisation",
+    "recorded": "2026-09-27",
+    "method": "cross-check every roster row's HuggingFace config.json model_type against colibri's own family registry (c/family_registry.py), then confirm on the homeserver with the engine's own `coli doctor`",
+    "verdict": "One roster model has a matching colibri engine and is already converted (qwen36 + int4-grouped gs64). Seven of the eight rows #3199's table marked 'runnable via an existing engine' have NO matching engine: their model_type is not in any of colibri's nine families. The correction is in the classification, not the tooling -- no new engine kernel was written and none is proposed here.",
+    "authority": "colibri dispatches on the HF config `model_type` field. The set of model_types any family accepts is the whole compatibility surface; a checkpoint whose model_type is not in that set is refused by the engine, not merely unsupported by a converter.",
+    "converter_field_caveat": "Only two of the nine families set the registry's `converter` field at all (glm53 -> convert_glm53.py, glm -> convert_fp8_to_int4.py). The other seven leave it empty, which per the registry's own docstring is not a gap: it means `coli convert` does not drive that family, either because its converter has a different command line or because it is not needed. The qwen36 row below is that case -- convert_qwen36.py is run directly with its own CLI. A null converter therefore never means 'unconvertible', and none of the verdicts here rest on the converter field.",
+    "engine_inventory": "c/family_registry.py FAMILIES table, read verbatim. Local clone f028d26 (JustVugg/colibri); upstream dev re-checked 2026-09-27 and carries the IDENTICAL nine families and the identical model_type tuples, so nothing in this file is stale against upstream.",
+    "safetensors_only": "colibri has no GGUF reader: `grep -rliE gguf c/*.c c/*.py c/tools/*.py` returns nothing in the source tree. Every roster artefact that exists only as GGUF (the requant ladder tags, the oversized-alias rows, the -GGUF mirrors) is therefore NOT a colibri input, whatever its architecture. Architecture-correct does not mean runnable; the artefact format decides.",
+    "homeserver": "supermicro, NVIDIA RTX 4000 Ada 20475 MiB, driver 615.71.09; clone at /var/benchmarks/colibri/src/colibri, venv /var/benchmarks/colibri/venv, containers /var/benchmarks/colibri/models",
+    "gpu_state_at_measurement": "NOT MEASURED ON GPU, and the reason is load-bearing rather than incidental. The card had 18.4-20.1 GiB of its 20.475 GiB occupied by an unattended, in-flight #1947 phase-2 benchmark sweep (/tmp/matrix-p2.sh, 56/68 models done, 12 remaining, running since 2026-09-26) whose driver asserts a cold single-model protocol and had hp-llm-worker and ghidra-revdeck-1 stopped for its duration. Loading a colibri container would have put a second model on the card and on the host mid-measurement, and the CUDA kernel test allocates VRAM and could have OOMed the in-flight run. Neither was done. Every measurement recorded here is CPU-only and touched no VRAM: config fetches, registry reads, and `coli doctor` (which plans against free VRAM and allocates none).",
+    "no_scores": "No benchmark score was produced, and none is copied or extrapolated. `coli doctor` validates a container; it is not the #1947 scoring harness. A per-cell score for any row below still requires a cold run through record_baseline.py, which is blocked on the sweep above.",
+    "doctor_verdict_caveat": "`coli doctor` exits with 'result warning' rather than 'result ok' on the verified qwen36 container, and the warning is VRAM occupancy -- 'N GB of VRAM is already in use (only M GB free): this plan plans against the remainder'. Every content check passes. #3199's table calls this row 'doctor ok'; the accurate wording is 'container checks pass, placement plan computed against a contended card'. A placement plan derived from the wrong free-VRAM figure is not a placement plan, which is why the container verdict and the serve verdict are recorded as separate fields below."
+  },
+
+  "families": {
+    "glm53":      { "model_types": ["glm5_next", "glm5_next_text"],        "engine_artifact": "glm53",       "build_target": "glm53",       "converter": "convert_glm53.py",       "converter_accepts": ["group_size"],           "built_on_homeserver": true },
+    "glm":        { "model_types": ["glm_moe_dsa", "glm5_moe", "glm"],    "engine_artifact": "colibri",     "build_target": "colibri",     "converter": "convert_fp8_to_int4.py",  "converter_accepts": ["ebits", "io_bits", "xbits", "group_size"], "built_on_homeserver": false },
+    "inkling":    { "model_types": ["inkling_mm_model", "inkling"],       "engine_artifact": "inkling",     "build_target": "inkling",     "converter": null,                  "converter_accepts": [],                                              "built_on_homeserver": false },
+    "kimi":       { "model_types": ["kimi_k3", "kimi_linear"],            "engine_artifact": "kimi_k3",     "build_target": "kimi_k3",     "converter": null,                  "converter_accepts": [],                                              "built_on_homeserver": false },
+    "olmoe":      { "model_types": ["olmoe"],                             "engine_artifact": "olmoe",       "build_target": "olmoe",       "converter": null,                  "converter_accepts": [],                                              "built_on_homeserver": false },
+    "qwen36":     { "model_types": ["qwen3_5_moe", "qwen3_5_moe_text"],   "engine_artifact": "qwen36",      "build_target": "qwen36",      "converter": null,                  "converter_accepts": [],                                              "built_on_homeserver": true, "converter_invocation": "c/tools/convert_qwen36.py driven directly with its own CLI (--model/--out/--gs/--low-disk/--no-mtp), not via `coli convert`" },
+    "qwen38":     { "model_types": ["qwen4_exp", "qwen4_exp_text"],       "engine_artifact": "qwen38",      "build_target": "qwen38",      "converter": null,                  "converter_accepts": [],                                              "built_on_homeserver": true },
+    "deepseek_v4":{ "model_types": ["deepseek_v4"],                       "engine_artifact": "deepseek_v4", "build_target": "deepseek-v4", "converter": null,                  "converter_accepts": [],                                              "built_on_homeserver": false },
+    "deepseek_v41":{ "model_types": ["deepseek_v41", "deepseek_v41_text"],"engine_artifact": "deepseek_v41","build_target": "deepseek_v41","converter": null,                  "converter_accepts": [],                                              "built_on_homeserver": true }
+  },
+
+  "build_targets_present": "All nine build targets resolve: `make -C c -n <target>` exits 0 for colibri, glm53, inkling, kimi_k3, olmoe, qwen36, qwen38, deepseek_v4 and deepseek_v41. Only four of the nine binaries exist on the homeserver (glm53, qwen36, qwen38, deepseek_v41); the `glm` family's own binary, c/colibri, does not, so the glm row below is unbuildable-then-unrunnable here for a second, independent reason.",
+
+  "uncovered_model_types": {
+    "note": "Verified by grepping each string against c/family_registry.py: none of these appears in any model_types tuple. The dense-Qwen3 refusal is not an inference from that grep alone -- it is the engine's own live verdict, reproduced below.",
+    "types": ["qwen3_5", "qwen3_5_text", "qwen3", "qwen2", "mistral", "mistral3", "gpt_oss", "gemma2", "gemma4", "glm4_moe"]
+  },
+
+  "engine_self_refusal": {
+    "what": "The engine's own live refusal of a dense-Qwen3 checkpoint, not a conclusion drawn from reading source.",
+    "command": "/var/benchmarks/colibri/venv/bin/python c/coli doctor --model /var/benchmarks/colibri/models/src-qwen3-8b --deep",
+    "container": "Qwen/Qwen3-8B safetensors, config.model_type=qwen3, architectures=['Qwen3ForCausalLM']",
+    "output": "[fail] config.arguments   unsupported model_type: qwen3  /  result error",
+    "reading": "An already-downloaded, otherwise-valid dense Qwen3 checkpoint is refused at the family gate. Every 'no engine' row below fails the same gate for the same reason."
+  },
+
+  "models": {
+
+    "Huihui-Qwen3.6-35B-A3B-abliterated": {
+      "roster_ref": "homeserver colibri container; architecture of Qwen/Qwen3.6-35B-A3B and of the qwen3.6-35b-a3b-dyn ladder base",
+      "verdict": "ENGINE_MATCH_CONFIRMED",
+      "colibri_family": "qwen36",
+      "engine": "qwen36 (c/qwen36, make target qwen36, CUDA=1)",
+      "quantisation": "int4-grouped -- ebits=4, expert_gs=64 (qwen36_meta.json); 41 shards, 23.0 GB",
+      "source_model_type": "qwen3_5_moe / qwen3_5_moe_text (num_experts 256, num_hidden_layers 40, topk 8) -- matches the converted container's config and qwen36_meta exactly",
+      "conversion": "c/tools/convert_qwen36.py --gs 64 --low-disk, shard-by-shard, 40/40 layers stored incl. Gated DeltaNet (convert-huihui.log)",
+      "container_verdict": "pass -- `coli doctor --deep` 2026-09-27: ok on model.path, model.config, model.family ('Qwen3.6-35B-A3B family is registered'), model.tokenizer, storage.persistence, engine.binary, accelerator.gpu, model.shards, storage.disk, memory.ram; 256 of 528 tensors in shard 0 carry .qs scale sidecars, which is the int4-grouped evidence",
+      "placement_verdict": "warning -- planned against a contended card (20.1 GB of VRAM already in use, 1.4 GB free), so the plan itself is not a representative placement",
+      "serve_verdict": "NOT MEASURED -- GPU occupied by the in-flight #1947 sweep for the whole session; one-model-at-a-time boundary held",
+      "score": "not measured, and deliberately not asserted. No number here is borrowed from the Ollama/llama.cpp runs of the same weights.",
+      "reproduce": "convert-huihui.sh then `/var/benchmarks/colibri/venv/bin/python c/coli doctor --model /var/benchmarks/colibri/models/huihui-qwen36-colibri-i4-gs64 --deep`, on an idle card"
+    },
+
+    "qwen3.6-35b-a3b-dyn:q4_k_xl": {
+      "roster_ref": "models_round7.txt line 16 (R2 dynamic ladder)",
+      "verdict": "ARCHITECTURE_MATCH_ARTEFACT_UNUSABLE",
+      "colibri_family": "qwen36 (architecture)",
+      "engine": "not applicable to this artefact",
+      "quantisation": "GGUF Q4_K_XL -- a llama.cpp quantisation name, meaningless to colibri",
+      "reason": "The base architecture is qwen3_5_moe and the qwen36 engine is correct for it. The ladder tag is a GGUF requantisation, and colibri reads safetensors only. Serving this exact tag needs a safetensors re-export of the ladder, not an engine.",
+      "serve_verdict": "NOT MEASURED"
+    },
+
+    "ornith-35b-dyn:q4_k_xl": {
+      "roster_ref": "models_round7.txt line 13 (R2 dynamic ladder)",
+      "verdict": "ARCHITECTURE_MATCH_ARTEFACT_UNUSABLE",
+      "reason": "Same shape as the row above: a 35B-A3B-class ladder tag served as GGUF. #3199's table credits it with 'huihui-35B container already converted'; that container is Huihui-Qwen3.6-35B-A3B-abliterated, a different checkpoint, so the credit does not transfer and is not claimed here.",
+      "serve_verdict": "NOT MEASURED"
+    },
+
+    "qwen3.6-27b-dyn:q4_k_xl": {
+      "roster_ref": "models_round7.txt line 15 (R2 dynamic ladder) -- listed by neither #3199 table",
+      "verdict": "NO_ENGINE",
+      "source_model_type": "qwen3_5 (dense) -- Qwen/Qwen3.6-27B is model_type qwen3_5, architectures Qwen3_5ForConditionalGeneration, 64 layers",
+      "reason": "qwen36 covers the MoE branch (qwen3_5_moe) only. The dense sibling of the same generation is not in any family, so the 27B ladder row is an engine gap exactly like the dense rows in the lower table, and it was missing from #3199's own split."
+    },
+
+    "GLM-4.6-reap-218b-dyn:q3_k_xl": {
+      "roster_ref": "models_round7.txt line 19 (R2 dynamic ladder); #1947 phase 2 measured it as GLM-4.6-REAP-218B-A32B-Derestricted-i1-GGUF:i1-IQ1_S",
+      "verdict": "NO_ENGINE",
+      "issue_claim": "#3199 marks this 'glm (MoE-DSA)'",
+      "source_model_type": "glm4_moe, architectures Glm4MoeForCausalLM, n_routed_experts 96, num_hidden_layers 92 (cerebras/GLM-4.6-REAP-218B-A32B and -FP8)",
+      "reason": "The glm family accepts glm_moe_dsa, glm5_moe and glm. glm4_moe -- the GLM-4.6 lineage -- is in none of them. 'MoE-DSA' describes a different model than this one, and routing the row to the glm family on that basis does not survive the config check.",
+      "second_independent_blocker": "The glm family's engine binary is c/colibri, which is not built on the homeserver.",
+      "third_independent_blocker": "The roster artefact is GGUF (q3_k_xl); colibri reads safetensors only."
+    },
+
+    "huihui-Qwen3.8-27B-abliterated": {
+      "roster_ref": "#3199 table, 'PULL_FAILED in sweep (ollama manifest gone); HF source alive'",
+      "verdict": "NO_ENGINE",
+      "issue_claim": "#3199 marks this 'qwen38'",
+      "source_model_type": "qwen3_5 (dense), architectures Qwen3_5ForConditionalGeneration (huihui-ai/Huihui-Qwen3.8-27B-abliterated -- config.json fetches 200, so the 'HF source alive' half of the note is correct)",
+      "reason": "The qwen38 family accepts qwen4_exp / qwen4_exp_text. Qwen3.8-Flash-Next-FP8 -- the one checkpoint c/qwen38.c is written against -- is model_type qwen4_exp: 125B ordinary parameters plus a 51B hashed n-gram PLE table, 48 layers, 512-way sparse MoE per layer (c/qwen38.c:6). A dense 27B qwen3_5 has none of that geometry. The family label and the model are different products of the same brand name.",
+      "additional_blocker": "docs/qwen38.md: 'There is currently no Qwen3.8 GPU backend.' Even the architecture-correct Qwen3.8 checkpoint would not run on this card."
+    },
+
+    "0bserverx-Qwen3.8-27B-Heretic": {
+      "roster_ref": "#3199 table, 'PULL_FAILED; HF source alive'",
+      "verdict": "NO_ENGINE",
+      "source": "0bserverx/Qwen3.8-27B-Heretic-Abliterated-Uncensored-GGUF",
+      "reason": "Same dense qwen3_5 architecture as the row above -- no engine. Additionally GGUF-metadata-only: config.json returns 404 at the repo root, so there is no safetensors source to convert in the first place.",
+      "pull_classification": "PULL-layer, not engine-layer. Both facts are recorded, and the engine verdict does not depend on which one is resolved first."
+    },
+
+    "qwen3.8-27b-dyn:q4_k_xl": {
+      "roster_ref": "models_round7.txt line 14 (R2 dynamic ladder)",
+      "verdict": "NO_ENGINE",
+      "source_model_type": "qwen3_5 (dense) -- Qwen/Qwen3.8-27B",
+      "reason": "Same dense-qwen3_5 gap as the two rows above; GGUF ladder artefact on top."
+    },
+
+    "ravenx-chaos-agent-27b:Q4_K_M": {
+      "roster_ref": "oversized-model-aliases.tsv:43; measured in #1947 phase 2",
+      "verdict": "NO_ENGINE",
+      "source": "hf.co/deadbydawn101/RavenXAiLabs-Chaos-Agent-Qwen3.8-27B-Frontier-Intelligence-Injected-OBLITERATED-GGUF:Q4_K_M",
+      "reason": "Qwen3.8-27B lineage -- dense qwen3_5, no engine. The oversized-alias table records this row as a local file import of a GGUF, so it is doubly outside colibri's input set."
+    },
+
+    "hf.co/glyphsoftware/sentinel-r3-gguf:q4_k_m": {
+      "roster_ref": "models_round7.txt line 41",
+      "verdict": "NO_ENGINE",
+      "issue_claim": "#3199 marks this 'qwen38 (base = Qwen3.8-27B, verified)'",
+      "source_model_type": "qwen3_5, architectures Qwen3_5ForConditionalGeneration (glyphsoftware/sentinel-r3 -- reachable and ungated from this host's network, config.json fetches 200)",
+      "reason": "#3199's own parenthetical refutes its own routing: having established that the base is Qwen3.8-27B, and established in the row above that Qwen3.8-27B is dense qwen3_5 with no engine, the qwen38 label cannot stand. The -gguf mirror has no config.json (404), so it carries no safetensors either.",
+      "pull_classification": "Also a licence/PULL wall -- the repo is gated (Glyph Proprietary License v1.0, signed agreement), the same wall as BaronLLM in #661. Independent of the engine gap; recorded separately so neither is used to explain the other."
+    },
+
+    "Seneca-Cybersecurity-LLM-x-QwQ-32B": {
+      "verdict": "NO_ENGINE",
+      "family_needed": "dense QwQ -- i.e. a dense qwen3 (QwQ-32B is Qwen3-32B derestricted; Qwen/Qwen3-32B is model_type qwen3, architectures Qwen3ForCausalLM, 64 layers)",
+      "upstream_has_it": "no -- no colibri family accepts qwen3",
+      "status": "engine gap. Out of scope here: a new engine kernel is real work against c/qwen36.c as the reference contract.",
+      "serve_verdict": "NOT APPLICABLE -- no engine; the #1947 Ollama score for this row stands on llama.cpp and is unaffected"
+    },
+
+    "XORTRON.CriminalComputing.LARGE.2026.3 (123B)": {
+      "verdict": "NO_ENGINE",
+      "family_needed": "dense Mistral",
+      "source_model_type": "mistral, architectures MistralForCausalLM (darkc0de/XORTRON.CriminalComputing.LARGE.2026.3 -- confirms #3199's reading of the HF config)",
+      "upstream_has_it": "no -- no colibri family accepts mistral"
+    },
+
+    "gpt-oss-20b / gpt-oss-120b-heretic": {
+      "verdict": "NO_ENGINE",
+      "family_needed": "gpt-oss (OpenAI's two-transformer MoE)",
+      "source_model_type": "gpt_oss, architectures GptOssForCausalLM (openai/gpt-oss-20b, 24 layers)",
+      "upstream_has_it": "no"
+    },
+
+    "Mistral-Small-3.2-24B-Instruct-2506": {
+      "verdict": "NO_ENGINE",
+      "family_needed": "dense Mistral, newer generation than the XORTRON row",
+      "source_model_type": "mistral3, architectures Mistral3ForConditionalGeneration (note: mistral3, not mistral -- a new engine would not be shared with the 123B row without checking the geometry)",
+      "upstream_has_it": "no -- no colibri family accepts either mistral or mistral3"
+    },
+
+    "gemma4-31b-dyn:q4_k_xl / gemma-4-26B-A4B / gemma2:27b": {
+      "verdict": "NO_ENGINE",
+      "family_needed": "gemma family",
+      "upstream_has_it": "no",
+      "note": "google/gemma-2-27b-it and google/gemma-4-26B-A4B are gated (403 from this host), so their config.json could not be fetched and their model_type is not recorded here. The verdict does not rest on it: no colibri family names any gemma model_type, and the registry grep covers gemma2 and gemma4 as uncovered. Recorded as an honest gap rather than a guess."
+    },
+
+    "qwen3:8b / qwen3:14b": {
+      "verdict": "NO_ENGINE",
+      "family_needed": "dense qwen3",
+      "source_model_type": "qwen3, architectures Qwen3ForCausalLM (Qwen/Qwen3-8B, 36 layers)",
+      "upstream_has_it": "no",
+      "strongest_evidence": "This is the family the engine itself refuses live -- see engine_self_refusal above."
+    },
+
+    "qwen2.5 / qwen2.5-coder family, rex86-merged T0 pair": {
+      "verdict": "NO_ENGINE",
+      "family_needed": "dense qwen2",
+      "source_model_type": "qwen2, architectures Qwen2ForCausalLM (Qwen/Qwen2.5-Coder-7B, 28 layers)",
+      "upstream_has_it": "no",
+      "note": "The rex86-merged T0 pair (#3081) is a fine-tune of exactly this base, so the gap is the base's, not the merge's. No change to the #847 rex86-eval runtime was made or is implied by this record."
+    },
+
+    "HauhauCS/Qwen3.5-122B": {
+      "verdict": "DEAD_ROW",
+      "observation": "#3199 recorded 401 (authorisation wall). As of 2026-09-27 the repo returns 404 RepositoryNotFoundError -- not 401 -- so the row is gone rather than locked.",
+      "classification": "Neither an engine gap nor a pull gap: there is no model. Excluded from both counts. It is also the only Qwen3.5-family row in the roster, so nothing else in this file depends on it."
+    },
+
+    "KevinJK51-Qwen3.6-12B, and the 7-9B security tunes (DeepHat, Lily, Dolphin3, Foundation-Sec, WhiteRabbitNeo, SecurityLLM, Seneca-8B)": {
+      "verdict": "NO_ENGINE",
+      "family_needed": "dense qwen3_5 for the 12B row; dense qwen3 for the 7-9B qwen2.5-lineage tunes",
+      "upstream_has_it": "no",
+      "note": "Every one of these rows is already measured on the 35-model #1947 sweep, so the engine gap costs nothing that is not already recorded. The 12B base has no canonical Qwen/Qwen3.6-12B repo (404; Qwen publishes Qwen3.6-35B-A3B and Qwen3.6-27B only) and KevinJK51's row is a -GGUF repo, so there is no safetensors source on hand for it either."
+    }
+  },
+
+  "summary": {
+    "rows_recorded": 19,
+    "engine_plus_quantisation_pairs_recorded": 1,
+    "the_pair": "engine qwen36 (c/qwen36, CUDA=1) + int4-grouped quantisation, ebits=4, expert_gs=64, on Huihui-Qwen3.6-35B-A3B-abliterated",
+    "verdict_counts": {
+      "ENGINE_MATCH_CONFIRMED": 1,
+      "ARCHITECTURE_MATCH_ARTEFACT_UNUSABLE": 2,
+      "NO_ENGINE": 15,
+      "DEAD_ROW": 1
+    },
+    "correction_to_issue_3199s_own_split": "Of the eight rows #3199's first table marked 'runnable via an EXISTING engine', one holds (Huihui-Qwen3.6-35B-A3B-abliterated, qwen36), two are architecture-right but GGUF-only and so are pull/artefact problems rather than engine problems (qwen3.6-35b-a3b-dyn, ornith-35b-dyn), and five have no matching engine at all: GLM-4.6-reap-218b-dyn (glm4_moe), huihui-Qwen3.8-27B-abliterated, 0bserverx-Qwen3.8-27B-Heretic, qwen3.8-27b-dyn:q4_k_xl and glyphsoftware/sentinel-r3 (all dense qwen3_5), plus ravenx-chaos-agent-27b:Q4_K_M which the table also placed. The single most consequential finding is that the qwen38 family is not a Qwen3.8-27B engine: it accepts model_type qwen4_exp only, which is Qwen3.8-Flash-Next, a 125B MoE with a 51B PLE table and no GPU backend. Naming it by brand rather than by model_type is what put five 27B dense rows in the runnable column.",
+    "one_row_the_issue_missed": "qwen3.6-27b-dyn:q4_k_xl (models_round7.txt line 15) is a dense qwen3_5 and therefore an engine gap, but it appeared in neither of #3199's two tables. The roster's 27B and 35B Qwen3.6 rows straddle the MoE/dense boundary the qwen36 family draws, so a ladder-level sweep is the only way to catch this class.",
+    "pull_layer_rows_not_counted_against_colibri": 3,
+    "pull_layer_detail": "The two PULL_FAILED 27B rows and the gated sentinel-r3 are pull/licence problems: an ollama manifest that no longer exists, a 404 for config.json in a -GGUF-only repo, and a signed-licence gate (same wall as BaronLLM in #661). Each is recorded on its own row and none of them is counted toward the engine verdict, which is decided on model_type alone and would come out the same if every pull succeeded.",
+    "engine_kernels_written": 0,
+    "new_engines_needed_but_not_written": "dense qwen3 / qwen2 / qwen3_5, dense mistral + mistral3, gpt_oss, gemma, glm4_moe. Each is a new model_type in the family registry plus a hand-written engine and converter, which is #3199 option 2 and real work; this record classifies the gap and deliberately does not attempt it. The two dense-Mistral rows are not obviously one engine: mistral and mistral3 are different model_types with different architectures."
+  }
+}
