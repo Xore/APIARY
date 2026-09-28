@@ -248,6 +248,103 @@ are structural or mathematical:
   `model_state_id` groups, no group straddling the boundary. Non-eligible input
   is refused with exit 2, not scored.
 
+### 2026-09-28 — #3451: the alerting-trust harness landed; both legs UNMEASURED
+
+[Wire #3451](https://github.com/Xore/APIARY/issues/3451), the held measurement
+this epic's second half of acceptance asked for. Its gate, #2925, closed on
+2026-09-11, so the hold condition is satisfied. The measurement itself is still
+not made, and this entry records why in the form the issue requires.
+
+`evaluate_accuracy.py alerting-trust` is implemented and tested. It consumes the
+same NDJSON snapshot `disposition_corpus.py` exports, shares that module's
+`LABEL_MAPPING` rather than restating it, makes no network call, and is one
+command with no new service:
+
+```bash
+python3 ml-worker/benchmarks/evaluate_accuracy.py alerting-trust \
+  --snapshot "$HOME/ml-worker-qualification/dispositions.ndjson" \
+  --census   "$HOME/ml-worker-qualification/dispositions-census.json" \
+  --output   "$HOME/ml-worker-qualification/alerting-trust.json"
+```
+
+It is a separate module rather than a flag on the tier 2 rail because it
+measures a different thing. `disposition` scores a *calibrator* — precision on a
+held-out split of a fitted Platt model, which answers "is the calibration
+honest". This answers "were the alerts we raised worth raising", which is a
+count over the alert population and needs no calibrator, no split and no seed.
+It also still runs on a snapshot `disposition` would refuse, because a single
+`model_state_id` or a single class affects a split and does not affect a count.
+
+#### Precision — UNMEASURED, and the reason is reachability, not structure
+
+**No precision figure is recorded in this document, because none was measured.**
+The labelled population exists only in `ml-anomalies` on the live deployment,
+and no deployment Elasticsearch was reachable from the machine this was built
+on (connection refused on `localhost:9200` and on every candidate host, with no
+`ES_HOST` set). There is no snapshot to score, so the harness refuses with exit
+2 and writes no report. The fixture path was used to prove the plumbing end to
+end and its output was deleted; a number derived from a fixture is not a
+measurement of this deployment and does not appear here.
+
+The leg is computable. The moment a snapshot exists, one command produces
+`TP/(TP+FP)` over labelled, above-threshold alerts with its sample size and a 95%
+Wilson interval, so a corpus of three agreeing alerts cannot be read as a
+deployment claim.
+
+#### Recall — UNMEASURED, and always will be, on this corpus
+
+This one is not a reachability problem and no future run fixes it.
+
+`write_anomaly()` returns before persistence below `ML_ALERT_THRESHOLD`. Recall
+needs the true positives that *never became alerts*, and those events are
+discarded at the persistence boundary before anything stores them. No table
+holds that denominator, no counter tallies it, and it cannot be reconstructed
+afterwards. `TP / (all_events_seen)` is one line of arithmetic over a number
+that was never recorded; the quotient is not a measurement.
+
+So the harness has no `recall()` function at all. The leg is a constant,
+`as_record()` raises if a value is ever attached to it, and asking to compute
+recall is refused with that explanation rather than a ban notice. A test asserts
+recall remains UNMEASURED against a 900-alert all-true-positive corpus —
+deliberately, so that a future reader who notices the data improved and reaches
+for the division finds the refusal already tested.
+
+The distinction the reports keep: recall is UNMEASURED *by construction* and
+would read so against a perfect corpus, while precision is UNMEASURED only when
+a particular run had no labelled rows.
+
+#### `benign_known` is a negative, and is kept in the denominator
+
+It is a real operator disposition — the alert was reasonable to raise, the
+activity is known-benign — so the operator explicitly declined to call it an
+attack. Scored as a negative, kept in the denominator, reproducing the mapping
+already reviewed in `disposition_tier2.py`.
+
+Excluding it is the failure mode: dropping rows that are negatives from
+`TP/(TP+FP)` can only raise the quotient, and it raises it silently. A corpus
+that is mostly `benign_known` would report a near-perfect precision for a
+detector that is not close. Every report therefore carries
+`precision_if_benign_known_excluded` as a labelled counterfactual so the size of
+that inflation is visible rather than hypothetical, and a test asserts the
+excluded variant is strictly higher. Counting it as a positive is equally
+defensible on an "the alert was correct" reading and equally inflates; it is not
+adopted, because the detector's job is to call attacks. Per-status counts travel
+in every report, so a reader who disagrees can recompute rather than guess.
+
+#### The reporting rule, enforced in code
+
+`unmeasured()` hard-codes `value=None` and `as_record()` rejects any value
+without a status or a status without its value, so a `0.0` cannot reach a
+report through a skipped leg. This bites hardest on `unlabelled_alerts`: the
+NDJSON snapshot is closed-dispositions-only, so counting `open` rows in it
+reports `0` undisposed alerts on every run — an invented denominator wearing a
+clean-sweep result. It is UNMEASURED until `--census` supplies the real count
+from `disposition_corpus.py`.
+
+A *measured* zero — a corpus of nothing but false positives — is a real result
+and is still reported as `0.0`. Only a skipped leg is UNMEASURED. That is the
+line the whole rule draws.
+
 ### Scope deliberately left out
 
 - **No deployment recall figure, and none is possible.** Only above-threshold

@@ -193,6 +193,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="optional operator-supplied within-alerts precision floor; "
              "unarmed (reported, not gated) when omitted",
     )
+    trust = subparsers.add_parser(
+        "alerting-trust",
+        help="precision/recall of raised alerts against operator dispositions (#3451)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    trust.add_argument(
+        "--snapshot",
+        required=False,
+        type=Path,
+        default=None,
+        help="labelled NDJSON snapshot written by disposition_corpus.py; when "
+             "omitted, both legs are reported UNMEASURED rather than guessed",
+    )
+    trust.add_argument(
+        "--census",
+        required=False,
+        type=Path,
+        default=None,
+        help="optional census report from disposition_corpus.py; supplies the "
+             "unlabelled-alert count, which the closed-only snapshot cannot carry",
+    )
+    trust.add_argument(
+        "--output",
+        required=True,
+        help="path for the hashed JSON run report (must be outside the repository)",
+    )
     return parser
 
 
@@ -754,11 +780,51 @@ def _run_disposition_command(args: argparse.Namespace) -> int:
     return 0 if report["gates"]["passed"] else 1
 
 
+def _run_alerting_trust_command(args: argparse.Namespace) -> int:
+    """Precision/recall of raised alerts against operator dispositions (#3451).
+
+    Same lazy-import shape as the disposition rail: this path must stay usable
+    when the calibration module cannot be imported, because the most important
+    thing it can do is report UNMEASURED with a reason.
+    """
+    root = str(Path(__file__).resolve().parents[1])
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    try:
+        from benchmarks.alerting_trust import (
+            AlertingTrustError,
+            print_report as print_trust_report,
+            run_alerting_trust,
+        )
+    except ImportError:
+        from alerting_trust import (  # type: ignore[no-redef]
+            AlertingTrustError,
+            print_report as print_trust_report,
+            run_alerting_trust,
+        )
+
+    try:
+        report, digest = run_alerting_trust(args.snapshot, args.census, args.output)
+    except (AlertingTrustError, BannedMetricError, ValueError) as exc:
+        # DispositionError is a ValueError, so a malformed snapshot is covered
+        # without importing the calibration module at module scope.
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print_trust_report(report)
+    print(json.dumps({
+        "report_sha256": digest,
+        "written": str(Path(args.output).resolve()),
+    }))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "disposition":
         return _run_disposition_command(args)
+    if args.command == "alerting-trust":
+        return _run_alerting_trust_command(args)
     try:
         report, digest = run_beth(args.data_dir, args.output, args.seeds, args.archive)
     except (BethError, BannedMetricError, ValueError) as exc:

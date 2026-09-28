@@ -113,7 +113,111 @@ A gate with fewer than three populated reliability bins reports **not
 exercised** rather than passed, on the same "a skip is not a pass" rule Tier 1
 uses. An unsupplied precision floor reports **unarmed**, never passed.
 
+## Alerting trust — precision/recall vs operator dispositions (#3451)
+
+[`evaluate_accuracy.py alerting-trust`](evaluate_accuracy.py) is the held
+measurement the #1974 epic's second half of acceptance asked for. It answers
+one question about the alerts the system actually raised: when ml-worker raises
+an alert and an operator has since closed it out, how often was the operator
+right?
+
+```bash
+python3 ml-worker/benchmarks/evaluate_accuracy.py alerting-trust \
+  --snapshot "$HOME/ml-worker-qualification/dispositions.ndjson" \
+  --census   "$HOME/ml-worker-qualification/dispositions-census.json" \
+  --output   "$HOME/ml-worker-qualification/alerting-trust.json"
+```
+
+One command, no new service, and it consumes the same snapshot the pair above
+produces. It makes no network call.
+
+This is deliberately **not** a flag on the tier 2 rail. `disposition_tier2.py`
+scores a *calibrator* — it fits Platt scaling on a group-disjoint split and
+reports precision on a held-out split of that calibrator's own output, which is
+the right number for judging calibration and the wrong number here. Deployment
+precision needs no calibrator, no split and no seed, and it is still available
+on a snapshot that `disposition_tier2` would refuse (one `model_state_id`, or a
+single class). The two share a label mapping and a snapshot loader; they must
+agree on the mapping, so one is imported rather than restated.
+
+### One leg runs, one leg is UNMEASURED permanently
+
+| leg | status | why |
+|---|---|---|
+| `precision` | computable | `TP/(TP+FP)` over labelled, persisted, above-threshold alerts |
+| `recall` | **UNMEASURED** | its denominator was never persisted — see below |
+| `unlabelled_alerts` | UNMEASURED unless `--census` is given | the NDJSON snapshot is closed-only |
+
+**Recall has no denominator anywhere in this system, and no amount of labelling
+fixes that.** `write_anomaly()` returns before persistence below
+`ML_ALERT_THRESHOLD`, so the true positives that *never became alerts* — the
+only thing recall can divide by — were discarded at the persistence boundary.
+No table holds them, no counter tallies them, and they cannot be reconstructed
+afterwards. Recall would read UNMEASURED even against a fully labelled corpus,
+and it stays UNMEASURED until a below-threshold population is persisted and a
+real denominator exists.
+
+This is why there is no `recall()` function. The only way to produce a recall
+number here is `TP / (all_events_seen)`, which divides by something that was
+never recorded; the quotient is arithmetic on a missing number, not a
+measurement. The refusal is the deliverable and it is structural: the leg is a
+constant, the report validator raises if a value is ever attached to it, and
+asking to compute recall is refused with an explanation rather than a ban
+notice. A test asserts recall stays UNMEASURED against a 900-alert,
+all-true-positive corpus — precisely so nobody "fixes" it later by observing
+that the data got better.
+
+The distinction worth reading carefully in a report: recall is UNMEASURED *by
+construction*, while precision is UNMEASURED only when a particular run had no
+labelled rows. Different failures, and the report says which occurred.
+
+### `benign_known` is a negative, and it stays in the denominator
+
+`benign_known` is a real operator disposition — the alert was reasonable to
+raise, the activity underneath is known-benign — so the operator explicitly
+declined to call it an attack. It is scored as a **negative** and kept in the
+denominator, reproducing the mapping already reviewed in `disposition_tier2.py`.
+
+Excluding it is the dangerous option: dropping rows that are negatives from
+`TP/(TP+FP)` can only raise the number, and it raises it silently. A corpus
+that is mostly `benign_known` would report a near-perfect precision for a
+detector that is not close. The report therefore carries
+`precision_if_benign_known_excluded` as an explicitly labelled counterfactual so
+the size of that inflation is visible rather than hypothetical. Counting
+`benign_known` as a positive is likewise defensible on an "the alert was
+correct" reading and equally raises the number; it is not adopted, because the
+detector's job is to call attacks. Either way the per-status counts travel in
+the report, so a reader who disagrees can recompute rather than guess.
+
+### The reporting rule is enforced, not just documented
+
+> A leg that did not run is recorded UNMEASURED with a reason. A zero is a claim
+> about a result; a failed run is not a result.
+
+`unmeasured()` hard-codes `value=None`, and `as_record()` raises if a leg ever
+carries a value without a status or a status without its value, so a `0.0`
+cannot reach a report through a skipped leg. The place this bites hardest is
+`unlabelled_alerts`: the snapshot holds **closed dispositions only**, so a
+consumer counting `open` rows in it would report `0` undisposed alerts every
+single run — an invented denominator wearing a clean-sweep result. It is
+UNMEASURED until a census report supplies the real count.
+
+Every precision is reported with its sample size and a 95% Wilson interval, so
+`3/3 = 1.000 [0.44, 1.00]` cannot be mistaken for a deployment claim. A rate
+with no negative examples is additionally flagged, because 1.000 with zero false
+positives describes the sample and not the detector. Note the line this draws:
+a *measured* 0.0 (a corpus of nothing but false positives) is a real result and
+is reported as 0.0; only a *skipped* leg is UNMEASURED.
+
 ### Proving the rail bites
+
+`ml-worker/tests/test_alerting_trust.py` asserts the refusals directly, since
+the load-bearing claims are the negative ones: that a `0.0` on a skipped leg
+raises, that recall stays UNMEASURED against a large perfect corpus, that
+excluding `benign_known` would inflate the headline, and that the command exits
+2 rather than writing a report when no snapshot is supplied.
+
+### Proving the tier 2 rail bites
 
 `ml-worker/tests/test_disposition_tier2.py` deliberately breaks each guard and
 asserts the failure, because a rail that cannot fail is decoration. Replacing
