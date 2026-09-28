@@ -50,3 +50,10 @@ round7/
 # developer runs `schemathesis run` against the crate by hand -- and it is
 # per-machine derived data, not something to review.
 .schemathesis/
+
+# The committed http-honeypot binary (#3463). The image builds its own from
+# *.go in the builder stage and never copies this blob, so nothing reads it --
+# but any in-tree `go build` silently rewrote the tracked file, which left a
+# phantom diff in unrelated work and was one `git add -A` away from committing
+# a machine-local artifact. Same failure mode as the Python bytecode above.
+arcane/home/honeypot-http/http-honeypot/http-honeypot
