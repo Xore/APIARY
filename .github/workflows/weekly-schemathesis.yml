@@ -280,7 +280,7 @@ jobs:
         # what this job was last tested against, so the comment is corrected to
         # match the code rather than the code bumped to match the comment --
         # changing the major would be a build-logic change, not a pin fix.
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: schemathesis-reports
           path: |

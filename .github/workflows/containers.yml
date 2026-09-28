@@ -678,7 +678,7 @@ jobs:
 
       - name: "Upload the digest-bound SBOM as a CI artifact (#3321)"
         if: matrix.sbom == true && github.event_name != 'pull_request'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           # Keyed by the digest, not the run: two builds of the same commit
           # produce the same name, and a digest-keyed name is the one an
