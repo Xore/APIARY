@@ -126,6 +126,16 @@ services:
       # galah's own deadline doesn't cut the connection before the broker's
       # does.
       - UPSTREAM_TIMEOUT_SECONDS=90
+      # #3448: prompt-injection detection on the text galah hands the local
+      # model. Empty means every shape is enabled; comma-separated to run a
+      # subset. Deliberately NO count and NO rate: the research note puts
+      # this class at 3 requests in 84 days on the sensors it measured, none
+      # of which is galah, so a rate gate would suppress the one event it
+      # exists to catch and gate on a number nobody has measured. What is
+      # configurable is whether a shape runs at all, because the
+      # false-positive rate of these shapes on this sensor is UNMEASURED and
+      # an operator should not need a rebuild to find out.
+      - INJECTION_SHAPES=
     # #2366: measured baseline, same "run it, then reduce" methodology as
     # #89/#118's cap_drop passes. Verified locally: built this image, ran
     # it with cap_drop: [ALL] added on top of the existing
