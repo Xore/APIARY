@@ -49,8 +49,16 @@ func main() {
 // newHandler builds the proxy main() serves. It lives outside main() so
 // the test suite exercises this exact construction rather than its own
 // re-implemented copy; editing it is what changes broker behavior.
+//
+// It is also the only place in the stack that still holds the prompt text
+// after galah has handed the attacker's raw request to the model and before
+// galah has thrown it away, so prompt-injection classification runs here
+// (#3448; see injection.go). Classification is read-only: body is forwarded
+// as the exact bytes galah sent, and neither the status nor the body this
+// handler relays is influenced by what the classifier found.
 func newHandler(target *url.URL, maxBody int64, upstreamTimeout time.Duration) http.Handler {
 	client := &http.Client{Timeout: upstreamTimeout}
+	injection := injectionShapesFromEnv()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -64,6 +72,14 @@ func newHandler(target *url.URL, maxBody int64, upstreamTimeout time.Duration) h
 		if err != nil {
 			http.Error(w, "request body too large or unreadable", http.StatusRequestEntityTooLarge)
 			return
+		}
+
+		// Read-only, and before the upstream call so a hit is recorded
+		// whether or not the model ever answers. body itself is not
+		// modified -- classifyForwardedPrompt decodes into its own struct
+		// and the same slice is what goes upstream below.
+		if label, carrier := classifyForwardedPrompt(body); label != "" {
+			logPromptInjection(label, carrier, body, injection)
 		}
 
 		ctx, cancel := context.WithTimeout(r.Context(), upstreamTimeout)
