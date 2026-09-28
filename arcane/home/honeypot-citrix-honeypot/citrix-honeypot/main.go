@@ -355,6 +355,13 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) serveGET(w http.ResponseWriter, r *http.Request, reqPath string) {
 	h.log2(r, "get", reqPath, "")
+	// #3467, before the auth-surface block below: that block can return
+	// early (authSurfaceResponse), and this classifier must run on every
+	// request regardless of which branch serves it. No body is read on a
+	// GET, so body is empty here.
+	if kind := cmdShapeEvent(reqPath, queryForShape(r), ""); kind != "" {
+		h.log2(r, kind, reqPath, "")
+	}
 	if kind := authSurfaceEvent(reqPath); kind != "" {
 		h.log2(r, kind, reqPath, "")
 		if h.authSurfaceResponse(w, r, reqPath) {
@@ -402,6 +409,12 @@ func (h *handler) serveGET(w http.ResponseWriter, r *http.Request, reqPath strin
 func (h *handler) servePOST(w http.ResponseWriter, r *http.Request, reqPath string) {
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	h.log2(r, "post", reqPath, string(body))
+	// #3467: same ordering reason as serveGET, and here the body is the
+	// third surface cmdShapeEvent checks -- an unvalidated-input primitive
+	// is at least as likely to arrive in a form field as in the target.
+	if kind := cmdShapeEvent(reqPath, queryForShape(r), string(body)); kind != "" {
+		h.log2(r, kind, reqPath, string(body))
+	}
 	if kind := authSurfaceEvent(reqPath); kind != "" {
 		h.log2(r, kind, reqPath, string(body))
 		if h.authSurfaceResponse(w, r, reqPath) {
@@ -524,6 +537,11 @@ func main() {
 		},
 	}
 	log.emit(event{Port: port, Event: "listening"})
+	// #3467: the KEV metadata for the NetScaler zero-day RCE pair this
+	// decoy impersonates, once per start, on the same emit path. See
+	// cve_2026_88771.go for why this is metadata-driven coverage and not
+	// exploit detection.
+	emitKEVCoverage(log, port)
 	if err := srv.Serve(tlsLn); err != nil {
 		panic(err)
 	}
