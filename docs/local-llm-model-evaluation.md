@@ -1862,3 +1862,320 @@ precisely to catch this is the model that wins**:
    than as an `execv` argument string, and re-adjudicate. The current fixture
    produces at most one compliance event, so the gate's sensitivity has never
    been exercised — its 0/1 false-negative rate is not a measurement.
+
+## Issue #3199 / #1947 part 5 (2026-09-28): colibri engine-coverage disposition of the whole roster
+
+**Nothing in this section was measured.** No model was loaded, converted,
+served or scored; no GPU, no server, no container, no Elasticsearch. Every
+qualification cell is **UNMEASURED**, and the table below is a *disposition* —
+"can colibri serve this architecture at all" — which is a different question
+from "does it score well". A disposition is not a qualification, and this
+section does not turn any of it into one.
+
+Niklas's call on #3199 (2026-09-28) was to dispatch this against the current
+state rather than wait for the colibri seed/GGUF reader path (#3172). The
+accepted trade-off was that this round re-states the gap rather than closing
+it, so the reader's arrival has a measured baseline. That is what follows.
+
+Machine-readable table, one record per roster line with every field this
+section quotes:
+**`docs/benchmarks/matrices/colibri-roster-disposition-2026-09-28.json`**.
+
+### The oracle, pinned
+
+Colibri is upstream (`JustVugg/colibri`) and nothing in this repository
+changes it. The engine inventory below was read from a fresh shallow clone at
+
+| | |
+|---|---|
+| upstream | `https://github.com/JustVugg/colibri` |
+| commit | `ce370e87d7b623d7759b52ec2007d75fc5b0e87e` (2026-09-25, `Merge pull request #1663 from JustVugg/dev`) |
+| source of truth | `c/family_registry.py` — the registry docstring calls itself "Authoritative model-family registry for Colibri's Python control plane" |
+
+Colibri keys on one field. `family_for_config()` (`c/family_registry.py:1526`)
+reads `config.json`'s `model_type`, normalises it with `.strip().lower()`, and
+raises `UnknownFamilyError: unsupported model_type: <x>` for anything absent
+from `_BY_TYPE`. There is no fallback, no aliasing, no "closest family". So
+coverage is a closed set of **17 `model_type` strings across 9 engine
+families**, and any architecture outside it is a hard stop before a single
+byte is loaded:
+
+| family | `model_types` | engine artifact | `coli convert` dispatches to |
+|---|---|---|---|
+| `glm53` | `glm5_next`, `glm5_next_text` | `glm53` | `tools/convert_glm53.py` |
+| `glm` | `glm_moe_dsa`, `glm5_moe`, `glm` | `colibri` | `tools/convert_fp8_to_int4.py` |
+| `inkling` | `inkling_mm_model`, `inkling` | `inkling` | refuses → `tools/convert_inkling_int4.py` |
+| `kimi` | `kimi_k3`, `kimi_linear` | `kimi_k3` | refuses → `docs/kimi_k3.md` |
+| `olmoe` | `olmoe` | `olmoe` | `tools/convert_olmoe_merged.py` |
+| `qwen36` | `qwen3_5_moe`, `qwen3_5_moe_text` | `qwen36` | refuses → `tools/convert_qwen36.py` |
+| `qwen38` | `qwen4_exp`, `qwen4_exp_text` | `qwen38` | refuses → official FP8 runs as-is |
+| `deepseek_v4` | `deepseek_v4` | `deepseek_v4` | refuses → `docs/deepseek-v4.md` |
+| `deepseek_v41` | `deepseek_v41`, `deepseek_v41_text` | `deepseek_v41` | refuses → `prepare_dsv41.py` |
+
+Every one of the "refuses" entries is the same mechanism: `cmd_convert`
+(`c/coli:2483`) picks `family.converter`, and a family with an empty
+`converter` field falls back to `convert_fp8_to_int4.py`, whose family guard
+(`c/tools/convert_fp8_to_int4.py:47`) exits with a pointer instead of
+upcasting the wrong weights. That guard is the #1304 fix and it is correct
+behaviour — but it means `coli convert` is a one-step route for **three** of
+nine families and a two-step route (`python3 c/tools/<family converter>.py
+--repo <hf repo> --outdir <dir>`) for the rest.
+
+### The second wall: converters read safetensors, not GGUF
+
+`c/tools/` contains nine converters. `convert_gguf_to_olmoe.py` is the only
+one that reads GGUF; it binds the reader to `gguf_olmoe_profile.py`, refuses
+any non-OLMoE GGUF by name, and is not reachable from `coli convert` at all
+(the `olmoe` family routes to `convert_olmoe_merged.py`, which reads
+safetensors). The other eight take safetensors. A GGUF *reader* does
+exist in-tree (`c/tools/gguf_reader.py`, pure stdlib, `GGML_TYPE_RAW` /
+`GGML_TYPE_BLOCK` coverage) — what does not exist is a general GGUF ingest
+path. That is #3172's subject, and it is a real and separable piece of work:
+the hard part is per-family tensor mapping, not header parsing.
+
+Consequence for the roster: a line whose only published weights are `.gguf` is
+blocked on this wall **whatever its architecture is**.
+
+### How the architecture was established
+
+Not from names. For every roster line that resolves to a blob, the
+`general.architecture` key was read out of the GGUF header of that exact blob
+over HTTP range requests — for Ollama library tags via the
+`registry.ollama.ai` manifest's model-layer digest, for `hf.co` tags via a
+ranged `GET` of the named `.gguf`. Only the header and metadata block are
+read; no weights are downloaded. Where the upstream repo also ships a
+`config.json`, its `model_type` is recorded beside it, so most rows carry two
+independent readings that agree. Every `general.architecture` → `model_type`
+pair used here was itself established from a repo carrying **both** files
+(`MK4-Research/LOREA-cyber-v5.8` for `qwen35moe`↔`qwen3_5_moe`,
+`OBLITERATUS/Qwen3.8-27B-OBLITERATED` for `qwen35`↔`qwen3_5`,
+`OBLITERATUS/Gemma-4-12B-OBLITERATED` for `gemma4`↔`gemma4_unified`) or from
+the official base repo.
+
+### Disposition of all 108 roster lines
+
+Roster = 91 measured tags in `docs/benchmarks/matrices/round7-cold-baseline.json`
++ the 5 `PULL_FAILED` tags named in the round-7 section above + 4 T0 tags in
+`t0-rex86-cold.json` + `sentinel-r3` + the 7 R2 dynamic-ladder tags
+(`analysis/ghidra/benchmarks/corpus/models_round7.txt`).
+
+| disposition | lines | meaning |
+|---|---:|---|
+| **HOSTABLE** | **2** | architecture covered **and** a safetensors source exists |
+| BLOCKED-SOURCE | 13 | architecture covered, only `.gguf` published — #3172's wall |
+| BLOCKED-ENGINE | 90 | `model_type` not in colibri's registry — needs an engine |
+| UNVERIFIED | 3 | gated upstream; no bytes readable without a token |
+
+**Two of 108.** The two hostable lines are
+`hf.co/MK4-Research/LOREA-cyber-v5.8:latest` and
+`huihui-qwen3.6-35b-a3b-abliterated:q3_k`, both `qwen3_5_moe` → family
+`qwen36`. Neither has been converted or served. They are the *only* rows in
+this table that a reader could act on tomorrow.
+
+**Only one of colibri's nine engines is reachable by this roster at all:**
+`qwen36`, by 15 lines (13 of them blocked on format, 2 servable). No roster
+line is `qwen4_exp`, `deepseek_v4`, `deepseek_v41`, `glm_moe_dsa`, `glm5_moe`,
+`glm5_next`, `olmoe`, `kimi_k3` or `inkling`. The other eight engines are, for
+#1947's purposes, headroom.
+
+### The engine gap, by architecture
+
+`model_type` → rows → what it would take. All of these are upstream work in
+`JustVugg/colibri`: a `c/<name>.c` per the engine contract (`c/qwen36.c` is
+the reference), a Makefile target, a `FamilyDescriptor` in
+`c/family_registry.py` with the `model_types` tuple, and a
+`c/tools/convert_<name>.py` safetensors converter. Writing an engine is not
+in scope here and nothing below estimates it.
+
+| `model_type` | rows | family it would join | note |
+|---|---:|---|---|
+| `qwen3_5` | 26 | `qwen36`'s dense sibling | the single largest gap; see the correction below |
+| `llama` | 18 | new | Llama-3.1, CodeLlama, Foundation-Sec (7 tags), SecurityLLM/ZySec, Dolphin3, Lily, Mistral-7B-v0.3, NeoBase, `Colibri_8b_v0.1`, `XORTRON…LARGE`, and the `xortron-123b-dyn` base |
+| `qwen2` | 15 | new | Qwen2.5 dense + the T0 `rex86-merged` pair |
+| `gemma4_unified` | 12 | new | Gemma 4 dense (12B) and MoE (26B-A4B, 31B) in one `model_type` |
+| `gpt_oss` | 4 | new | the round-7 harmony defect (#3140/#3142) is colibri's problem too if this is written |
+| `qwen3` | 3 | new | `qwen3:8b` / `qwen3:14b` — the current incumbents |
+| `chatglm` | 2 | new | `glm4:9b`, `codegeex4:9b` |
+| `deepseek_v2` | 2 | new | `deepseek-coder-v2:16b-lite` and the `GLM-4.7-Flash` distill, which is a DeepSeek-arch model |
+| `mistral` | 2 | new | Mistral-Small-3.2-24B and `pki/nova-24b-cybersec` † |
+| `glm4_moe` | 2 | `glm`'s predecessor | see the correction below |
+| `gemma2` | 1 | new | `gemma2:27b` |
+| `muse_glimmer` | 1 | new | `Glimmer-Sentry-30B`; the round-7 note already records it falling outside round-7's serving adaptations |
+| `granite` | 1 | new | `antares-1b` |
+| `phi3` | 1 | new | `phi4:14b` (llama.cpp reports Phi-4 under `phi3`) |
+| unresolved | 3 | — | see UNVERIFIED below |
+
+Eleven rows carry `round7_tier_a_percent: 0.0` in the JSON. Those are not
+zeros written here: they are carried verbatim from
+`round7-cold-baseline.json`, where every run completed and every run returned
+empty or degenerate output, and the round-7 section above already names all
+eleven as serving defects rather than scores. Every leg that did **not** run
+in this work — the 5 `PULL_FAILED` tags, `sentinel-r3`, the 7 dynamic-ladder
+tags — carries `null`, which is what "no result" looks like in this table.
+
+† `hf.co/pki/nova-24b-cybersec` is the one row where the two evidence
+channels disagree: the repo's `config.json` reads `model_type: mistral` /
+`MistralForCausalLM`, while the `general.architecture` key in its
+`nova-24b-q8.gguf` reads `llama`. The table records `mistral`, because
+`config.json` is what colibri's own `family_for_config()` would be handed, and
+because the repo is the one that also ships the 10 safetensors shards. The
+disposition is BLOCKED-ENGINE either way — neither string is in the registry —
+but the disagreement is recorded rather than smoothed over, because it is
+exactly the kind of thing that makes a converted model quietly wrong.
+
+### Three corrections to #3199's own table
+
+These are the reason this section exists, and they move rows *out* of the
+"runnable via existing colibri engines" list rather than adding any.
+
+1. **The Qwen3.8 dense line is not `qwen38`.** #3199 lists
+   `huihui-Qwen3.8-27B-abliterated`, `0bserverx-Qwen3.8-27B-Heretic`,
+   `qwen3.8-27b-dyn`, `RavenX-Chaos-Agent-27B` and `glyphsoftware/sentinel-r3`
+   as `qwen38`-runnable, and the #3172 comment asserts the same for
+   `DavidAU/Qwen3.8-27B-TURBO`. `Qwen/Qwen3.8-27B`'s `config.json` reads
+   `model_type: qwen3_5` / `Qwen3_5ForConditionalGeneration`, and the roster
+   lines' own GGUFs report `general.architecture: qwen35`. The `qwen38`
+   engine covers `qwen4_exp` only — Qwen3.8-**Flash-Next** — which is a
+   different model and appears nowhere on this roster. That leaves **26 rows**
+   with no engine, not 0. (`sentinel-r3` is UNVERIFIED either way: its repo is
+   `gated: auto` and answered HTTP 401 to every read here.)
+2. **`GLM-4.6-reap-218b` is not the `glm` family.** #3199 lists it as
+   MoE-DSA and convertible. `zai-org/GLM-4.6`'s `config.json` reads
+   `model_type: glm4_moe` / `Glm4MoeForCausalLM`, and the roster line's GGUF
+   reports `glm4moe`. Colibri's `glm` family is `glm_moe_dsa` / `glm5_moe` /
+   `glm` — the successor, not the predecessor. Both GLM-4.6 lines move to
+   BLOCKED-ENGINE.
+3. **Dense-vs-MoE inside one generation is the whole story for Qwen3.5/3.6/3.8.**
+   `qwen36` covers `qwen3_5_moe`. Every dense member of the same generation —
+   4B, 9B, 12B, 27B — is `qwen3_5`, which is not in the registry. The #3172
+   comment already flagged this for `OrionLLM/OxCoder-9B`; it generalises to
+   26 of the roster's lines, including the 9B and 12B security tunes that were
+   among the round-7 leaders.
+
+### UNVERIFIED (3) — not zero, not "blocked on the engine"
+
+These three could not be classified because the bytes are gated and no
+authorized token was used in this investigation. They are recorded as
+unresolved, not as engine gaps and not as anything else.
+
+| line | why unresolved | how to resolve |
+|---|---|---|
+| `baronllm-llama3.1:q6_k` | `AlicanKiraz0/Cybersecurity-BaronLLM_Offensive_Security_LLM_Q6_K_GGUF` → HTTP 401 | read `config.json` / GGUF header with a token; same wall as #661 |
+| `hf.co/protoLabsAI/ThinkingCap-Qwen3.6-27B-abliterated-MTP-GGUF:Q4_K_M` | HTTP 401 | as above. Its ungated sibling `…/ThinkingCap-Qwen3.6-27B-MTP-GGUF` reads `qwen3_5`, so the abliterated variant is *probably* the same line — that is an inference and is not recorded as the answer |
+| `hf.co/glyphsoftware/sentinel-r3-gguf:q4_k_m` | `gated: auto` → HTTP 401. A token exists on the benchmark host per `docs/benchmarks/2026-09-27-sentinel-r3-pull-access.md`; it was not used here | same |
+
+### BLOCKED-SOURCE (13) — what #3172's reader would actually buy
+
+All 13 are `qwen3_5_moe`, i.e. the one covered architecture, blocked purely on
+format. The reader does not open a single new engine; it converts 13 blocked
+lines into servable ones and makes the largest engine gap (dense `qwen3_5`,
+26 rows) *reachable once written*.
+
+| line | upstream `.gguf` / `.safetensors` | verified safetensors alternative |
+|---|---:|---|
+| `hf.co/huihui-ai/Huihui-CyberStrike-OffSec-35B-abliterated-GGUF:q6_k` | 6 / 0 | `huihui-ai/Huihui-CyberStrike-OffSec-35B-abliterated` — 17 shards, `config.json` reads `qwen3_5_moe`, index present, unquantised |
+| `hf.co/llmfan46/Ornith-1.0-35B-uncensored-heretic-GGUF:{Q4_K_M,q3_k_m}` | 10 / 0 | `llmfan46/Ornith-1.0-35B-uncensored-heretic` — 2 shards, `config.json` read once as `qwen3_5_moe` (a re-read timed out; re-verify before converting) |
+| `hf.co/AlicanKiraz0/Titus-CybersecurityLLM-v1.0-Q4_K_M-No-MTP-GGUF:Q4_K_M` | 1 / 0 | `…/Titus-CybersecurityLLM-v1.0-mlx-4Bit` — MLX-quantised, **not** the layout `convert_qwen36.py` documents. A candidate, not a source |
+| `hf.co/ahmedandaloes/CyberStrike-OffSec-35B-GGUF:Q3_K_M` | 51 / 0 | `…/CyberStrike-OffSec-35B-MLX-bf16` — same MLX caveat |
+| `hf.co/HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive:iq3_m` | 12 / 0 | none found under that owner |
+| `ravenx-cyberagent-35b:Q4_K_M` | 1 / 0 | two MLX repos under `deadbydawn101`; same caveat |
+| `ornith-35b-selfquant:{Q4_K_M,iq3_m,q3_k_m,q3_k_s}` | 10 / 0 | the base's safetensors, but these four are *self-quantised* artefacts, different weights — the base is not a source for them |
+| `ornith-35b-dyn:q4_k_xl`, `qwen3.6-35b-a3b-dyn:q4_k_xl` | — | locally built by `requant_sweep.sh`; the only artifact is the GGUF it built |
+
+Two of the three "verified safetensors alternative" rows are same-owner,
+same-stem siblings of the GGUF repo. That is strong but not proof they hold
+the same weights: the GGUF and safetensors tensor counts are not comparable
+(753 vs 1045, 733 vs 31666) because the converter fuses expert tensors
+differently. Confirming equivalence is a one-command check and is **not**
+done here, so those rows stay BLOCKED-SOURCE.
+
+### What changed upstream since #3172's evaluation — and what did not
+
+The #3172/#3199 eval (`/home/xore/dispatch-3172-colibri-eval/REPORT.md`,
+against `f028d26`, 2026-09-13) recorded a hard blocker that no longer
+exists: the pinned scorer always sends `"seed": 144`
+(`analysis/ghidra/benchmarks/corpus/record_baseline.py:396`), and colibri
+answered `HTTP 400 … Per-request seeds are not supported yet`, forcing an
+adapter. At `ce370e87` that is fixed — `c/openai_server.py:3095` now reads
+"`seed` is accepted for request-shape compatibility and silently discarded: this
+server puts no per-request seed on the wire, at any temperature." The wire
+request is accepted; **the seed is not honoured**, so the round-7 cold
+protocol's "temp 0, seed 144, byte-identical repeats" property is unverified
+for colibri and no adapter is needed to *send* the request any more. Whether
+repeats are byte-identical is **NOT DETERMINABLE** without a run, and no run
+happened here.
+
+Everything else that eval found still stands and is the reason no
+qualification cell in this section carries a number: one Tier A pass at
+96.4% with all 17 answers truncated at the output cap, an injection gate
+reported `untested` because the payload never reached the evidence, and no
+seeded repeatability.
+
+### Reconciling with the concurrently-open #3433
+
+PR #3433 (`oc/3199-engine-gap`,
+`docs/benchmarks/matrices/3199-colibri-engine-gap.json`) answers the same
+question over 19 named groupings and is open against `main` at the same time as
+this. The two are not identical, and the differences are recorded here rather
+than left for a reviewer to find:
+
+- **It agrees on the two corrections that matter most** — the dense Qwen3.8
+  lines are not `qwen38`, and `GLM-4.6-reap-218b` is `glm4_moe`, not the `glm`
+  family. That is the substantive finding, and it is independently reached
+  here from a different evidence channel.
+- **Its coverage is 19 named groupings; this table is all 108 roster lines.**
+  Groupings hide the per-line split that decides the reader's value: #3433
+  cannot say that the `qwen3_5_moe` lines are 2 servable and 13 blocked-on-
+  format, because most of its `qwen3_5_moe` rows are reported by base model
+  rather than by roster line.
+- **Its `uncovered_model_types` list is incomplete** for this roster. Four
+  uncovered types that roster lines actually land on are missing from it —
+  `muse_glimmer`, `granite`, `phi3` and `deepseek_v2`, 5 lines between them
+  (1 / 1 / 1 / 2). It also lists `gemma4`, where the `config.json` these repos
+  ship reads `gemma4_unified`; neither string is in the registry, so the
+  disposition is the same, but the registry keys on the second.
+- **Its central format claim is false at `ce370e87`.** It asserts "colibri has
+  no GGUF reader" on the strength of
+  `grep -rliE gguf c/*.c c/*.py c/tools/*.py` returning nothing, and records
+  the grep's result as the finding. At the pinned commit that grep returns
+  four files, including `c/tools/gguf_reader.py` (pure stdlib). The wall is
+  real but narrower than stated: there is no *general* GGUF ingest path, and
+  the one GGUF reader is bound to the OLMoE profile. Its downstream conclusion
+  — that `.gguf`-only artefacts are not colibri inputs — survives; its stated
+  reason does not.
+- **It has evidence this section lacks:** a live `coli doctor --deep` on the
+  homeserver against an already-converted `qwen36` container. This section is
+  documentation-only and makes no claim about any container.
+
+Neither file is edited by this PR, and #3433 is left open. Whichever is merged
+first, the other's numbers should be reconciled rather than both left standing.
+
+### Decision
+
+**The #1947 roster cannot be qualified on colibri today, and the reason is
+measurable rather than rhetorical: 2 of 108 lines are servable, 13 are one
+format-decision away, 90 need an engine nobody has written, and 3 cannot be
+classified without a token.**
+
+What this establishes for #3172 and for whoever picks the engine work up:
+
+- The reader is worth more than its issue number suggests. It is the whole
+  delta between "colibri serves one architecture of this roster" and "colibri
+  serves the roster's largest MoE family" — 13 lines, zero new engine code.
+- The engine gap is not the one #3199 described. It is dominated by **dense
+  `qwen3_5` (26 rows)** and **`llama` (18)**, not by QwQ/gemma/gpt-oss as
+  separate families, and it needs a per-`model_type` decision, not a
+  per-brand-name one. `qwen3_5` dense and `qwen3_5_moe` MoE share a generation
+  and a tensor vocabulary; whether the dense engine is mostly the MoE engine
+  with the router removed is the first question an estimator should answer,
+  because 26 of the 90 blocked rows hang on it.
+- Nothing here is a promotion, a qualification, or a score. `approved-models.json`
+  and `model-governance.py promote` are untouched, and no cell in
+  `round7-cold-baseline.json` or `t0-rex86-cold.json` was edited — both are
+  completed aggregations and a disposition row is not a run.
+
+To re-run this table against a newer colibri, the whole method is: read
+`_BY_TYPE` from `c/family_registry.py` for coverage, read each upstream repo's
+file list for a safetensors source, and read each blob's `general.architecture`
+for the architecture. No matrix cell depends on a number this section did not
+read.
