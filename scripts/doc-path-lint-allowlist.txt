@@ -87,3 +87,13 @@ tests/test_claims.py::ReviewQueueFreshnessTest # era class reference; same sourc
 #     names where the toolchain record and the scripts will land ---
 analysis/ghidra/training # training tree the round-7 plan creates in #3080; not tracked yet
 analysis/ghidra/training/TOOLCHAIN.md # resolved-version record #3080 writes into that tree; not tracked yet
+
+# --- upstream JustVugg/colibri clone, pinned at ce370e8 in
+#     docs/local-llm-model-evaluation.md (#3199) ---
+# These name files in the colibri clone this repo reads as an oracle, not
+# paths here. The sibling citations in the same table (c/family_registry.py,
+# tools/convert_*.py) are upstream too and pass only because `c` and `tools`
+# are not tracked top-level dirs; `docs` is tracked, so these two are the only
+# upstream spans the first-segment screen cannot discard on its own.
+docs/kimi_k3.md # upstream colibri doc the `kimi` family guard points at; not a path in this repo
+docs/deepseek-v4.md # upstream colibri doc the `deepseek_v4` family guard points at; not a path in this repo
