@@ -597,7 +597,7 @@ jobs:
       # per-run suffix costs no consumer.
       - name: Upload unit test results
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: frontend-next-unit-junit-${{ github.run_id }}-${{ github.run_attempt }}
           # The file is named explicitly rather than uploading its directory:
@@ -669,7 +669,7 @@ jobs:
       # files the coverage reporter wrote, from the run above, can land here.
       - name: Upload unit test coverage
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: frontend-next-coverage-${{ github.run_id }}-${{ github.run_attempt }}
           path: arcane/home/honeypot-dashboard/frontend-next/coverage/
@@ -758,7 +758,7 @@ jobs:
       # gone and why the path is not the `.ci-artifacts/` directory.
       - name: Upload unit test results
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: frontend-next-unit-junit-${{ github.run_id }}-${{ github.run_attempt }}
           path: .ci-artifacts/frontend-next-unit-junit.xml
@@ -782,7 +782,7 @@ jobs:
         run: npm run test:discovery
       - name: Upload unit test coverage
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: frontend-next-coverage-${{ github.run_id }}-${{ github.run_attempt }}
           path: arcane/home/honeypot-dashboard/frontend-next/coverage/
@@ -878,7 +878,7 @@ jobs:
       # upload above.
       - name: Upload browser test results
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: frontend-next-browser-junit-${{ github.run_id }}-${{ github.run_attempt }}
           path: .ci-artifacts/playwright-junit.xml
@@ -889,7 +889,7 @@ jobs:
       # run it holds nothing worth storing.
       - name: Upload Playwright report and traces
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: frontend-next-browser-report-${{ github.run_id }}-${{ github.run_attempt }}
           # Both directories are named, not the frontend-next tree around
@@ -949,7 +949,7 @@ jobs:
       # names, same explicit paths, no `overwrite: true`.
       - name: Upload browser test results
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: frontend-next-browser-junit-${{ github.run_id }}-${{ github.run_attempt }}
           path: .ci-artifacts/playwright-junit.xml
@@ -957,7 +957,7 @@ jobs:
           retention-days: 7
       - name: Upload Playwright report and traces
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: frontend-next-browser-report-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -1225,7 +1225,7 @@ jobs:
       # twin's upload for the full argument.
       - name: Upload test log
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: backend-service-cargo-test-log-${{ github.run_id }}-${{ github.run_attempt }}
           path: .ci-artifacts/cargo-test.log
@@ -1322,7 +1322,7 @@ jobs:
       # same named-file path, no `overwrite: true`.
       - name: Upload test log
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: backend-service-cargo-test-log-${{ github.run_id }}-${{ github.run_attempt }}
           path: .ci-artifacts/cargo-test.log
@@ -2515,7 +2515,7 @@ jobs:
       # sanitise a free-text field, so fixing that means renaming the row.
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: scripts-${{ matrix.name }}-results-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
