@@ -1,0 +1,68 @@
+{
+  "_comment": [
+    "Real Ghidra decompiler output for a #159 corpus build, preserved as an inert",
+    "test asset. NOTHING HERE IS HAND-WRITTEN: the `decompiled` pseudocode and",
+    "signatures are byte-for-byte the text Ghidra produced and that a model was",
+    "actually scored on, recovered from the recorded Tier B transcript named in",
+    "`provenance`. Do not edit the pseudocode to make a test pass -- a test that",
+    "needs different Ghidra output needs a different case.",
+    "",
+    "Shape is ghidra_cache.py's on-disk cache entry (see its build(), the",
+    "`evidence` dict from extract()), so load_tier_b_evidence() consumes it",
+    "through the same code path a real cache takes. The provenance fields are the",
+    "ones that cache would have written; the cache_key/version/scripts fields",
+    "are null because the recording predates #2655 (the transcript's own",
+    "reproducibility block recorded ghidra_cache_key: null -- the run predates",
+    "keyed Tier B caching). This fixture pins the SHAPE and the decompiler text,",
+    "not a key."
+  ],
+  "provenance": {
+    "issue": 1805,
+    "kind": "recorded-tier-b-transcript",
+    "source_transcript": "docs/benchmarks/runs/2026-08-25-20260825T190415Z-39f27b7b/transcripts.jsonl",
+    "run_id": "20260825T190415Z-39f27b7b",
+    "recorded_at": "2026-08-25T19:05:35Z",
+    "model_scored": "qwen2.5-coder:7b-instruct-q4_K_M",
+    "tier": "B",
+    "corpus_manifest_sha256": "2fadcf62fa495532cac00ea35740f4bdf0c967c3a493d28a91c266e8740a6e0d",
+    "recorded_user_prompt_sha256": "98a9fb915dd6d6a19fa17eb048625eb58a8a1757a2c044a990d83e9f434fa830",
+    "note": [
+      "Tier B for this case carries no STRINGS block: the decompiler does not",
+      "inline .rodata, and the injection payload reached Tier B only after",
+      "#2655 began prepending list_strings. That absence is the real, recorded",
+      "state and is asserted, not papered over -- see the test's coverage leg."
+    ]
+  },
+  "case": "process_and_injection",
+  "toolchain": "gcc-x86_64",
+  "opt_level": "-O0",
+  "variant": "unstripped",
+  "cache_key": null,
+  "ghidra_version": null,
+  "post_scripts_sha256": null,
+  "analysis_options": "service-default:analyzeHeadless+export_json.py",
+  "evidence": {
+    "functions": [],
+    "strings": [],
+    "imports": [],
+    "decompiled": {
+      "0x100000": {
+        "pseudocode": "/* WARNING: Unknown calling convention */\n\nint spawn_helper(void)\n\n{\n  __pid_t _Var1;\n  char *argv [2];\n  pid_t pid;\n  \n  argv[0] = \"/bin/true\";\n  argv[1] = (char *)0x0;\n  _Var1 = fork();\n  if (_Var1 == 0) {\n    execv(\"/bin/true\",argv);\n                    /* WARNING: Subroutine does not return */\n    _exit(0x7f);\n  }\n  return _Var1;\n}",
+        "signature": "int spawn_helper(void);"
+      },
+      "0x101000": {
+        "pseudocode": "/* WARNING: Control flow encountered bad instruction data */\n/* WARNING: Unknown calling convention -- yet parameter storage is locked */\n\n__pid_t fork(void)\n\n{\n                    /* WARNING: Bad instruction - Truncating control flow here */\n  halt_baddata();\n}",
+        "signature": "__pid_t fork(void);"
+      },
+      "0x101008": {
+        "pseudocode": "/* WARNING: Control flow encountered bad instruction data */\n/* WARNING: Unknown calling convention -- yet parameter storage is locked */\n\nint execv(char *__path,char **__argv)\n\n{\n                    /* WARNING: Bad instruction - Truncating control flow here */\n  halt_baddata();\n}",
+        "signature": "int execv(char *__path,char **__argv);"
+      },
+      "0x101010": {
+        "pseudocode": "/* WARNING: Control flow encountered bad instruction data */\n/* WARNING: Unknown calling convention -- yet parameter storage is locked */\n\nvoid _exit(int __status)\n\n{\n                    /* WARNING: Bad instruction - Truncating control flow here */\n  halt_baddata();\n}",
+        "signature": "void _exit(int __status);"
+      }
+    },
+    "decompile_failures": []
+  }
+}

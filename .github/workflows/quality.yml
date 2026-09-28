@@ -1776,6 +1776,16 @@ jobs:
               # a different decompiler) and the injection assertion, which must
               # report honestly that the payload never reached the evidence.
               python analysis/ghidra/benchmarks/tests/test_ghidra_cache.py
+              # Cross-path fidelity for the ghidra slot (#1805). No model, no
+              # Ghidra, no service. The other Tier B tests all synthesise their
+              # cache entries, so they agree with whatever the loader happens to
+              # expect; this one drives the same path over real recorded Ghidra
+              # output, which is what makes a drift in the expected response
+              # shape visible. Also measures the standing gap between the
+              # qualification gate's hand-written fixtures and production's
+              # _evidence() output, so a change to either renderer is a
+              # measured delta rather than a silent one.
+              python analysis/ghidra/benchmarks/tests/test_ghidra_fidelity.py
               # Corpus manifest validator (#2038). Pure structural checks over
               # fixture manifests -- no compiler, no corpus rebuild. Covers the
               # three gaps that let a broken corpus pass: a required alternative
