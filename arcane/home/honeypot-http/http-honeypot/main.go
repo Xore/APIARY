@@ -825,7 +825,16 @@ func roundcubeVirtuserSQLi(query, body string) bool {
 // once the escape is defeated. Every needle is a metacharacter sequence with
 // no ordinary parameter value behind it, because the cost of a wrong label
 // here is every Roundcube login in the corpus turning into an alert.
+//
+// Matching is case-insensitive, the way the generic sqli case effectively is
+// (it matches a lowercased body). SQL keyword case is the cheapest encoding
+// variation there is -- the note on classifyPayload records the PHP-CGI
+// probe arriving as %ADd, %25ADd and plain -d in one window -- and a class
+// that matches only the published casing loses the event outright:
+// measured, an uppercase `UNION SELECT` through the gate was unlabelled
+// on both GET and POST (#3364).
 func roundcubeSQLPayload(v string) bool {
+	v = strings.ToLower(v)
 	return containsAny(v,
 		// A quote closed and the rest of the statement appended.
 		"';", "'--", "' #", "'/*", "')",
