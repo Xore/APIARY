@@ -214,7 +214,94 @@ func TestScannerLaunderingLayersNotImplementable(t *testing.T) {
 	// shape-based class added here is the part of the signature that
 	// survives laundering, because it is carried in the request bytes.
 	// The parts that need history are exactly the parts laundering hides.
+	//
+	// #3447 (2026-09-28), and the one line above that this layer's own
+	// arrival falsified. This function said "There is no map, no cache and no
+	// per-source counter in the package -- an in-request classifier by
+	// construction." That is no longer true, and the correction is stated
+	// here rather than left for someone to discover: #3447 added exactly one
+	// such structure, launderingState, and it is the only cross-request state
+	// in the package.
+	//
+	// What did NOT change, and what the layers below are still pinned on:
+	//
+	//   - classifyPayload is still pure and still in-request. #3443's classes
+	//     are decided from (RawQuery, body) alone, with no reference to the
+	//     path, the headers or any history. Asserted, not claimed, in
+	//     TestLayerCIsTheFirstStateThisPackageKeeps, which calls it over the
+	//     whole pinned corpus before and after the detector has run.
+	//   - This test's own list is unchanged. #3447 does not implement #3430's
+	//     layer B (per-source field-name enumeration, single-byte mutation
+	//     retry) or its layer C (cross-source header-fingerprint clustering),
+	//     and does not make layer A's path shapes readable by
+	//     classifyPayload. It is a *different* thing that also needs history:
+	//     the %2561 bypass, which rides a path and needs a pairing rather
+	//     than a window. See TestLaunderingClassIsNotA3430Layer, which
+	//     asserts the two are disjoint rather than leaving that to this
+	//     comment.
+	//
+	// So the honest amendment is narrow: the package is no longer stateless,
+	// and the one thing that is stateful is bounded, off-switchable, and
+	// unable to change any in-request answer.
 	t.Log("layer B (per-source field-name enumeration, single-byte mutation retry): not implementable, no session state")
 	t.Log("layer C (cross-source header-fingerprint cluster): not implementable, no event window")
 	t.Log("layer A path shapes: not implementable, classifyPayload is not given the path")
+	t.Log("#3447 added one bounded cross-request structure (launderingState); classifyPayload is still pure and still in-request")
+
+	// The assertion that makes the amendment above checkable rather than
+	// narrative. Before #3447 this function's claim about the package was a
+	// comment; now that the claim is false in one place, the false part is
+	// pinned so the next stateful component cannot be added by accident.
+	//
+	// Two of #3430's layers are still unimplementable for the reasons above,
+	// and what remains unimplementable is a *window over events* -- something
+	// this binary has no way to hold, and would not hold in memory even if it
+	// could, because #3430's layer C is defined over many sources and a
+	// bounded map keyed by (fingerprint, resource) cannot be a window over the
+	// fleet. #3447's component is a pairing over one client and one collection,
+	// which is a different computation, not a small version of this one.
+	if !odataDoubleEncode(`$filter=year%2520eq%25202026`, "") {
+		t.Error("#3443's in-request class stopped working; the layering it depends on has changed")
+	}
+	if qualifyingODataRequest("/", `$filter=Year%20eq%202026`, "") {
+		t.Error("an OData option on the root now qualifies; #3430's layer C must remain unimplementable in-request")
+	}
+}
+
+// TestLaunderingClassIsNotA3430Layer asserts that the class #3447 adds and the
+// class #3443 adds cannot be reached by each other's inputs, in both
+// directions. The two are easy to conflate -- both are about double-encoding,
+// both mention OData, and #3430's layer C and #3447's "layer C" are different
+// things under the same name -- so the disjointness is a test.
+//
+// Direction 1: a #3447 pair is invisible to classifyPayload, because
+// classifyPayload never sees the path. Direction 2: #3443's published shapes
+// are unlabelled by the stateful layer, because it needs two requests and
+// each shape is one.
+func TestLaunderingClassIsNotA3430Layer(t *testing.T) {
+	// Direction 1. The path-borne bypass, as a single request, is nothing to
+	// the in-request classifier -- and must stay nothing, or #3443's
+	// over-match gate has been reopened.
+	if got := classifyPayload("", ""); got != "" {
+		t.Errorf("classifyPayload on an empty request = %q, want \"\"", got)
+	}
+	for _, s := range publishedShapes3430 {
+		if got := classifyPayload(s.query, s.body); got != s.want {
+			t.Errorf("classifyPayload(%q, %q) = %q, want %q: #3447 changed an in-request answer",
+				s.query, s.body, got, s.want)
+		}
+	}
+
+	// Direction 2. #3443's own published shapes must not become layer C
+	// output, including the ones that carry a double-encoded value -- those
+	// keep their #3443 class and never reach the stateful pair.
+	for _, s := range publishedShapes3430 {
+		d := newLaunderingState(launderMaxEntries, launderPerFingerprint, launderTTL)
+		// Replay each shape as a request at a collection path, so the OData
+		// half is genuinely available and only the absence of a second request
+		// keeps it from firing.
+		if got := d.observe("fp", "/odata/Products", s.query, s.body); got != "" {
+			t.Errorf("published shape %q was labelled %q by layer C on a single request", s.name, got)
+		}
+	}
 }

@@ -1040,6 +1040,13 @@ type server struct {
 	// for requests classify() buckets as unrecognized scanning/exploit
 	// noise, instead of the normal fast reply. See HTTP_TARPIT in main().
 	tarpitEnabled bool
+	// launder (#3447): the bounded cross-request component, and the only
+	// state this package keeps between requests. Nil disables it, which is
+	// how HTTP_LAUNDERING=0 is expressed -- see laundering.go, which also
+	// answers #3447's two design questions (where the state lives, and what
+	// bounds it). Consulted after classifyPayload, and only into an empty
+	// PayloadClass, so it stays the last case rather than the first.
+	launder *launderingState
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -1096,6 +1103,14 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Username:                 creds.username,
 		AuthType:                 creds.authType,
 	}
+
+	// #3447 layer C, and the reason the state has to be here and not in the
+	// classifier: this is a decision about two requests, so it cannot be made
+	// by classifyPayload, which sees one. It runs after the event literal
+	// because it reads r.URL.Path -- the value #3430's bypass rides and
+	// #3443 was never given -- and before the reply, so the class is on the
+	// event that gets logged either way.
+	s.observeLaundering(r, &e, string(body))
 
 	if s.tarpitEnabled && tarpitCategory(e.Category) {
 		e.Status = http.StatusOK
@@ -1433,6 +1448,22 @@ func main() {
 		// behavior instead.
 		tarpitEnabled: getenv("HTTP_TARPIT", "1") != "0",
 		listenPort:    listenPort(addr),
+		// #3447. On by default, like the tarpit, and off the same way
+		// (HTTP_LAUNDERING=0), because a detector whose evidence cap has been
+		// reached has void coverage and an operator needs the switch. The
+		// three bounds are configurable because they are the answer to
+		// #3447's second design question and an operator has to be able to
+		// move them; the defaults are the values argued for in laundering.go.
+		launder: func() *launderingState {
+			if getenv("HTTP_LAUNDERING", "1") == "0" {
+				return nil
+			}
+			return newLaunderingState(
+				int(getenvInt64("LAUNDER_MAX_ENTRIES", launderMaxEntries)),
+				int(getenvInt64("LAUNDER_PER_FINGERPRINT", launderPerFingerprint)),
+				time.Duration(getenvInt64("LAUNDER_TTL_SECONDS", int64(launderTTL/time.Second)))*time.Second,
+			)
+		}(),
 	}
 
 	srv := &http.Server{

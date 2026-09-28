@@ -120,6 +120,47 @@ func TestODataDoubleEncodeProbe(t *testing.T) {
 		// claiming it because some unrelated key elsewhere held an OData
 		// option. Recorded as a negative so the boundary is visible
 		// rather than assumed.
+		//
+		// #3447 (2026-09-28) -- THE PIN IS NOW DELIBERATELY KEPT, and this
+		// comment is the record of that decision, because the issue required
+		// the update to be visible rather than silent.
+		//
+		// The brief said this pin "fails if this ever starts matching" and
+		// would need updating when layer C lands. The pin was examined
+		// against the landed code and the honest finding is that it does NOT
+		// need its expectation changed: `want` is still "". Two reasons, and
+		// the first is the important one.
+		//
+		// 1. Layer C does not reach this case at all, by construction. The
+		//    escape half of a layer C pair is read from the *path*
+		//    (pathBorneResidualEscape), and `classifyPayload` is called with
+		//    (query, body) only. `%2561` here is a query key, which is
+		//    #3443's territory, so this input is not a half for the new layer
+		//    and cannot complete a pair. Even replayed twice, it does not
+		//    fire -- pinned in TestLayerCDoesNotOverMatch.
+		//
+		// 2. More generally, the same-request rule makes an in-request match
+		//    between an option and an unrelated escape impossible in code,
+		//    not by policy. A single request carrying both halves seeds the
+		//    state and returns ""; the pair can only complete on a later
+		//    request, and then only for a bound (fingerprint, resource) pair.
+		//    Pinned in TestLayerCSameRequestNeverFires.
+		//
+		// So the trap #3447 names -- "fire because an unrelated key happened
+		// to hold an option-shaped value" -- is now structurally impossible
+		// rather than merely avoided, and relaxing this expectation would
+		// *reopen* the trap rather than record progress. The value of
+		// "want" below is unchanged from #3443 and the reason it is still ""
+		// is now stronger. Changing it to "odata-path-encoded-bypass" would
+		// have been the wrong fix: it would have required fabricating the
+		// query form into a match, which is what the #3443 agent refused to
+		// do in the first place.
+		//
+		// What DID change when layer C landed is elsewhere and is pinned
+		// there: TestLayerCCatchesThePublishedPathBorneBypass, which fires
+		// on the real two-request shape the path actually produces, and
+		// TestLaunderingClassIsNotA3430Layer, which asserts the two classes
+		// are unreachable from each other's inputs.
 		{
 			name:  "residual escape split onto a different key than the option",
 			query: `$filter=year%20eq%202026&%2561=1`,
