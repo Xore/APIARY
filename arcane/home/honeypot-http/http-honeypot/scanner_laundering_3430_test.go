@@ -88,7 +88,11 @@ var publishedShapes3430 = []struct{ name, query, body, want string }{
 	{"residual escape with no OData option", `q=%2561%2562`, "", ""},
 	{"the relay-laundered request itself", `page=2&sort=name`, "", ""},
 	{"a self-submitting form body", "", `url=https%3A%2F%2F203.0.113.7%2Fdump&submit=go`, ""},
-	{"malformed escape is not an escape", `$filter=Year%zz%2520eq`, "", ""},
+	// A value whose only escape is broken. A deliberately broken % sequence
+	// is not evidence of a second decode, and this stays true after #3364's
+	// parser swap: formValues keeps an undecodable side rather than dropping
+	// it, and residualEscape still demands two hex digits behind the %.
+	{"malformed escape is not an escape", `$filter=Year%zz%2Gz`, "", ""},
 }
 
 // ungatedOData3430 is #3430's layer-A signature with no gate: any query key

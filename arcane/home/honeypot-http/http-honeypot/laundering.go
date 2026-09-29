@@ -82,7 +82,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -742,10 +741,16 @@ func qualifyingODataRequest(decodedPath, query, body string) bool {
 		return false
 	}
 	for _, raw := range []string{query, body} {
-		values, err := url.ParseQuery(raw)
-		if err != nil && len(values) == 0 {
-			continue
-		}
+		// formValues, not url.ParseQuery, and the reason is the same one
+		// at the other three call sites: since Go 1.17 url.ParseQuery
+		// rejects and drops any pair containing a ";", so an option
+		// carrying one was not a half this layer could see and the bypass
+		// that followed it could not complete a pair. The
+		// value-consistency gate below is unchanged and still runs on the
+		// value it is shown, which is what keeps a wider parser from
+		// being a wider over-match -- see
+		// form_values_semicolon_3364_test.go.
+		values := formValues(raw)
 		for key, vals := range values {
 			name := strings.ToLower(key)
 			if i := strings.LastIndexByte(name, '.'); i >= 0 {

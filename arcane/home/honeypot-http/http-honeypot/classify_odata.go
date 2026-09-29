@@ -6,10 +6,7 @@ package main
 // state exists, which is why it is a case in the dispatch and not a hook
 // behind it.
 
-import (
-	"net/url"
-	"strings"
-)
+import "strings"
 
 // odataDoubleEncode reports an OData system query option -- $select, $filter,
 // $top and the rest -- whose key or value still carries a percent-escape
@@ -47,10 +44,14 @@ func odataDoubleEncode(query, body string) bool {
 		"$format": true, "$search": true, "$skiptoken": true, "$index": true,
 	}
 	for _, raw := range []string{query, body} {
-		values, err := url.ParseQuery(raw)
-		if err != nil && len(values) == 0 {
-			continue
-		}
+		// formValues, not url.ParseQuery, for the reason
+		// roundcubeVirtuserSQLi gives at its own call site: a `;` inside
+		// a pair makes url.ParseQuery drop that pair, so an option whose
+		// own value carries one was invisible to this gate while the
+		// target parsed it. `;` is also what a Java/ASP.NET-style
+		// client sends when it is being careless, and a request nobody
+		// sends is not evidence.
+		values := formValues(raw)
 		for key, vals := range values {
 			// OData allows a namespace alias prefix, so compare the last
 			// dotted part: `northwind.$filter` is the same option.
@@ -75,8 +76,8 @@ func odataDoubleEncode(query, body string) bool {
 }
 
 // odataDoubleEncodeCase is the dispatch's entry for odataDoubleEncode. The
-// raw query and body go in, not the lowercased pair: url.ParseQuery does its
-// own decoding, and the residue this class is looking for is destroyed by a
+// raw query and body go in, not the lowercased pair: formValues does its own
+// decoding, and the residue this class is looking for is destroyed by a
 // decode that happens before it.
 func odataDoubleEncodeCase(c classifyInput) bool {
 	return odataDoubleEncode(c.Query, c.Body)

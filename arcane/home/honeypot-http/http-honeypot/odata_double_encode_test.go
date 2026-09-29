@@ -190,11 +190,27 @@ func TestODataDoubleEncodeProbe(t *testing.T) {
 		// A malformed escape decodes to nothing, so it is not a residual
 		// escape. A deliberately broken % sequence must not become a way
 		// to hide the payload, but it is not evidence of a second decode
-		// either.
+		// either. Stated on a value whose only escape is broken, because
+		// that is what the rule is about -- see the next row for the
+		// distinction this used to blur.
 		{
 			name:  "malformed escape is not a residual escape",
-			query: `$filter=Year%zz%2520eq`,
+			query: `$filter=Year%zz%2Gz`,
 			want:  "",
+		},
+		// The distinction, and it used to be blurred by which parser read
+		// the request. This value carries a broken escape AND a genuine
+		// `%25`, which is a `%` that decodes once to `%20` and once more
+		// to a space -- the double-decode signature, and the reason the
+		// option is this class in the first place. url.ParseQuery threw
+		// the whole pair away on the `%zz` and this was unlabelled; that
+		// was a parser deleting its own evidence, not the gate declining.
+		// The target reads `Year%zz%20eq` and decodes that to `Year eq`,
+		// so the class now says what happens to those bytes. #3364.
+		{
+			name:  "a broken escape does not hide a real residual escape in the same value",
+			query: `$filter=Year%zz%2520eq`,
+			want:  want,
 		},
 		// Ordinary traffic that happens to carry a percent sign.
 		{
