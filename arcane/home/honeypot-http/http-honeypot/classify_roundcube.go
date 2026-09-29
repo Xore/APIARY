@@ -4,10 +4,7 @@ package main
 // change to it touches one new-ish file and one line of the dispatch in
 // classify.go, and nothing else in this package.
 
-import (
-	"net/url"
-	"strings"
-)
+import "strings"
 
 // roundcubeVirtuserSQLi reports a pre-authentication SQL injection aimed at
 // Roundcube Webmail's virtuser_query plugin (CVE-2026-48842). CVSS 8.1; the
@@ -43,8 +40,8 @@ import (
 // wordpressPagenameTraversal gives: the text "virtuser_query" inside some
 // other value must not trigger this, and neither must a payload that happens
 // to contain "_task". Nothing is deserialized and nothing is evaluated --
-// url.ParseQuery splits a string into key/value pairs, and every value is
-// then matched as bytes.
+// formValues splits a string into key/value pairs the way PHP will split it,
+// and every value is then matched as bytes.
 //
 // Its place in the dispatch is first, ahead of the generic sqli class,
 // because a Roundcube probe is often both at once -- the same value is caught
@@ -65,10 +62,13 @@ import (
 // a fixed number of linear passes over bytes already in memory.
 func roundcubeVirtuserSQLi(c classifyInput) bool {
 	for _, raw := range []string{c.Query, c.Body} {
-		values, err := url.ParseQuery(raw)
-		if err != nil && len(values) == 0 {
-			continue
-		}
+		// formValues, not url.ParseQuery: the target is PHP, whose only
+		// separator is "&", so a `;` inside a value is data that reaches
+		// the plugin intact -- while url.ParseQuery rejects the pair
+		// carrying it and hands back a map with the parameter missing.
+		// The payload would arrive at Roundcube and never reach this
+		// case. See formValues, and form_values_semicolon_3364_test.go.
+		values := formValues(raw)
 		roundcube := false
 		for key, vals := range values {
 			// The dispatch parameters, and the plugin named as a key.

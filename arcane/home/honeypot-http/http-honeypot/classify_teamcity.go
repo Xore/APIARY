@@ -5,10 +5,7 @@ package main
 // ordering decision #3444 had to make by hand and the one this file's own
 // tests now pin from both sides.
 
-import (
-	"net/url"
-	"strings"
-)
+import "strings"
 
 // teamcityAgentDeserialization reports a request aimed at a Java
 // deserialization sink through TeamCity's build-agent polling protocol
@@ -236,7 +233,7 @@ var teamcityProtocolMarkers = []string{
 // xmlrpc/allowRegistrationAndPing, and a call name sitting inside somebody
 // else's parameter value, both keep their own answers.
 //
-// Nothing is parsed in order to answer this. url.ParseQuery splits a string
+// Nothing is parsed in order to answer this. formValues splits a string
 // into key/value pairs and the element extractor is two index searches;
 // neither is told what to do with what it found, and neither can fail in a
 // way that changes the answer. Parsing a request to learn what it asked for
@@ -250,12 +247,22 @@ func teamcityAgentProtocol(lowerQuery, lowerBody string) bool {
 	for _, channel := range []string{lowerQuery, lowerBody} {
 		// A body that is not a parameter list at all parses into junk keys
 		// and values, which is harmless: the key test below rejects them.
-		// An error alongside real values is tolerated for the same reason
-		// wordpressPagenameTraversal tolerates it.
-		values, err := url.ParseQuery(channel)
-		if err != nil && len(values) == 0 {
-			continue
-		}
+		// formValues, for the reason the other three call sites give: a
+		// `;` inside a pair must not delete the pair.
+		//
+		// This site is the exception on the evidence, and the exception is
+		// in the call name, not the parser. teamcityAgentCall compares a
+		// value to a fixed list as a whole string, so a `;` in the value
+		// makes it a different value rather than the same one the parser
+		// dropped, and a `;` in front of the key makes it a different key
+		// rather than the parameter it resembles. There is no semicolon
+		// payload this class can be shown to gain here: the target's parser
+		// reaches the same verdict. The swap is for consistency with the
+		// other three sites and to retire one root cause rather than four,
+		// and it is pinned as gaining nothing in
+		// form_values_semicolon_3364_test.go so that "nothing to gain" is
+		// a measured claim rather than an assumption.
+		values := formValues(channel)
 		for key, vals := range values {
 			if key != "methodname" && key != "method" {
 				continue
