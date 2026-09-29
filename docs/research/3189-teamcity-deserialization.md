@@ -190,7 +190,7 @@ classifies, and valid base64 decoding to harmless text does not.
 `event` struct (`main.go:125`), read by the dashboard at
 `arcane/home/honeypot-dashboard/backend-service/src/events.rs:206`. The sensor
 log is shipped by Filebeat into `honeypot-v2-*` with parsed fields nested under
-`honeypot.*` (`arcane/home/honeypot-elk/analysis/filebeat.yml:84,617`), so the
+`honeypot.*` (`arcane/home/honeypot-elk/analysis/filebeat.yml`, lines 84 and 617), so the
 queryable path is `honeypot.payload_class`. **Elasticsearch field names beyond
 that — index templates, any `keyword`/`text` mapping, Kibana saved-object or
 data-view naming — are not mapped here and are to be mapped to the real schema
