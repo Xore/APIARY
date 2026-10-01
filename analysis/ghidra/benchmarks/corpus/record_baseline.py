@@ -373,9 +373,25 @@ def resolve_digest(api_base: str, model: str, engine: str = "ollama") -> str:
 # engine ignores looks like a seeded cell but is not one, and #1947 measured the
 # run-to-run band at +/-0.58 with margins in the tables smaller than that. So a
 # payload carrying them is refused rather than scored as if the runtime honoured
-# them. Drop these once the engine honours a seed (#3172 reader path).
+# them. The one exception is a discarded seed at temperature exactly 0, where
+# colibri's argmax branch makes the seed irrelevant to the result (see
+# refuse_unhonoured_params). Drop these once the engine honours a seed
+# (#3172 reader path).
 ENGINE_DISCARDS = ("seed",)
 ENGINE_REJECTS = ("frequency_penalty", "presence_penalty", "top_k", "repeat_penalty")
+
+
+def is_zero_temperature(value) -> bool:
+    """True only for a real numeric zero.
+
+    `bool` is an int subclass, so `isinstance(True, int)` holds and `True == 1`
+    while `False == 0`; letting either through would read a missing/ambiguous
+    temperature as a deterministic cell (#1947 rule 3). Strings, None, and
+    missing values are not zero either.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return value == 0
 
 
 def refuse_unhonoured_params(engine: str, payload: dict) -> None:
@@ -383,11 +399,21 @@ def refuse_unhonoured_params(engine: str, payload: dict) -> None:
 
     A cell scored through an engine that ignored the seed is not comparable to
     the Ollama baseline and must not enter the matrix as though it were.
+
+    Colibri discards `seed`, but its sampler takes the argmax branch when
+    `temp <= 0` (`c/qwen36.c`), so at temperature exactly 0 no stochastic step
+    runs and the discarded seed cannot change the result -- measured byte-stable
+    across three identical requests on a real qwen36 checkpoint. Only that exact
+    case is accepted; an absent, non-zero, or non-numeric temperature keeps the
+    seeded cell refused. Token penalties remain hard-rejected at every
+    temperature, since colibri errors on them rather than ignoring them.
     """
     if engine == "ollama":
         return
-    discarded = [p for p in ENGINE_DISCARDS if payload.get(p) is not None]
     rejected = [p for p in ENGINE_REJECTS if payload.get(p)]
+    discarded = [p for p in ENGINE_DISCARDS if payload.get(p) is not None]
+    if discarded and is_zero_temperature(payload.get("temperature")):
+        discarded = []
     if discarded or rejected:
         raise SystemExit(
             f"--engine {engine} cannot honour {sorted(discarded + rejected)}; "
@@ -520,7 +546,7 @@ def ask_model(
 def build_report(results: dict, *, model_tag: str, model_digest: str, request: dict,
                   tier: str, api_base: str = DEFAULT_API_BASE,
                   transcript_summary: dict | None = None,
-                  extra: dict | None = None) -> dict:
+                  extra: dict | None = None, engine: str = "ollama") -> dict:
     total_score = sum(r["score"] for r in results.values())
     total_max = sum(r["max_score"] for r in results.values())
     report = {
@@ -542,6 +568,12 @@ def build_report(results: dict, *, model_tag: str, model_digest: str, request: d
         report["transcripts_sha256"] = transcript_summary["transcripts_sha256"]
     if extra:
         report.update(extra)
+    if engine == "colibri":
+        # Provenance for a discarded seed (#3172). The keys appear only on a
+        # colibri report, so the ollama report shape stays byte-identical; the
+        # value is fixed by the temperature-0 cell this harness now accepts.
+        report["seed_honoured"] = False
+        report["deterministic_by"] = "temperature=0 -> argmax"
     return report
 
 
@@ -597,7 +629,8 @@ def write_report(output_path, report: dict) -> None:
 
 def finalize(results: dict, output_path, *, model_tag: str, model_digest: str, request: dict,
              tier: str, api_base: str = DEFAULT_API_BASE,
-             transcript_summary: dict | None = None, extra: dict | None = None) -> int:
+             transcript_summary: dict | None = None, extra: dict | None = None,
+             engine: str = "ollama") -> int:
     """Writes the report and returns the process exit code.
 
     #3090: a model that fails every request (e.g. Ollama 500s on every call)
@@ -611,7 +644,7 @@ def finalize(results: dict, output_path, *, model_tag: str, model_digest: str, r
         return 3
     report = build_report(results, model_tag=model_tag, model_digest=model_digest,
                           request=request, tier=tier, api_base=api_base,
-                          transcript_summary=transcript_summary, extra=extra)
+                          transcript_summary=transcript_summary, extra=extra, engine=engine)
     write_report(output_path, report)
     print(f"\n{model_tag}: {report['total_score']}/{report['total_max_score']} "
           f"({report['percent']}%) across {len(results)} cases")
@@ -692,7 +725,8 @@ def run_cases(slice_builds, rubric: dict, tier: str, *, api_base: str, model_tag
         if output_path is not None:
             write_report(output_path, build_report(
                 results, model_tag=model_tag, model_digest=model_digest,
-                request=request, tier=tier, api_base=api_base, extra=report_extra))
+                request=request, tier=tier, api_base=api_base, extra=report_extra,
+                engine=engine))
     return results
 
 
@@ -779,8 +813,11 @@ def main() -> int:
     # family-alias ambiguity #158 exists to prevent.
     # Refuse an unhonourable engine before we ask the runtime anything, so an
     # unseeded colibri cell cannot cost a digest round-trip before saying no.
+    # The request's own temperature rides along: without it a temperature-0
+    # colibri cell would be refused here even though ask_model accepts it.
     refuse_unhonoured_params(args.engine, {
         "seed": request.get("seed"),
+        "temperature": request.get("temperature"),
         "frequency_penalty": 0.0,
     })
     model_digest = resolve_digest(args.api_base, model_tag, args.engine)
@@ -854,7 +891,8 @@ def main() -> int:
         transcript_summary = writer.close()
     return finalize(results, args.output, model_tag=model_tag, model_digest=model_digest,
                     request=request, tier=args.tier, api_base=args.api_base,
-                    transcript_summary=transcript_summary, extra=report_extra)
+                    transcript_summary=transcript_summary, extra=report_extra,
+                    engine=args.engine)
 
 
 if __name__ == "__main__":
