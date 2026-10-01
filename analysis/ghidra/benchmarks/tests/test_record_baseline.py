@@ -650,7 +650,7 @@ class ColibriEngineContractTest(unittest.TestCase):
                 record_baseline.ask_model("http://fake/v1", "model", sampled,
         with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
             with self.assertRaises(SystemExit) as caught:
-                record_baseline.ask_model("http://fake/v1", "model", self.REQUEST,
+                record_baseline.ask_model("http://fake/v1", "model", sampled,
                                           "prompt", engine="colibri")
         self.assertEqual(sent, [], "refusal must happen before the wire, not after")
         self.assertIn("seed", str(caught.exception))

@@ -418,8 +418,10 @@ def refuse_unhonoured_params(engine: str, payload: dict) -> None:
     """
     if engine == "ollama":
         return
-    discarded = [p for p in ENGINE_DISCARDS if payload.get(p) is not None]
     rejected = [p for p in ENGINE_REJECTS if payload.get(p)]
+    discarded = [p for p in ENGINE_DISCARDS if payload.get(p) is not None]
+    if discarded and is_zero_temperature(payload.get("temperature")):
+        discarded = []
     if discarded or rejected:
         raise SystemExit(
             f"--engine {engine} cannot honour {sorted(discarded + rejected)}; "
@@ -826,6 +828,7 @@ def main() -> int:
         "temperature": request.get("temperature"),
     refuse_unhonoured_params(args.engine, {
         "seed": request.get("seed"),
+        "temperature": request.get("temperature"),
         "frequency_penalty": 0.0,
     })
     model_digest = resolve_digest(args.api_base, model_tag, args.engine)
