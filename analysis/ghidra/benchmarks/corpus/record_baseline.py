@@ -377,6 +377,7 @@ def resolve_digest(api_base: str, model: str, engine: str = "ollama") -> str:
 # colibri's argmax branch makes the seed irrelevant to the result (see
 # refuse_unhonoured_params). Drop these once the engine honours a seed
 # (#3172 reader path).
+# them. Drop these once the engine honours a seed (#3172 reader path).
 ENGINE_DISCARDS = ("seed",)
 ENGINE_REJECTS = ("frequency_penalty", "presence_penalty", "top_k", "repeat_penalty")
 
@@ -414,6 +415,11 @@ def refuse_unhonoured_params(engine: str, payload: dict) -> None:
     discarded = [p for p in ENGINE_DISCARDS if payload.get(p) is not None]
     if discarded and is_zero_temperature(payload.get("temperature")):
         discarded = []
+    """
+    if engine == "ollama":
+        return
+    discarded = [p for p in ENGINE_DISCARDS if payload.get(p) is not None]
+    rejected = [p for p in ENGINE_REJECTS if payload.get(p)]
     if discarded or rejected:
         raise SystemExit(
             f"--engine {engine} cannot honour {sorted(discarded + rejected)}; "
@@ -818,6 +824,8 @@ def main() -> int:
     refuse_unhonoured_params(args.engine, {
         "seed": request.get("seed"),
         "temperature": request.get("temperature"),
+    refuse_unhonoured_params(args.engine, {
+        "seed": request.get("seed"),
         "frequency_penalty": 0.0,
     })
     model_digest = resolve_digest(args.api_base, model_tag, args.engine)
