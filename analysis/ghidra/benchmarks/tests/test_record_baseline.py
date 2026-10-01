@@ -606,6 +606,94 @@ class PayloadDeterminismTest(unittest.TestCase):
         )
 
 
+class ColibriEngineContractTest(unittest.TestCase):
+    """#3172/#3199: colibri serves the same OpenAI /v1/chat/completions route,
+    so it can answer these cells -- but it accepts `seed` and silently discards
+    it. A cell scored that way would look seeded and would not be, against a
+    measured +/-0.58 noise band. The harness must refuse it loudly instead of
+    letting an unseeded run into the matrix as a seeded one."""
+
+    REQUEST = {"temperature": 0, "output_tokens": 512, "seed": 144, "thinking": False}
+
+    def test_the_ollama_path_is_unchanged(self):
+        sent = []
+
+        def fake_urlopen(req, timeout=None):
+            sent.append(req.data)
+            return _FakeChatResponse("answer text")
+
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            record_baseline.ask_model("http://fake/v1", "model", self.REQUEST, "prompt")
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(json.loads(sent[0])["seed"], 144)
+
+    def test_a_seeded_colibri_cell_is_refused_before_any_request(self):
+        sent = []
+
+        def fake_urlopen(req, timeout=None):
+            sent.append(req.data)
+            return _FakeChatResponse("answer text")
+
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            with self.assertRaises(SystemExit) as caught:
+                record_baseline.ask_model("http://fake/v1", "model", self.REQUEST,
+                                          "prompt", engine="colibri")
+        self.assertEqual(sent, [], "refusal must happen before the wire, not after")
+        self.assertIn("seed", str(caught.exception))
+
+    def test_an_unseeded_colibri_cell_is_allowed(self):
+        sent = []
+
+        def fake_urlopen(req, timeout=None):
+            sent.append(req.data)
+            return _FakeChatResponse("answer text")
+
+        unseeded = {**self.REQUEST, "seed": None}
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            content, _ = record_baseline.ask_model("http://fake/v1", "model", unseeded,
+                                                   "prompt", engine="colibri")
+        self.assertEqual(content, "answer text")
+        self.assertIsNone(json.loads(sent[0])["seed"])
+
+    def test_a_penalty_the_engine_rejects_is_refused_too(self):
+        with self.assertRaises(SystemExit) as caught:
+            record_baseline.refuse_unhonoured_params(
+                "colibri", {"seed": None, "frequency_penalty": 0.3})
+        self.assertIn("frequency_penalty", str(caught.exception))
+
+    def test_the_ollama_path_never_refuses_its_own_pinned_payload(self):
+        # The guard must not be able to strand the default path: ollama honours
+        # the same seed this harness has always sent.
+        record_baseline.refuse_unhonoured_params("ollama", self.REQUEST)
+
+    def test_colibri_identity_comes_from_v1_models_not_api_tags(self):
+        """Colibri has no /api/tags; its /v1/models object is the identity."""
+        requested = []
+
+        class _FakeModelsResponse:
+            def read(self):
+                return json.dumps({"id": "qwen36-i4"}).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def fake_urlopen(req, timeout=None):
+            # resolve_digest calls urlopen with a plain URL string, not a
+            # Request object, so normalise the two before reading it.
+            requested.append(getattr(req, "full_url", req))
+            return _FakeModelsResponse()
+
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            digest = record_baseline.resolve_digest(
+                "http://fake/v1", "some-tag", engine="colibri")
+
+        self.assertEqual(digest, "qwen36-i4")
+        self.assertEqual(requested, ["http://fake/v1/models"])
+
+
 class RunCasesIncrementalSaveTest(unittest.TestCase):
     """#2644: the report used to be written once at the very end, so 53
     minutes of already-scored cases were discarded the instant a later cell's

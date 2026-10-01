@@ -339,15 +339,21 @@ def ollama_version(api_base: str = DEFAULT_API_BASE) -> str | None:
         return None
 
 
-def resolve_digest(api_base: str, model: str) -> str:
-    """Read the installed digest for a tag from Ollama's native /api/tags.
+def resolve_digest(api_base: str, model: str, engine: str = "ollama") -> str:
+    """Read the installed digest for a tag from the serving engine.
 
-    api_base points at the OpenAI-compatible /v1 prefix, which does not expose
-    digests, so this steps up to the native API alongside it.
+    Ollama's OpenAI-compatible /v1 prefix does not expose digests, so that
+    engine steps up to its native /api/tags. Colibri has no /api/tags at all:
+    its identity comes from the /v1/models object (#3172), which is what the
+    digest is read from instead.
     """
     native = api_base.rstrip("/")
     if native.endswith("/v1"):
         native = native[: -len("/v1")]
+    if engine == "colibri":
+        with urllib.request.urlopen(f"{native}/v1/models", timeout=30) as r:
+            entry = json.loads(r.read())
+        return str(entry.get("id") or entry.get("model") or model)
     with urllib.request.urlopen(f"{native}/api/tags", timeout=30) as r:
         tags = json.loads(r.read()).get("models", [])
     for item in tags:
@@ -359,6 +365,35 @@ def resolve_digest(api_base: str, model: str) -> str:
             _harmony_by_tag[model] = any(m in family for m in HARMONY_FAMILY)
             return (item.get("digest") or "").removeprefix("sha256:")
     raise SystemExit(f"model tag is not installed: {model}")
+
+
+# Colibri accepts `seed` and discards it (openai_server.py: `this server puts no
+# per-request seed on the wire, at any temperature`), and hard-errors on token
+# penalties. Both are silent-comparability traps: a seed pinned to 144 that the
+# engine ignores looks like a seeded cell but is not one, and #1947 measured the
+# run-to-run band at +/-0.58 with margins in the tables smaller than that. So a
+# payload carrying them is refused rather than scored as if the runtime honoured
+# them. Drop these once the engine honours a seed (#3172 reader path).
+ENGINE_DISCARDS = ("seed",)
+ENGINE_REJECTS = ("frequency_penalty", "presence_penalty", "top_k", "repeat_penalty")
+
+
+def refuse_unhonoured_params(engine: str, payload: dict) -> None:
+    """Fail loud when the engine cannot honour the pinned sampling contract.
+
+    A cell scored through an engine that ignored the seed is not comparable to
+    the Ollama baseline and must not enter the matrix as though it were.
+    """
+    if engine == "ollama":
+        return
+    discarded = [p for p in ENGINE_DISCARDS if payload.get(p) is not None]
+    rejected = [p for p in ENGINE_REJECTS if payload.get(p)]
+    if discarded or rejected:
+        raise SystemExit(
+            f"--engine {engine} cannot honour {sorted(discarded + rejected)}; "
+            f"this harness pins seed/sampling for comparability (#1947 rule 3). "
+            f"Run the cell through ollama, or wait for the engine's seed support."
+        )
 
 
 def ask_model(
@@ -374,6 +409,7 @@ def ask_model(
     sleep=time.sleep,
     system_prompt: str = REV_SYSTEM,
     meta: dict | None = None,
+    engine: str = "ollama",
 ) -> tuple[str, float]:
     # #2642: this payload carries zero hidden entropy -- no timestamp, nonce,
     # or request id -- so two calls with the same (request, model, prompt)
@@ -422,6 +458,7 @@ def ask_model(
         # ghidra-worker.py's own OpenAI-compatible request already uses this;
         # only the corpus scorer was missing it.
         payload["reasoning_effort"] = "none"
+    refuse_unhonoured_params(engine, payload)
     body = json.dumps(payload).encode()
     start = time.monotonic()
     resp = None
@@ -584,7 +621,7 @@ def finalize(results: dict, output_path, *, model_tag: str, model_digest: str, r
 def run_cases(slice_builds, rubric: dict, tier: str, *, api_base: str, model_tag: str,
               model_digest: str, request: dict, recorder=None, tier_b=None,
               output_path=None, system_prompt: str = REV_SYSTEM,
-              report_extra: dict | None = None) -> dict:
+              report_extra: dict | None = None, engine: str = "ollama") -> dict:
     """Scores every build in slice_builds and returns the results dict.
 
     A cell whose Ollama request fails after ask_model's own retries is logged
@@ -618,9 +655,9 @@ def run_cases(slice_builds, rubric: dict, tier: str, *, api_base: str, model_tag
         meta: dict = {}
         try:
             answer, wall = ask_model(api_base, model_tag, request, prompt, recorder, case_name,
-                                     system_prompt=system_prompt, meta=meta)
+                                     system_prompt=system_prompt, meta=meta, engine=engine)
         except TRANSIENT_REQUEST_ERRORS as exc:
-            print(f"SKIP {case_name}: ollama request failed after retries: "
+            print(f"SKIP {case_name}: {engine} request failed after retries: "
                   f"{type(exc).__name__}: {exc}")
             continue
         result = score(answer, case_rubric)
@@ -677,6 +714,13 @@ def select_cases(slice_builds: list, rubric: dict, cases_arg: str) -> list:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--api-base", default=DEFAULT_API_BASE)
+    parser.add_argument(
+        "--engine", default="ollama", choices=("ollama", "colibri"),
+        help="Which runtime serves --api-base. Both speak OpenAI /v1/chat/completions, "
+             "so the request bytes are identical; this only changes where the model "
+             "identity is read from and pins the sampling contract the engine must "
+             "honour (colibri discards `seed`, so a seeded cell is refused, not scored).",
+    )
     parser.add_argument("--transcript-dir", default=str(DEFAULT_SYNTHETIC_ROOT))
     parser.add_argument("--provenance", default=PROVENANCE_SYNTHETIC, choices=PROVENANCES)
     parser.add_argument("--tier", default="A", choices=TIERS,
@@ -733,7 +777,13 @@ def main() -> int:
     # manifest: with --model the manifest describes a different model entirely,
     # and a report naming a tag whose digest was never checked is exactly the
     # family-alias ambiguity #158 exists to prevent.
-    model_digest = resolve_digest(args.api_base, model_tag)
+    # Refuse an unhonourable engine before we ask the runtime anything, so an
+    # unseeded colibri cell cannot cost a digest round-trip before saying no.
+    refuse_unhonoured_params(args.engine, {
+        "seed": request.get("seed"),
+        "frequency_penalty": 0.0,
+    })
+    model_digest = resolve_digest(args.api_base, model_tag, args.engine)
     if not args.model and model_digest != revdeck["artifact"]["digest"]:
         raise SystemExit(
             f"installed {model_tag} is digest {model_digest}, but the manifest approves "
@@ -751,6 +801,10 @@ def main() -> int:
     system_prompt = SYSTEM_PROMPT_VARIANTS[args.system_prompt_variant]
     report_extra = {
         "system_prompt_variant": args.system_prompt_variant,
+        # A report that names its runtime: the same tag behind two engines is
+        # two different measurements (#1947 rule 6, three harness paths).
+        "engine": args.engine,
+        "api_base": args.api_base,
         "cases_filter": sorted(Path(b["case_source"]).stem for b in slice_builds) if args.cases else None,
     }
 
@@ -792,7 +846,7 @@ def main() -> int:
         slice_builds, rubric, args.tier,
         api_base=args.api_base, model_tag=model_tag, model_digest=model_digest,
         request=request, recorder=recorder, tier_b=tier_b, output_path=args.output,
-        system_prompt=system_prompt, report_extra=report_extra,
+        system_prompt=system_prompt, report_extra=report_extra, engine=args.engine,
     )
 
     transcript_summary = None
