@@ -1909,6 +1909,7 @@ jobs:
               # a dead server still fails fast, and that both ends clamp so no
               # caller can buy an unbounded wait.
               python analysis/ghidra/benchmarks/tests/test_request_timeout.py
+              python analysis/ghidra/benchmarks/tests/test_bench_tools.py
               # full_capabilities.py (#800): inventories env vars straight out of
               # the real pipeline source, so its own test runs against the real
               # tree rather than fixtures -- proving that stays true.

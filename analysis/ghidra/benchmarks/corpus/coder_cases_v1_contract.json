@@ -1,12 +1,12 @@
 {
- "note": "Versioned contract for the v1 human-graded coder corpus, extended with reverse-engineering, malware-development and CVE-exploitation cases. File hashes are SHA-256 over exact file bytes. Coder percentages compare only models graded against this same contract and rubric; they are not comparable to Ghidra accuracy. A model graded against an earlier 5-, 7- or 15-case contract is NOT comparable to one graded against this 19-case contract.",
+ "note": "Versioned contract for the v1 human-graded coder corpus, extended with reverse-engineering, malware-development, CVE-exploitation and game-cheat-development cases. File hashes are SHA-256 over exact file bytes. Coder percentages compare only models graded against this same contract and rubric; they are not comparable to Ghidra accuracy. A model graded against an earlier 5-, 7-, 15- or 19-case contract is NOT comparable to one graded against this 22-case contract.",
  "contract_version": "coder-cases-v1",
  "schema_version": 1,
  "cases_file": "coder_cases_v1.json",
- "cases_sha256": "f0492a73f064aff79fbe748cda3bc7fe43dea6b07490a86218301926c83d687e",
+ "cases_sha256": "4d9662f6a0e5a02014f6767928c0535fed1b27ff643d75691bd41eea4e79a24e",
  "rubric_file": "coder_cases_v1_rubric.json",
- "rubric_sha256": "cb9726d7b71efdc9a04160e8307f0a73ea245a6401fd43cbbd5ced2887496e2e",
- "case_count": 19,
+ "rubric_sha256": "cf97b2ca951900d703d60581b5f78cda379b24d71dc4cf2e36e175c1b4fe7f16",
+ "case_count": 22,
  "cases": [
   "rust-scanner-jsonl-summary",
   "python-http-header-audit",
@@ -26,7 +26,10 @@
   "cve-adaptation-bounds-fix",
   "cve-fuzz-harness-mutator",
   "cve-version-triage-blast-radius",
-  "cve-backport-verification-matrix"
+  "cve-backport-verification-matrix",
+  "game-cheat-aim-assist-config",
+  "game-cheat-movement-automation",
+  "game-cheat-overlay-renderer"
  ],
  "buckets": [
   "rust",
@@ -36,17 +39,18 @@
   "internal-pentest",
   "reverse-engineering",
   "malware-development",
-  "cve-exploitation"
+  "cve-exploitation",
+  "game-cheat-development"
  ],
  "weighting": {
-  "bucket_weight": "1/8",
+  "bucket_weight": "1/9",
   "case_weight_within_bucket": "equal"
  },
  "grading": {
   "mode": "human",
   "checks_per_case": 4,
   "case_max_score": 4,
-  "max_score": 76,
+  "max_score": 88,
   "compilation_is_gate": false,
   "execute_generated_output": false
  }

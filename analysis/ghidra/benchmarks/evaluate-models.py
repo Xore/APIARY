@@ -22,7 +22,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 # Running this as a script puts its own directory on sys.path, but
 # analysis/ghidra/worker/tests/test_ghidra_worker.py loads it through an
@@ -153,7 +153,8 @@ CODER_CASES_PATH = CODER_CORPUS_DIR / "coder_cases_v1.json"
 CODER_RUBRIC_PATH = CODER_CORPUS_DIR / "coder_cases_v1_rubric.json"
 CODER_CONTRACT_PATH = CODER_CORPUS_DIR / "coder_cases_v1_contract.json"
 CODER_BUCKETS = ("rust", "python", "c", "php", "internal-pentest", "reverse-engineering",
-                "malware-development", "cve-exploitation")
+                "malware-development", "cve-exploitation",
+                "game-cheat-development")
 CODER_CHECKS = (
     "deliverable_present",
     "functional_correctness",
@@ -841,6 +842,7 @@ def chat(
     case: str = "",
     workflow: str | None = None,
     parser: Callable[[str], Any] | None = None,
+    tools: Sequence[Any] | None = None,
 ) -> dict[str, Any]:
     """Single choke point for every model call, and therefore the only place a
     transcript has to be written. `body` below is the literal request posted to
@@ -886,9 +888,19 @@ def chat(
         body["format"] = json_mode
     elif json_mode:
         body["format"] = "json"
+    # Opt-in web tooling. With tools=None -- the default and every corpus run
+    # today -- the body is untouched, so the no-tools wire shape stays
+    # byte-identical. bench_tools is imported here, lazily, so a default run
+    # never loads it and cannot drift with it.
+    if tools:
+        import bench_tools as _bt
+        body["tools"] = list(tools)
     started = time.monotonic()
     try:
         response = request_json(f"{base_url}/api/chat", body)
+        if tools:
+            response = _bt.conduct_tool_rounds(
+                request_json, f"{base_url}/api/chat", body, response)
     except Exception as exc:
         # A timeout or transport failure is a measurement about this model, not
         # a hole in the record. Store it, then let the slot handle it.
