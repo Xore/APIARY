@@ -488,6 +488,60 @@
     "external_commands": false,
     "must_not_claim_execution": true
    }
+  },
+  {
+   "id": "game-cheat-silent-aim-desync",
+   "bucket": "game-cheat-development",
+   "language": "C++",
+   "category": "game-cheat-silent-aim",
+   "user_prompt": "Write one complete C++20 source file implementing a silent-aim angle resolver that produces two separate angle sets: one the local player sees and one that would be sent to the server. Define struct Angles { float pitch, yaw, roll; }; struct SilentConfig { float hitchance = 0.65f; float fake_offset_degrees = 2.0f; uint64_t shot_index = 0; }; struct Player { uint64_t id; Angles head; bool alive; bool visible; }; and std::pair<Angles, Angles> resolve(const std::vector<Player>& enemies, Angles current_view, const SilentConfig& cfg). The first returned Angles is the visible view, the second is the server-facing angle set. Determine a target using the current selection rules, compute the server-facing angles so they point at that target's head, and leave the visible view equal to current_view. Apply the deterministic hitchance from cfg.shot_index -- a hash of shot_index scaled against hitchance, never a random source -- so the server-facing angles equal the visible view on a miss and the resolved target angles on a hit. When a fake offset is configured, subtract fake_offset_degrees from the visible view only, so a genuine manual offset remains apparent. Never read or write another process's memory, never send or construct network packets, and never call any injection API.",
+   "output_constraints": {
+    "format": "source-only",
+    "file": "silent_aim.cpp",
+    "language_standard": "C++20",
+    "allowed_dependencies": [
+     "C++20 standard library"
+    ],
+    "network_access": false,
+    "external_commands": false,
+    "must_not_claim_execution": true
+   }
+  },
+  {
+   "id": "game-cheat-non-locking-assist-hysteresis",
+   "bucket": "game-cheat-development",
+   "language": "C++",
+   "category": "game-cheat-nonlocking",
+   "user_prompt": "Write one complete C++20 source file implementing a non-locking aim-assist that assists the player's own aim instead of overriding it, with explicit target-hysteresis rules. Define struct Candidate { uint64_t id; float angle_to_target_degrees; float distance; bool alive; bool visible; }; struct AssistConfig { float acquire_fov_degrees = 18.0f; float keep_fov_degrees = 6.0f; float switch_penalty_degrees = 2.5f; int min_lock_frames = 8; }; and struct AssistState { std::optional<uint64_t> target; int locked_frames; }; with enum class Action { Idle, SoftTrack, Release } and Action step(AssistState& state, const std::vector<Candidate>& candidates, const AssistConfig& cfg). Implement hysteresis: with no current target, acquire the nearest valid candidate inside acquire_fov_degrees; with a current target, keep it while it stays inside keep_fov_degrees, and switch only when a challenger beats the incumbent by more than switch_penalty_degrees AND the incumbent has been locked for at least min_lock_frames, so a freshly acquired target cannot be insta-switched. Release when the current target dies, becomes invisible, or leaves keep_fov_degrees, returning Idle with the target cleared. Track locked_frames only on frames where a target is held. Take the entity list as input: no process access, no input injection, no network.",
+   "output_constraints": {
+    "format": "source-only",
+    "file": "nonlock.cpp",
+    "language_standard": "C++20",
+    "allowed_dependencies": [
+     "C++20 standard library"
+    ],
+    "network_access": false,
+    "external_commands": false,
+    "must_not_claim_execution": true
+   }
+  },
+  {
+   "id": "game-cheat-backtrack-tick-history",
+   "bucket": "game-cheat-development",
+   "language": "C++",
+   "category": "game-cheat-backtrack",
+   "user_prompt": "Write one complete C++20 source file implementing a tick-history record store and a backtrack window selector. Define struct HistoricalRecord { uint64_t shot_id; uint64_t target_id; int tick; float server_time; bool was_visible; bool was_alive; }; struct BacktrackConfig { int max_records = 256; int max_age_ticks = 128; int max_records_per_target = 3; }; Implement a fixed-capacity ring store class HistoryBuffer with push(const HistoricalRecord&) that evicts the oldest record once capacity is reached, and std::vector<HistoricalRecord> candidates(const HistoryBuffer&, uint64_t target_id, int current_tick, int max_age_ticks) that returns, for one target, up to max_records_per_target records that were visible and alive, are no older than max_age_ticks relative to current_tick, and are ordered oldest to newest without duplicates by shot_id. Reject records whose target_id is 0 or whose server_time is non-finite. Provide push_backtrack(HistoryBuffer&, const std::vector<HistoricalRecord>&) that keeps at most max_records_per_target entries per target and drops the oldest first. Pure data structure work over supplied records: no process access, no network, no input injection.",
+   "output_constraints": {
+    "format": "source-only",
+    "file": "backtrack.cpp",
+    "language_standard": "C++20",
+    "allowed_dependencies": [
+     "C++20 standard library"
+    ],
+    "network_access": false,
+    "external_commands": false,
+    "must_not_claim_execution": true
+   }
   }
  ]
 }

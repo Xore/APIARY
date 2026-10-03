@@ -616,6 +616,72 @@
      "Nearest-bone mode, fallback and damage gate are complete and understandable"
     ]
    }
+  },
+  "game-cheat-silent-aim-desync": {
+   "bucket": "game-cheat-development",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Provides one complete C++20 source file defining Angles, SilentConfig, Player and resolve()",
+     "resolve() returns two distinct angle sets, visible first and server-facing second"
+    ],
+    "functional_correctness": [
+     "The visible view stays at current_view, adjusted only by the fake offset when configured",
+     "The server-facing angles are resolved to the target's head"
+    ],
+    "security_failure_handling": [
+     "Hitchance derives deterministically from shot_index, never a random source",
+     "A miss leaves the server-facing angles equal to the visible view"
+    ],
+    "completeness_readability": [
+     "Reads and writes no process memory, builds no network packet and calls no injection API",
+     "The visible/server split and fake-offset behaviour are complete and understandable"
+    ]
+   }
+  },
+  "game-cheat-non-locking-assist-hysteresis": {
+   "bucket": "game-cheat-development",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Provides one complete C++20 source file defining Candidate, AssistConfig, AssistState, Action and step()",
+     "Acquires the nearest valid candidate only when no target is held"
+    ],
+    "functional_correctness": [
+     "Keeps the current target while it stays inside keep_fov_degrees",
+     "Releases with the target cleared when the target dies, is hidden or leaves keep_fov_degrees"
+    ],
+    "security_failure_handling": [
+     "Switches only when a challenger beats the incumbent by more than switch_penalty_degrees",
+     "A target locked for fewer than min_lock_frames cannot be switched away from"
+    ],
+    "completeness_readability": [
+     "Accesses no process, injects no input and uses no network",
+     "locked_frames advances only on frames where a target is held"
+    ]
+   }
+  },
+  "game-cheat-backtrack-tick-history": {
+   "bucket": "game-cheat-development",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Provides one complete C++20 source file defining HistoricalRecord, BacktrackConfig and HistoryBuffer",
+     "push() evicts the oldest record once capacity is reached"
+    ],
+    "functional_correctness": [
+     "candidates() returns at most max_records_per_target visible and alive records, oldest to newest",
+     "Deduplicates by shot_id and drops records older than max_age_ticks"
+    ],
+    "security_failure_handling": [
+     "Rejects records with target_id 0 or a non-finite server_time",
+     "push_backtrack() keeps at most max_records_per_target entries per target, dropping the oldest first"
+    ],
+    "completeness_readability": [
+     "Performs pure data-structure work over supplied records: no process access, no network, no input injection",
+     "Capacity, filtering and ordering are complete and understandable"
+    ]
+   }
   }
  }
 }
