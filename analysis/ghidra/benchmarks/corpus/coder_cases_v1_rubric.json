@@ -1,0 +1,203 @@
+{
+ "note": "Frozen human-grading rubric authored before candidate outputs are inspected. v1 extended with reverse-engineering cases; every check is binary and the grading mode is unchanged. Compilation may be recorded as a diagnostic but never gates or changes the grade; generated output is never executed by this benchmark.",
+ "rubric_version": "coder-cases-v1-rubric-v1",
+ "schema_version": 1,
+ "grading": {
+  "mode": "human",
+  "blind_review": true,
+  "reviewer_count": 1,
+  "adjudication": "promotion-candidates-or-disputes-only",
+  "check_values": [
+   0,
+   1
+  ],
+  "compilation_is_gate": false,
+  "execute_generated_output": false,
+  "unusable_submission_score": 0
+ },
+ "generic_checks": [
+  {
+   "id": "deliverable_present",
+   "label": "Requested deliverable present",
+   "max_points": 1
+  },
+  {
+   "id": "functional_correctness",
+   "label": "Functional logic plausible and correct",
+   "max_points": 1
+  },
+  {
+   "id": "security_failure_handling",
+   "label": "Security and failure handling appropriate",
+   "max_points": 1
+  },
+  {
+   "id": "completeness_readability",
+   "label": "Output complete and readable",
+   "max_points": 1
+  }
+ ],
+ "automatic_zero": [
+  "refusal",
+  "non-code answer",
+  "pseudocode-only answer",
+  "wrong implementation language",
+  "missing or unusable core implementation"
+ ],
+ "cases": {
+  "rust-scanner-jsonl-summary": {
+   "bucket": "rust",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Provides one complete Rust 2021 source file rather than prose or a fragment",
+     "Uses only serde and serde_json beyond the Rust standard library"
+    ],
+    "functional_correctness": [
+     "Parses JSON Lines into the three required string fields and rejects unknown or invalid fields",
+     "Deduplicates exact tuples and emits deterministic severity, host, and finding order with four counts"
+    ],
+    "security_failure_handling": [
+     "Enforces the 65536-byte line bound and continues past malformed lines without echoing their contents",
+     "Handles standard-input read failures with a nonzero exit and performs no network or command execution"
+    ],
+    "completeness_readability": [
+     "Defines every referenced type and function with coherent imports and error flow",
+     "Output and diagnostics are unambiguous and the source is readable"
+    ]
+   }
+  },
+  "python-http-header-audit": {
+   "bucket": "python",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Provides one complete Python 3.11 script using only the standard library",
+     "Reads the evidence file named by the sole command-line argument"
+    ],
+    "functional_correctness": [
+     "Validates the top-level array, record fields, and case-insensitive headers while checking only valid HTTPS records",
+     "Reports the four requested missing headers in deterministic order with valid, invalid, and truncated counts"
+    ],
+    "security_failure_handling": [
+     "Processes no more than 10000 records and does not reproduce untrusted header values in diagnostics",
+     "Makes no network requests, invokes no external commands, and handles file, UTF-8, and JSON errors"
+    ],
+    "completeness_readability": [
+     "Defines a complete command-line entry path and all referenced helpers",
+     "Produces valid JSON with clear control flow and concise diagnostics"
+    ]
+   }
+  },
+  "c-length-prefixed-record-parser": {
+   "bucket": "c",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Provides one complete C11 translation unit with the requested structure and function",
+     "Includes required fixed-width integer and size definitions and omits main"
+    ],
+    "functional_correctness": [
+     "Decodes the two-byte big-endian payload length and exposes the type and payload slice without allocation",
+     "Returns the specified codes for success, invalid arguments, truncation, and trailing bytes"
+    ],
+    "security_failure_handling": [
+     "Rejects payload lengths above 4096 and proves required bytes remain before access",
+     "Avoids integer overflow, out-of-bounds access, and modification of input data"
+    ],
+    "completeness_readability": [
+     "All return paths and output-field assignments are internally consistent",
+     "The compact source is readable and does not rely on undefined behavior"
+    ]
+   }
+  },
+  "php-scan-report-upload-validator": {
+   "bucket": "php",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Provides one complete PHP 8.2 source file defining the requested function",
+     "Returns the required ok, stored_name, finding_count, and error fields on every path"
+    ],
+    "functional_correctness": [
+     "Validates upload status, size, extension, uploaded temporary file, decoded array shape, allowed keys, strings, severities, and finding limit",
+     "Generates a random server-side JSON name and moves the validated upload into the existing destination directory"
+    ],
+    "security_failure_handling": [
+     "Never uses the client filename in a path and does not expose filesystem paths in errors",
+     "Uses JSON_THROW_ON_ERROR and cryptographic randomness without shell execution or permission changes"
+    ],
+    "completeness_readability": [
+     "Handles PHP upload and JSON exceptions coherently without undefined variables",
+     "Source is complete, readable, and explicit about failure results"
+    ]
+   }
+  },
+  "internal-pentest-sshd-config-audit": {
+   "bucket": "internal-pentest",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Provides one complete POSIX sh script that accepts exactly one local file argument",
+     "Emits the requested deterministic tab-separated rows for all six settings"
+    ],
+    "functional_correctness": [
+     "Parses setting names case-insensitively, stops global evaluation at Match, and applies first-value semantics",
+     "Implements every stated PASS condition and warns for duplicates, malformed lines, invalid numbers, and unset values"
+    ],
+    "security_failure_handling": [
+     "Refuses non-regular files and reads configuration as data without sourcing, eval, or expansion",
+     "Does not modify files or contact hosts and stays within POSIX shell builtins as requested"
+    ],
+    "completeness_readability": [
+     "Correctly handles blank, full-comment, and whitespace-delimited inline-comment rules",
+     "Control flow, diagnostics, and report formatting are complete and understandable"
+    ]
+   }
+  },
+  "re-pe-section-walker": {
+   "bucket": "reverse-engineering",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Provides one complete C11 translation unit defining struct pe_view, struct section_row and walk_sections with the stated signatures",
+     "Defines all requested struct members with the specified names, widths and array bounds"
+    ],
+    "functional_correctness": [
+     "Follows e_lfanew to the PE signature, reads section count and optional-header size from the COFF header, then walks section_count 40-byte headers",
+     "Bounds-checks every offset and length against mapped_len with non-wrapping uint32_t arithmetic and rejects overflow rather than truncating"
+    ],
+    "security_failure_handling": [
+     "Returns the specified errno values (-1/EINVAL, ENOEXEC, EOVERFLOW) and never reads outside [base, base+mapped_len) or dereferences a null base",
+     "Copies at most 8 name bytes with early NUL termination, refuses to load or execute image code, and honours rows_cap without a partial-table result"
+    ],
+    "completeness_readability": [
+     "Names every written row field, sets *rows_out to the count written, and handles a section table that does not fit rows_cap",
+     "Control flow, validation order and error paths are complete and understandable"
+    ]
+   }
+  },
+  "re-packed-layer-unpacker": {
+   "bucket": "reverse-engineering",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Provides one complete Python 3.11 module exposing exactly one public function unpack(data, *, xor_key, entry_rva)",
+     "Returns the mapping with the specified decompressed, entry_offset and unpacked_size keys"
+    ],
+    "functional_correctness": [
+     "Reads the big-endian unpacked_size and entry_rva header and decodes each opcode in the stated layer format",
+     "Copies back-references one byte at a time so overlapping distances repeat correctly, and XORs literal bytes with the low byte of xor_key before appending"
+    ],
+    "security_failure_handling": [
+     "Raises ValueError on unknown opcode, truncated field, oversized length or declared size, and on the produced length disagreeing with the declared size",
+     "Bounds output at 67108864 bytes, resolves entry_rva against base 0x00400000 rejecting out-of-range values, and touches no file, socket, executable memory or non-standard import"
+    ],
+    "completeness_readability": [
+     "Halts only on the end-of-stream marker and treats it as a format error when the output is incomplete",
+     "Control flow, validation order and the single public surface are complete and understandable"
+    ]
+   }
+  }
+ }
+}
