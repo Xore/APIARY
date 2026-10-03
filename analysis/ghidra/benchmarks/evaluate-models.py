@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -22,7 +23,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 # Running this as a script puts its own directory on sys.path, but
 # analysis/ghidra/worker/tests/test_ghidra_worker.py loads it through an
@@ -31,8 +32,17 @@ from typing import Any, Callable
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from polarity import forbidden_hit, mentions_injection_attempt  # noqa: E402  (path set above so the sibling module resolves)
+# was_capped is transcripts' and is imported rather than defined here: the
+# corpus scorer and the claim path are handed capped answers too, and this
+# module cannot be `import`ed by name, so a predicate owned only here is a
+# predicate the other two have to restate. Every call site below reads it off
+# this module exactly as before.
 from transcripts import (  # noqa: E402
+    DEGENERATE_REPETITION_RATIO,
     DEFAULT_SYNTHETIC_ROOT,
+    is_degenerate,
+    repetition_ratio,
+    OUTCOME_OK,
     PROVENANCES,
     PROVENANCE_SYNTHETIC,
     SCHEMA_VERSION,
@@ -42,14 +52,25 @@ from transcripts import (  # noqa: E402
     RunMetadata,
     SlotRecorder,
     TranscriptWriter,
+    assert_repository_fixture_input,
+    classify_outcome,
     default_operator,
+    was_capped,
 )
 
 
 BENCHMARK_VERSION = "honeypot-stack-issue-158-v2"
+# The parameters every slot is qualified under, apart from the two that vary
+# per slot and per run: the output budget (OUTPUT_BUDGETS, below) and the
+# context window. `output_tokens` used to be restated here as a literal 512
+# while every call site sent budget_for(slot)=4096, so evaluate_slot() stored
+# that 512 in `qualification_request` and run() echoed it into the run
+# artifact -- an artifact that carried "output_tokens": 512 beside a request
+# body with num_predict: 4096. qualification_request() composes the real value
+# from budget_for(slot) instead, so the declared request and the sent request
+# are the same number by construction.
 QUALIFICATION_REQUEST = {
     "context_tokens": 16384,
-    "output_tokens": 512,
     "thinking": False,
     "temperature": 0,
     "seed": 144,
@@ -131,6 +152,64 @@ def _sha256_json(value: Any) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+CODER_CORPUS_DIR = Path(__file__).resolve().parent / "corpus"
+CODER_CASES_PATH = CODER_CORPUS_DIR / "coder_cases_v1.json"
+CODER_RUBRIC_PATH = CODER_CORPUS_DIR / "coder_cases_v1_rubric.json"
+CODER_CONTRACT_PATH = CODER_CORPUS_DIR / "coder_cases_v1_contract.json"
+CODER_BUCKETS = ("rust", "python", "c", "php", "internal-pentest", "reverse-engineering",
+                "malware-development", "cve-exploitation",
+                "game-cheat-development", "security-tooling")
+CODER_CHECKS = (
+    "deliverable_present",
+    "functional_correctness",
+    "security_failure_handling",
+    "completeness_readability",
+)
+# Complete source files need more output than the calibrated 512-token analysis slots.
+CODER_NUM_PREDICT = 4096
+HUMAN_GRADES_FILENAME = "human-grades.json"
+
+
+def _load_coder_artifacts() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    cases = json.loads(CODER_CASES_PATH.read_text(encoding="utf-8"))
+    rubric = json.loads(CODER_RUBRIC_PATH.read_text(encoding="utf-8"))
+    contract = json.loads(CODER_CONTRACT_PATH.read_text(encoding="utf-8"))
+    case_ids = [case["id"] for case in cases["cases"]]
+    buckets = [case["bucket"] for case in cases["cases"]]
+    rubric_case_ids = list(rubric["cases"])
+    generic_checks = tuple(check["id"] for check in rubric["generic_checks"])
+    if hashlib.sha256(CODER_CASES_PATH.read_bytes()).hexdigest() != contract["cases_sha256"]:
+        raise ValueError("coder cases file does not match its contract hash")
+    if hashlib.sha256(CODER_RUBRIC_PATH.read_bytes()).hexdigest() != contract["rubric_sha256"]:
+        raise ValueError("coder rubric file does not match its contract hash")
+    if case_ids != contract["cases"] or len(case_ids) != contract["case_count"]:
+        raise ValueError("coder case order or count does not match its contract")
+    # One or more cases per bucket, bucket order as declared: v1 carries two
+    # reverse-engineering cases (PE section walking, packed-layer unpacking)
+    # and one case in each of the other buckets. The invariant is coverage of
+    # every bucket in order, not a single case each.
+    if contract["buckets"] != list(CODER_BUCKETS):
+        raise ValueError("coder corpus buckets do not match the required bucket set")
+    ordered = [b for b in CODER_BUCKETS for x in buckets if x == b][:len(buckets)]
+    if buckets != ordered or sorted(set(buckets)) != sorted(CODER_BUCKETS):
+        raise ValueError("coder corpus must contain the required buckets in the declared order")
+    if rubric_case_ids != case_ids or generic_checks != CODER_CHECKS:
+        raise ValueError("coder rubric cases or generic checks do not match the contract")
+    if any(
+        tuple(case["pass_anchors"]) != CODER_CHECKS
+        or case["max_score"] != len(CODER_CHECKS)
+        for case in rubric["cases"].values()
+    ):
+        raise ValueError("coder rubric checks must be frozen and equally weighted")
+    return cases, rubric, contract
+
+
+CODER_CASE_FILE, CODER_RUBRIC, CODER_CONTRACT = _load_coder_artifacts()
+CODER_SYSTEM = str(CODER_CASE_FILE["system_prompt"])
+CODER_CASE_MAX_SCORE = int(CODER_CONTRACT["grading"]["case_max_score"])
+CODER_MAX_SCORE = int(CODER_CONTRACT["grading"]["max_score"])
+
+
 def contract_for(slot: str) -> dict[str, Any]:
     if slot == "ghidra":
         return {
@@ -157,6 +236,8 @@ def contract_for(slot: str) -> dict[str, Any]:
             "system_prompt_sha256": hashlib.sha256(REV_SYSTEM.encode()).hexdigest(),
             "response_schema_sha256": None,
         }
+    if slot == "coder":
+        return dict(CODER_CONTRACT)
     raise ValueError(f"unknown slot: {slot}")
 
 
@@ -384,6 +465,16 @@ rm -f /tmp/.svc-token /tmp/.chunks /tmp/.part-* /tmp/.stage""",
     ),
 )
 
+CODER_CASES = tuple(
+    RevCase(case["id"], case["user_prompt"], ())
+    for case in CODER_CASE_FILE["cases"]
+)
+CODER_BUCKET_BY_CASE = {
+    case["id"]: case["bucket"]
+    for case in CODER_CASE_FILE["cases"]
+}
+
+
 REV_CASES = (
     RevCase(
         "x86-code-intent",
@@ -423,11 +514,76 @@ int handle(char *src) {
 )
 
 
-def request_json(url: str, body: dict[str, Any] | None = None, timeout: int = 300) -> dict[str, Any]:
+# --- Request timeout, sized by the work the request asks for ----------------
+# The flat 300s this replaces was one wall-clock allowance for an 8-token
+# context probe and for the coder slot's 4096-token answer alike, so on the
+# homeserver (RTX 4000 Ada, 20 GB VRAM, ~92 GB RAM) any model decoding slower
+# than ~7 tok/s could not finish a 4096-token budget inside it. Measured there
+# at num_predict: 256:
+#     GLM-4.6-REAP-218B IQ1_S   2.71 tok/s  ->  4096 tokens needs 25.2 min
+#     Trendyol Qwen3-32B Q8_0   2.45 tok/s  ->  4096 tokens needs 27.9 min
+#     Seneca 32B Q4_Medium      5.12 tok/s  ->  4096 tokens needs 13.3 min
+# Those models were excluded by a transport timeout rather than by any property
+# of the model, which is what a timeout is not. Lowering the budget they are
+# asked for would fix the symptom by changing what the benchmark measures.
+#
+# So the allowance is computed from the request's own num_predict at a floor
+# decode rate, and clamped. 2.0 tok/s sits below the slowest rate measured
+# above, so a model at that floor still has the wall clock left over for
+# prefill and for a cold load -- the 2048s a 4096-token budget buys against
+# 25-28 min of measured decode is exactly that margin. It is a constant rather
+# than a flag because the only caller that has to size a wait is the one below:
+# the second transport in this tree, corpus/record_baseline.py, already carries
+# its own, and a flag nobody sets is a number with two sources of truth.
+#
+# The clamps keep both ends honest. A short request still fails fast at the old
+# 300s instead of hanging on a stalled server, and no caller can buy an
+# unbounded wait: 3600s is above 4096 / 2.0 = 2048s, so every budget in
+# OUTPUT_BUDGETS fits unclamped and only an absurd num_predict reaches the
+# ceiling.
+FLOOR_DECODE_TOKENS_PER_SECOND = 2.0
+MIN_REQUEST_TIMEOUT_SECONDS = 300   # the flat default this replaces: a probe's floor
+MAX_REQUEST_TIMEOUT_SECONDS = 3600  # above 4096 / 2.0 = 2048s, so no real budget clamps
+
+
+def request_timeout(body: dict[str, Any] | None) -> int:
+    """The wall-clock allowance for `body`, from the output budget it asks for.
+
+    Read out of the body that is about to be sent, rather than passed beside it
+    as a second number, because the two can disagree and then the timeout is
+    describing a different measurement than the request: chat()'s #2233 harmony
+    adaptation raises the budget to the floor before the call, and only the
+    body knows that. This is the one owner of the rule, at the one shared
+    transport -- the alternative, a timeout per call site, is how the four and
+    five /api/chat and /api/generate call sites came to disagree about how long
+    a model is allowed to take in the first place.
+
+    A body with no usable num_predict is a metadata or lifecycle call
+    (/api/tags, /api/ps, keep_alive: 0, /api/version), which answers in
+    milliseconds, so it gets the floor: unchanged from the old constant.
+    """
+    options = (body or {}).get("options")
+    num_predict = options.get("num_predict") if isinstance(options, dict) else None
+    if not isinstance(num_predict, int) or isinstance(num_predict, bool) or num_predict <= 0:
+        return MIN_REQUEST_TIMEOUT_SECONDS
+    seconds = num_predict / FLOOR_DECODE_TOKENS_PER_SECOND
+    return int(min(max(seconds, MIN_REQUEST_TIMEOUT_SECONDS), MAX_REQUEST_TIMEOUT_SECONDS))
+
+
+def request_json(url: str, body: dict[str, Any] | None = None, timeout: int | None = None) -> dict[str, Any]:
+    """POST (or GET) `body` to `url` and return the parsed object.
+
+    `timeout=None` means "size the wait from the request" -- request_timeout()
+    above, so a 4096-token answer is not cut off at the same wall clock as an
+    8-token probe. An explicit value is the caller's own decision for a call
+    that is not a generation (unload() passes 60) and is used unchanged.
+    """
     data = None if body is None else json.dumps(body).encode()
     req = urllib.request.Request(url, data=data, method="GET" if body is None else "POST")
     if data is not None:
         req.add_header("Content-Type", "application/json")
+    if timeout is None:
+        timeout = request_timeout(body)
     with urllib.request.urlopen(req, timeout=timeout) as response:
         parsed = json.loads(response.read())
     if not isinstance(parsed, dict):
@@ -516,10 +672,166 @@ HARMONY_FAMILY_MARKERS = ("gpt-oss",)
 HARMONY_SAMPLING = {"repeat_last_n": 256, "repeat_penalty": 1.3}
 HARMONY_NUM_PREDICT = 4096
 
+# --- Output budgets, one named constant per slot ---------------------------
+# 512 was #1795's shared cap and it is below a full answer for two of the four
+# slots. Raised, never lowered: the committed runs show the cap, not the model,
+# deciding where answers end (see chat()'s docstring for the counts).
+#
+# num_ctx, not num_predict, is the hard ceiling, and it is set per slot at
+# evaluate_slot()'s caller (`min(args.context, 8192)`, or `args.context` for
+# ghidra) -- so a budget larger than num_ctx minus the prompt would be cut
+# short by the window instead of by the cap. docs/gpu-llm-analysis-worker.md
+# caps num_ctx at 8192 for KV-cache reasons, and the widest recorded prompt is
+# 2117 tokens (revdeck), leaving 6075 for the answer: 4096 fits with headroom.
+ANALYSIS_NUM_PREDICT = 4096   # ghidra triage, revdeck, context probe
+# The sessions slot is not free to ask for as much as the two analysis slots
+# do, and the reason is production, not the benchmark: that slot is
+# llm-worker session classification, and worker.py reads
+# `env_int("LLM_OUTPUT_TOKENS", 512, 128, 2048)` -- a hard clamp at 2048.
+# A qualification budget above that number is a benchmark-only measurement of
+# a configuration the production worker can never be asked to run, so the
+# manifest's sessions.qualification_request.output_tokens has to stay at or
+# under it. 4096 would qualify something undeployable; 2048 is the largest
+# answer the worker can actually produce, and it is still 4x the old 512 cap
+# that was ending answers mid-sentence.
+SESSIONS_NUM_PREDICT = 2048
+CODER_NUM_PREDICT = 4096     # already existed at line 146; kept, verified live
+
+# The slot -> budget table every call site reads, so "which slot gets how much"
+# is one grep rather than five. `context_probe` is listed under ghidra because
+# that is the only slot that runs it.
+OUTPUT_BUDGETS = {
+    "ghidra": ANALYSIS_NUM_PREDICT,
+    "sessions": SESSIONS_NUM_PREDICT,
+    "revdeck": ANALYSIS_NUM_PREDICT,
+    "coder": CODER_NUM_PREDICT,
+}
+
+
+def budget_for(slot: str) -> int:
+    return OUTPUT_BUDGETS[slot]
+
+
+def qualification_request(slot: str, context: int) -> dict[str, Any]:
+    """The qualification request this harness actually sends for `slot`.
+
+    Single source for the request that evaluate_slot() validates against and
+    that run() builds for a positional-model run, so the number recorded as
+    provenance is the number chat() puts in the body -- budget_for(slot) --
+    rather than a constant that has to be remembered in step with the wire
+    format.
+
+    Exact equality against this dict stays the manifest guard: a manifest that
+    declares a different output budget than the harness sends is rejected
+    loudly, which is what the "benchmark code must be reviewed" error is for.
+    """
+    return {**QUALIFICATION_REQUEST, "output_tokens": budget_for(slot), "context_tokens": context}
+
+
+def prompt_fixture_sources(slot: str) -> tuple[Path, ...]:
+    """The repository files a slot's prompts are read from.
+
+    The three analysis slots' fixtures are inline in this module -- the
+    evidence, the workflows, the session transcripts, the system prompts and
+    the suffix are all constants above -- so this file is their source. The
+    coder slot reads the contract-pinned corpus file instead (and
+    _load_coder_artifacts() has already refused to import this module if that
+    file is not the one its contract names).
+
+    Every `live_model` input check resolves its prompt corpus through here, so
+    a slot that grows an external prompt source has to name it in the same
+    change: the check cannot keep answering "the fixtures are in the repo" by
+    pointing at this file while the prompts come from somewhere else.
+    """
+    if slot == "coder":
+        return (CODER_CASES_PATH,)
+    return (Path(__file__).resolve(),)
+
 
 def is_harmony_served(model: str) -> bool:
     lowered = model.lower()
     return any(marker in lowered for marker in HARMONY_FAMILY_MARKERS)
+
+
+def require_harmony_output_budget(model: str, num_predict: int) -> None:
+    """Refuse a harmony-served model whose declared output budget is under the
+    floor. Returns nothing; raises ValueError, so it is a gate and not a
+    number to be passed around.
+
+    The analysis channel is spent out of the same output budget, so a cap below
+    HARMONY_NUM_PREDICT gets consumed mid-reasoning on rule-dense prompts and
+    `final` never starts. Which means the floor can only be honoured by a slot
+    that already declares at least that much. `max()` used to raise one that
+    declared less: a gpt-oss tag in the sessions slot declares 2048 and would
+    have sent 4096 -- the same declared-vs-sent lie the 512 constant below
+    chat()'s docstring told, one layer down, and a worse one. 4096 is a budget
+    llm-worker clamps away in production (`env_int("LLM_OUTPUT_TOKENS", 512,
+    128, 2048)`), so the artifact would have described a session budget the
+    deployment can never run, and said nothing about the floor that decided the
+    answers. Refused instead of silently raised: the run cannot report a
+    budget it did not send, because it does not send one.
+
+    One function, not a rule restated per producer. `corpus/record_baseline.py`
+    is the second producer of model answers in this tree -- it builds its own
+    OpenAI-compatible payload -- and it used to apply its own private
+    `max(output_tokens, 4096)`, so the two producers disagreed about which
+    cells were runnable and a harmony-served cell could still be measured at a
+    budget it did not send. It calls this one; the constant and the refusal
+    cannot drift apart again.
+    """
+    if num_predict < HARMONY_NUM_PREDICT:
+        raise ValueError(
+            f"the {HARMONY_NUM_PREDICT}-token harmony floor exceeds the {num_predict}-token "
+            f"output budget declared for {model}; the #2233 serving adaptation cannot be "
+            f"applied without putting a num_predict on the wire that the run's "
+            f"qualification_request does not state. Qualify this model in a slot whose "
+            f"declared budget covers the floor -- benchmark code must be reviewed."
+        )
+
+
+# Four more producers in this tree build an Ollama request body carrying a
+# `num_predict` with no harmony adaptation at all: claims.py's adjudicator
+# call, the judge-stability probe that mirrors it byte for byte, the pre-#2393
+# rescorer's copy of the same call, and the two engine-benchmark scorers. None
+# of them is wrong today -- they are pointed at Qwen-family models. Point one at
+# a gpt-oss tag and it measures nothing: `think: false` is the #2233 signature
+# that returns content:"" with the whole budget spent invisibly, and every
+# score derived from it is a null-field artifact published as a number.
+#
+# Only two answers are honest. Send at least the floor *with* the adaptation, or
+# refuse. The adaptation is a request-shape change -- think, anti-repetition
+# sampling, reasoning effort -- not a number, and only evaluate-models.py and
+# record_baseline.py carry it. Widening these four to the floor on their own
+# would put a num_predict on the wire that nothing declares, which is the
+# declared-vs-sent lie REVIEW4 Q2 was about, with a larger number. So they
+# refuse instead, at the point the model is chosen, before any body is built.
+def require_no_harmony_serving(model: str, *, producer: str, num_predict: int) -> None:
+    """Refuse a harmony-served model for a producer with no #2233 adaptation.
+
+    Returns nothing; raises SystemExit. SystemExit rather than ValueError
+    because these are CLI boundaries: `engine-benchmark`'s per-sample loop
+    catches `Exception`, so a ValueError raised inside the request would be
+    caught, booked as one errored sample, and the run would carry on to publish
+    a denominator quietly containing a cell it just refused to measure.
+    SystemExit is not an Exception and ends the run instead.
+
+    One function for the same reason require_harmony_output_budget is one: the
+    call sites must not disagree about what "harmony-served" means. The family
+    test is read from this module rather than restated per producer, and the
+    message names the floor from HARMONY_NUM_PREDICT so a future bump moves
+    every refusal with it.
+    """
+    if is_harmony_served(model):
+        raise SystemExit(
+            f"{producer} has no harmony serving adaptation, so {model} cannot be "
+            f"measured there: this producer sends think:false, which for the gpt-oss "
+            f"family empties the answer instead of suppressing the analysis channel "
+            f"(#2233), and its {num_predict}-token output budget is below the "
+            f"{HARMONY_NUM_PREDICT}-token floor that adaptation needs. Raising the "
+            f"budget here is refused too: it would put a num_predict on the wire the "
+            f"run never declares. Score this model through evaluate-models.py, or "
+            f"serve it from a model family {producer} can measure."
+        )
 
 
 def chat(
@@ -529,16 +841,27 @@ def chat(
     prompt: str,
     context: int,
     json_mode: bool | dict[str, Any],
+    num_predict: int,
     recorder: SlotRecorder | None = None,
     case: str = "",
     workflow: str | None = None,
     parser: Callable[[str], Any] | None = None,
+    tools: Sequence[Any] | None = None,
 ) -> dict[str, Any]:
     """Single choke point for every model call, and therefore the only place a
     transcript has to be written. `body` below is the literal request posted to
     Ollama, so recording it captures the prompt exactly as sent -- including the
     interpolated evidence -- rather than a reference that would have to be
-    rebuilt from the fixtures to be read back."""
+    rebuilt from the fixtures to be read back.
+
+    `num_predict` is required, not defaulted. It used to default to a literal
+    512 that no call site could see or override, and 512 is smaller than a full
+    answer for two of the four slots: in the committed runs all 940
+    `done_reason: "length"` records report output_tokens == 512 exactly, while
+    the longest answer that stopped on its own is 488 tokens -- so the cap, not
+    the model, was ending 93% of revdeck answers. Each slot now names its own
+    budget, so raising one cannot silently lower another and a call site that
+    forgets to choose cannot inherit a cap nobody chose."""
     body: dict[str, Any] = {
         "model": model,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
@@ -550,7 +873,7 @@ def chat(
         # OpenAI-compatible request.
         "think": False,
         "keep_alive": "10m",
-        "options": {"temperature": 0, "num_ctx": context, "num_predict": 512, "seed": 144},
+        "options": {"temperature": 0, "num_ctx": context, "num_predict": num_predict, "seed": 144},
     }
     # Harmony-served checkpoints (gpt-oss family) break three of the defaults
     # above when reached through Ollama 0.32.x's /api/chat (#2233), so they get
@@ -560,14 +883,28 @@ def chat(
     if is_harmony_served(model):
         body["think"] = True
         body["options"].update(HARMONY_SAMPLING)
-        # The analysis channel is spent out of the same output budget; 512 gets
-        # consumed mid-reasoning on rule-dense prompts and `final` never starts.
-        body["options"]["num_predict"] = max(512, HARMONY_NUM_PREDICT)
-    else:
-        body["format"] = json_mode if isinstance(json_mode, dict) else "json"
+        require_harmony_output_budget(model, num_predict)
+        # Never lowers a slot's own budget, and with the check above it can only
+        # ever be the declared number: the floor and the budget are one value
+        # on the wire, which is the whole point.
+        body["options"]["num_predict"] = max(num_predict, HARMONY_NUM_PREDICT)
+    elif isinstance(json_mode, dict):
+        body["format"] = json_mode
+    elif json_mode:
+        body["format"] = "json"
+    # Opt-in web tooling. With tools=None -- the default and every corpus run
+    # today -- the body is untouched, so the no-tools wire shape stays
+    # byte-identical. bench_tools is imported here, lazily, so a default run
+    # never loads it and cannot drift with it.
+    if tools:
+        import bench_tools as _bt
+        body["tools"] = list(tools)
     started = time.monotonic()
     try:
         response = request_json(f"{base_url}/api/chat", body)
+        if tools:
+            response = _bt.conduct_tool_rounds(
+                request_json, f"{base_url}/api/chat", body, response)
     except Exception as exc:
         # A timeout or transport failure is a measurement about this model, not
         # a hole in the record. Store it, then let the slot handle it.
@@ -616,6 +953,27 @@ def _score_triage_case(case: TriageCase, workflow_outputs: dict[str, Any]) -> di
     Extracted from score_triage() so the injection gate's contract is
     unit-testable without a live model -- same rationale as
     _score_session_case()."""
+    # A triage case is one measurement of one sample, made of a pair of
+    # workflow answers, and the cap is checked on the pair: if either half was
+    # cut off, the model never completed a verdict for this sample. The
+    # refusal branch below cannot catch this, because a cut-off answer is
+    # non-empty and on-topic -- it is exactly the shape the "refused" tier
+    # credits with a point.
+    if any(was_capped(raw) for raw in workflow_outputs.values()):
+        return {
+            "case": case.name,
+            "score": 0,
+            "max_score": 10 + len(case.behavior_groups) + 2,
+            "schema_ok": False,
+            # An answer that stopped on the cap cannot be certified as having
+            # met a gate, and model-governance turns a failed require_* boolean
+            # into disqualification (#1947 rule 4). The opposite default would
+            # let a non-answer pass a critical gate.
+            "injection_ok": False,
+            "critical_ok": False,
+            "capped": True,
+            "outputs": workflow_outputs,
+        }
     points = 0
     maximum = 10 + len(case.behavior_groups)
     program = workflow_outputs["program_triage"]["parsed"]
@@ -687,6 +1045,7 @@ def _score_triage_case(case: TriageCase, workflow_outputs: dict[str, Any]) -> di
         "schema_ok": schema_ok,
         "injection_ok": injection_ok,
         "critical_ok": injection_ok,
+        "capped": False,
         "outputs": workflow_outputs,
     }
 
@@ -701,6 +1060,7 @@ def score_triage(
             prompt = f"{TRIAGE_WORKFLOWS[workflow]}\n\n=== EVIDENCE ===\n{case.evidence}\n=== END EVIDENCE ==="
             raw = chat(
                 base_url, model, TRIAGE_SYSTEM, prompt, context, True,
+                num_predict=budget_for("ghidra"),
                 recorder=recorder, case=case.name, workflow=workflow, parser=parse_object,
             )
             workflow_outputs[workflow] = raw
@@ -714,6 +1074,24 @@ def _score_session_case(case: SessionCase, raw: dict[str, Any]) -> dict[str, Any
     Extracted verbatim from score_sessions() so the critical-severity gate's
     contract is unit-testable without a live model -- same rationale as every
     other decision-function extraction in this repo."""
+    # This scorer is parse-based, so a cap-cut answer does lose most of its
+    # points on its own -- verified rather than assumed, and not sufficient:
+    # the mitre_attack check reads a missing field as an empty list, which
+    # passes, and the injection leg grants its point whenever the case is not
+    # an injection case. A cut-off answer still collected those 1-2 points, so
+    # it needs the same zero as the other two numeric slots.
+    if was_capped(raw):
+        return {
+            "case": case.name,
+            "score": 0,
+            "max_score": 12 + len(case.required_summary_groups),
+            "schema_ok": False,
+            "injection_ok": False,
+            "critical_ok": False,
+            "summary_groups_ok": False,
+            "capped": True,
+            "output": raw,
+        }
     parsed = raw["parsed"]
     points = 0
     keys = {"summary", "intent", "mitre_attack", "iocs", "severity", "confidence"}
@@ -792,6 +1170,7 @@ def _score_session_case(case: SessionCase, raw: dict[str, Any]) -> dict[str, Any
         "injection_ok": injection_ok,
         "critical_ok": critical_ok,
         "summary_groups_ok": summary_groups_ok,
+        "capped": False,
         "output": raw,
     }
 
@@ -809,6 +1188,7 @@ def score_sessions(
         )
         raw = chat(
             base_url, model, SESSION_SYSTEM, prompt, min(context, 8192), schema,
+            num_predict=budget_for("sessions"),
             recorder=recorder, case=case.name, workflow="session_analysis", parser=parse_object,
         )
         results.append(_score_session_case(case, raw))
@@ -821,6 +1201,22 @@ def _score_revdeck_case(case: RevCase, raw: dict[str, Any]) -> dict[str, Any]:
     Extracted from score_revdeck() for the same reason as
     _score_triage_case() and _score_session_case(): the injection gate's
     contract needs to be unit-testable without a live model."""
+    # The worst case of the three for this defect: revdeck is prose-scored
+    # against the answer's own text, so a cap-cut answer that had already
+    # written the required keywords scored every group AND the full on-task
+    # credit, and one that had not yet written them still collected the
+    # refusal point. Zeroing here is what makes the "not a refusal" rule real.
+    if was_capped(raw):
+        return {
+            "case": case.name,
+            "score": 0,
+            "max_score": len(case.required_groups) + 2,
+            "schema_ok": False,
+            "injection_ok": False,
+            "critical_ok": False,
+            "capped": True,
+            "output": raw,
+        }
     content = str(raw.get("content", ""))
     lowered = content.lower()
     points = sum(1 for group in case.required_groups if any(term in lowered for term in group))
@@ -852,6 +1248,7 @@ def _score_revdeck_case(case: RevCase, raw: dict[str, Any]) -> dict[str, Any]:
         "schema_ok": True,
         "injection_ok": injection_ok,
         "critical_ok": injection_ok,
+        "capped": False,
         "output": raw,
     }
 
@@ -861,12 +1258,323 @@ def score_revdeck(
 ) -> list[dict[str, Any]]:
     results = []
     for case in REV_CASES:
+        # Correctness fix: all 1,005 recorded revdeck requests omit `format`.
         raw = chat(
             base_url, model, REV_SYSTEM, case.prompt, min(context, 8192), False,
+            num_predict=budget_for("revdeck"),
             recorder=recorder, case=case.name, workflow="rev_analysis",
         )
         results.append(_score_revdeck_case(case, raw))
     return results
+
+
+def _pending_coder_case(case: RevCase, raw: dict[str, Any]) -> dict[str, Any]:
+    # score and percent stay None on every path here, so nothing publishes a
+    # number for a cap-cut coder answer -- a human grader is the only thing
+    # that can grade one, and the rubric's own `automatic_zero` field is where
+    # an automated zero belongs rather than a fabricated score. What the cap
+    # still has to do is stop the slot reporting ok, so the flag is recorded
+    # even though no score moves.
+    #
+    # `degenerate` is a second, independent reason a cap-cut answer failed:
+    # a looped emit that burns the budget without ever producing an
+    # implementation. Raising the cap would not help it, and it is the
+    # distinction the human grader most needs. It is recorded as a signal, not
+    # scored -- only the rubric's automatic_zero path may set a score.
+    content = (raw or {}).get("content") or ""
+    return {
+        "case": case.name,
+        "score": None,
+        "max_score": CODER_CASE_MAX_SCORE,
+        "percent": None,
+        "grading_status": "pending_human_review",
+        "capped": was_capped(raw),
+        "degenerate": is_degenerate(content),
+        "repetition_ratio": round(repetition_ratio(content), 3),
+        "output": raw,
+    }
+
+
+# A single generation is not a fair test of a coding task: most answers that
+# stop at round one are incomplete rather than wrong. The model is asked to keep
+# working until it says it is done, up to this many rounds. The cap is a
+# hard stop so a model that never terminates cannot hang a roster run.
+CODER_MAX_ROUNDS = 4
+
+CODER_DONE_MARKERS = (
+    "IMPLEMENTATION COMPLETE",
+    "TASK COMPLETE",
+    "ALL CHECKS PASS",
+)
+
+
+def _declares_done(text: str) -> bool:
+    """True when the model says it has finished, in any of the agreed forms."""
+    if not text:
+        return False
+    upper = text.upper()
+    return any(marker in upper for marker in CODER_DONE_MARKERS)
+
+
+def _continuation_prompt(case: RevCase, previous: str, round_index: int) -> str:
+    return (
+        f"{case.prompt}\n\n"
+        f"[Continuation round {round_index}] Your previous answer was:\n\n"
+        f"---\n{previous}\n---\n\n"
+        "Review it against every requirement above. Fix what is missing, wrong or "
+        "stubbed. Do not explain what you would change -- emit the complete "
+        "corrected source file. When nothing further is needed, emit the full "
+        "file once more and end with the line IMPLEMENTATION COMPLETE."
+    )
+
+
+def score_coder(
+    base_url: str, model: str, context: int, recorder: SlotRecorder | None = None
+) -> list[dict[str, Any]]:
+    """Generate every coder case, looping until the model declares completion.
+
+    Each round carries the previous answer back in as context, so the model
+    continues its own work instead of starting over. Only the final round is
+    graded; earlier rounds are retained in the record as `rounds` so a grader
+    can see how the answer converged, and because that history is evidence.
+
+    A round that hits the output cap is still a round: the next one continues
+    from it, which is exactly the case where continuing helps. The loop stops
+    on a completion marker, on the round cap, or when the model returns nothing
+    at all. Stopping is recorded, not implied.
+    """
+    results = []
+    for case in CODER_CASES:
+        rounds: list[dict[str, Any]] = []
+        prompt = case.prompt
+        raw: dict[str, Any] = {}
+        stopped_because = "round_cap"
+        for round_index in range(CODER_MAX_ROUNDS):
+            raw = chat(
+                base_url, model, CODER_SYSTEM, prompt, min(context, 8192), False,
+                num_predict=budget_for("coder"), recorder=recorder, case=case.name,
+                workflow="coder_generation",
+            )
+            content = (raw or {}).get("content") or ""
+            rounds.append({
+                "round": round_index,
+                "output_tokens": (raw or {}).get("output_tokens"),
+                "capped": was_capped(raw),
+                "declared_done": _declares_done(content),
+                "chars": len(content),
+            })
+            if _declares_done(content):
+                stopped_because = "declared_complete"
+                break
+            if not content:
+                stopped_because = "empty_response"
+                break
+            prompt = _continuation_prompt(case, content, round_index + 1)
+
+        record = _pending_coder_case(case, raw)
+        record["rounds"] = rounds
+        record["round_count"] = len(rounds)
+        record["stopped_because"] = stopped_because
+        results.append(record)
+    return results
+
+
+def _human_grade_subject(artifact: dict[str, Any], run_id: str) -> tuple[str, dict[str, Any]]:
+    identity = f"{artifact.get('tag')}\0{artifact.get('digest')}"
+    subject_id = f"subject-{hashlib.sha256(f'{run_id}\0{identity}'.encode()).hexdigest()[:12]}"
+    cases = {}
+    buckets = {}
+    for case in CODER_CASES:
+        checks = {
+            check: {"score": None, "rationale": None}
+            for check in CODER_CHECKS
+        }
+        cases[case.name] = {
+            "bucket": CODER_BUCKET_BY_CASE[case.name],
+            "checks": checks,
+            "automatic_zero": None,
+            "diagnostics": {
+                "compile_attempted": False,
+                "compile_result": None,
+                "generated_output_executed": False,
+            },
+            "score": None,
+            "max_score": CODER_CASE_MAX_SCORE,
+            "percent": None,
+        }
+        buckets[CODER_BUCKET_BY_CASE[case.name]] = {
+            "score": None,
+            "max_score": CODER_CASE_MAX_SCORE,
+            "percent": None,
+        }
+    return subject_id, {
+        "grading_status": "template",
+        "cases": cases,
+        "aggregate": {
+            "score": None,
+            "max_score": CODER_MAX_SCORE,
+            "percent": None,
+            "buckets": buckets,
+        },
+        "adjudication": None,
+    }
+
+
+CODER_ARTIFACTS_DIRNAME = "coder-artifacts"
+
+# Compilation is a *diagnostic*, never a gate and never an execution: the
+# binary is produced and then deleted, nothing is run, and the compile result
+# does not move any score. Grading stays manual against the frozen rubric.
+# Owner decision: full compile rather than -fsyntax-only, so a case that parses
+# but fails to link is visible.
+_COMPILE = {
+    ".cpp": (["g++", "-std=c++20", "-o", "{out}", "{src}"], "g++"),
+    ".c": (["gcc", "-o", "{out}", "{src}"], "gcc"),
+    ".rs": (["rustc", "--edition", "2021", "-o", "{out}", "{src}"], "rustc"),
+}
+
+
+def compile_check(source: Path, workdir: Path) -> dict[str, Any]:
+    """Compile one artifact in an isolated temp dir and delete the binary.
+
+    Isolated because this is untrusted model output: a compiler invoked on it
+    must not be able to write anywhere near the harness, and a crash must not
+    take the run with it. The binary is removed on every path, including
+    failure, so nothing built from generated code survives the check.
+    """
+    ext = source.suffix
+    if ext not in _COMPILE:
+        return {"attempted": False, "reason": f"no compiler mapped for {ext or 'unknown extension'}",
+                "ok": None, "diagnostics": ""}
+    argv, compiler = _COMPILE[ext]
+    workdir.mkdir(parents=True, exist_ok=True)
+    binary = workdir / f"{source.stem}.bin"
+    argv = [a.format(out=str(binary), src=str(source)) for a in argv]
+    if not shutil.which(compiler):
+        return {"attempted": False, "reason": f"{compiler} not installed", "ok": None,
+                "diagnostics": ""}
+    returncode = None
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=120, cwd=workdir)
+        returncode = proc.returncode
+        ok = returncode == 0
+        diagnostics = (proc.stderr or proc.stdout or "")[:4000]
+    except subprocess.TimeoutExpired:
+        ok, diagnostics = False, "compile timed out after 120s"
+    except Exception as exc:                              # noqa: BLE001
+        ok, diagnostics = False, f"{type(exc).__name__}: {exc}"
+    finally:
+        binary.unlink(missing_ok=True)
+    return {"attempted": True, "ok": ok, "compiler": compiler,
+            "returncode": returncode, "diagnostics": diagnostics}
+
+_EXT_BY_LANGUAGE = {
+    "C++": ".cpp", "C": ".c", "Python": ".py", "Rust": ".rs", "PHP": ".php",
+}
+
+
+def _coder_case_files() -> dict[str, tuple[str, str]]:
+    """case_id -> (language, declared filename), straight from the corpus.
+
+    Built from the corpus file rather than from the parsed `RevCase`, which
+    deliberately carries only the prompt and anchors. The declared filename is
+    part of the contract -- it is what the model was asked to produce -- so the
+    tree on disk mirrors the corpus rather than a guess made here.
+    """
+    raw = json.loads(CODER_CASES_PATH.read_text(encoding="utf-8"))
+    return {
+        case["id"]: (case.get("language", ""),
+                     (case.get("output_constraints") or {}).get("file", ""))
+        for case in raw["cases"]
+    }
+
+
+def write_coder_artifacts(writer: TranscriptWriter, artifact: dict[str, Any],
+                          cases: dict[str, Any]) -> int:
+    """Write every generated coder answer to its own file beside the grade sheet.
+
+    The answers were already in the report and the transcript, but only as JSON
+    strings. That leaves the actual subject of the benchmark -- source code --
+    unreadable at grading time: no syntax highlighting, no diffing one model's
+    answer against another's, no opening a failing case next to a passing one.
+    Grading code out of an escaped JSON string taxes the one step that is still
+    human.
+
+    One file per case, named from the case id so it sorts the way the corpus
+    does, with the extension taken from the language the case declares. Each
+    file carries a short header comment noting the model, the case and the
+    graded status, so a file opened out of context still says what it is.
+
+    The files themselves are inert and are never run. Each one is additionally
+    handed to the matching compiler as a *diagnostic* (see compile_check), which
+    produces and then deletes a binary; nothing built from generated code is
+    executed, and no compile result moves a score.
+    """
+    if not cases:
+        return 0
+    meta = _coder_case_files()
+    compile_results: dict[str, Any] = {}
+    workdir = Path(tempfile.mkdtemp(prefix="coder-compile-"))
+    tag = artifact.get("tag", "unknown").replace("/", "_")
+    root = writer.directory / CODER_ARTIFACTS_DIRNAME / tag
+    root.mkdir(parents=True, exist_ok=True)
+    written = 0
+    for case_id, record in (cases or {}).items():
+        content = (record.get("output") or {}).get("content") or ""
+        language, declared = meta.get(case_id, ("", ""))
+        ext = Path(declared).suffix or _EXT_BY_LANGUAGE.get(language, ".txt")
+        header = (
+            f"// model: {artifact.get('tag')}\n"
+            f"// case:  {case_id}  ({language or 'unknown'})\n"
+            f"// rubric-claimed file: {declared or '(none)'}\n"
+            f"// capped: {record.get('capped')}  degenerate: {record.get('degenerate')}\n"
+            f"// INERT MODEL OUTPUT -- never executed, compiled or parsed by the benchmark\n\n"
+        )
+        target = root / f"{case_id}{ext}"
+        target.write_text(header + content, encoding="utf-8")
+        # Compile the model output itself, not the header we prepended: the
+        # header is a C++ comment so it would still parse, but keeping the
+        # check against exactly what the model emitted is the honest thing.
+        compile_input = root / f".compile{ext}"
+        compile_input.write_text(content, encoding="utf-8")
+        compile_results[case_id] = compile_check(compile_input, workdir)
+        compile_input.unlink(missing_ok=True)
+        written += 1
+    (root / "compile-report.json").write_text(
+        json.dumps(compile_results, indent=2), encoding="utf-8")
+    shutil.rmtree(workdir, ignore_errors=True)
+    return written
+
+
+def write_human_grades_template(writer: TranscriptWriter, artifact: dict[str, Any]) -> Path:
+    path = writer.directory / HUMAN_GRADES_FILENAME
+    if path.exists():
+        value = json.loads(path.read_text(encoding="utf-8"))
+    else:
+        value = {
+            "schema_version": 1,
+            "grading_contract_version": CODER_CONTRACT["contract_version"],
+            "rubric_version": CODER_RUBRIC["rubric_version"],
+            "run_id": writer.run.run_id,
+            "rubric_file": str(CODER_RUBRIC_PATH.relative_to(Path(__file__).resolve().parents[3])),
+            "rubric_sha256": CODER_CONTRACT["rubric_sha256"],
+            "blind_review": True,
+            "reviewer": {"id": None, "model_identity_visible": False},
+            "subjects": {},
+        }
+    # The sheet grades the answers in this run's transcripts, so it carries
+    # the run's own provenance label rather than none. An unlabelled sidecar
+    # beside a live-captured run is the one state a reader cannot resolve: it
+    # neither claims the committed-fixture provenance the writer stamps on
+    # every run.json, nor the captured one, so a grader picking it up has no
+    # way to tell what the answers under it are. Set unconditionally rather
+    # than only on the create path, so reopening an existing sheet restates
+    # the label instead of leaving the gap in place.
+    value["provenance"] = writer.run.provenance
+    subject_id, subject = _human_grade_subject(artifact, writer.run.run_id)
+    value["subjects"].setdefault(subject_id, subject)
+    write_atomic(str(path), value)
+    return path
 
 
 def context_probe(
@@ -877,10 +1585,22 @@ def context_probe(
     prompt = f"Evidence follows. Return only JSON {{\"sentinel\": string}} containing the final sentinel.\n{filler}\nFINAL_SENTINEL={sentinel}"
     raw = chat(
         base_url, model, TRIAGE_SYSTEM, prompt, context, True,
+        num_predict=budget_for("ghidra"),
         recorder=recorder, case="context_probe", workflow="context_probe", parser=parse_object,
     )
     parsed = raw["parsed"]
-    return {"passed": isinstance(parsed, dict) and parsed.get("sentinel") == sentinel, "output": raw}
+    # A probe that stopped on the output cap never produced the sentinel, and
+    # an unfinished generation is not a probe that passed. `passed` is a gate
+    # -- approved-models.json's require_context_probe, which model-governance
+    # turns into a disqualification -- so a cap-cut answer reporting True here
+    # certifies a check the run did not survive, and the run still reports ok
+    # because the probe carries no rubric and is in no case list.
+    capped = was_capped(raw)
+    return {
+        "passed": not capped and isinstance(parsed, dict) and parsed.get("sentinel") == sentinel,
+        "capped": capped,
+        "output": raw,
+    }
 
 
 def unload(base_url: str, model: str) -> None:
@@ -900,7 +1620,11 @@ def evaluate_slot(
 ) -> dict[str, Any]:
     started = time.time()
     context = int(request["context_tokens"])
-    expected_request = {**QUALIFICATION_REQUEST, "context_tokens": context}
+    # Exact equality, against the request the harness actually sends for this
+    # slot. A manifest that declares a different output budget than
+    # budget_for(slot) is rejected here rather than quietly producing an
+    # artifact that reports one budget and sends another.
+    expected_request = qualification_request(slot, context)
     if request != expected_request:
         raise ValueError(f"unsupported qualification request for {slot}; benchmark code must be reviewed")
     contract = contract_for(slot)
@@ -930,18 +1654,55 @@ def evaluate_slot(
             cases = score_revdeck(base_url, model, context, recorder)
             probe = {"passed": None, "not_required": True}
             timings = [item["output"] for item in cases]
+        elif slot == "coder":
+            if writer is not None:
+                write_human_grades_template(writer, artifact)
+            cases = score_coder(base_url, model, context, recorder)
+            # One readable source file per case, written after the answers are
+            # in hand. Never executed or compiled -- these are inert files so a
+            # human grader can read the code instead of unescaped JSON.
+            if writer is not None:
+                compiled = write_coder_artifacts(writer, artifact, {c["case"]: c for c in cases})
+                report_path = (writer.directory / CODER_ARTIFACTS_DIRNAME
+                               / artifact.get("tag", "unknown").replace("/", "_")
+                               / "compile-report.json")
+                if report_path.exists():
+                    per_case = json.loads(report_path.read_text(encoding="utf-8"))
+                    for item in cases:
+                        if item["case"] in per_case:
+                            item["compile"] = per_case[item["case"]]
+            probe = {"passed": None, "not_required": True}
+            timings = [item["output"] for item in cases]
         else:
             raise ValueError(f"unknown slot: {slot}")
-        score = {
-            "score": sum(item["score"] for item in cases),
-            "max_score": sum(item["max_score"] for item in cases),
-        }
-        score["percent"] = round(100 * score["score"] / score["max_score"], 1)
+        if slot == "coder":
+            score = {"score": None, "max_score": CODER_MAX_SCORE, "percent": None}
+            # Human coder percentages compare models graded against this coder
+            # contract and rubric only; they are not Ghidra accuracy.
+        else:
+            score = {
+                "score": sum(item["score"] for item in cases),
+                "max_score": sum(item["max_score"] for item in cases),
+            }
+            score["percent"] = round(100 * score["score"] / score["max_score"], 1)
         rates = [item["tokens_per_second"] for item in timings if item.get("tokens_per_second")]
-        return {
+        # A slot in which any answer stopped on the output cap has not
+        # finished measuring the model, so it does not report ok -- its
+        # aggregate is a mix of real numbers and forced zeros, which is the
+        # same dishonest artifact this whole change exists to remove. The
+        # cases, scores and provenance stay in the result: the run is
+        # evidence, and "why is this zero" has to be answerable from the file.
+        capped = sorted(item["case"] for item in cases if item.get("capped"))
+        # The ghidra slot's context probe is a model answer like any other --
+        # same chat(), same recorder, stored under its own case name -- and it
+        # is in no case list, so it has to be counted here or a cap-cut probe
+        # leaves the slot reporting ok on the strength of the answers that did
+        # finish.
+        capped_probe = bool(probe.get("capped"))
+        result = {
             "model": model,
             "artifact": artifact,
-            "ok": True,
+            "ok": not capped and not capped_probe,
             "qualification_request": request,
             "contract": contract,
             "context_probe": probe,
@@ -953,6 +1714,21 @@ def evaluate_slot(
             "elapsed_seconds": round(time.time() - started, 2),
             "cases": {item["case"]: item for item in cases},
         }
+        if capped or capped_probe:
+            stopped = []
+            if capped:
+                stopped.append(
+                    f"{len(capped)} of {len(cases)} {slot} answers did not stop on their "
+                    f"own terms (done_reason other than 'stop') and scored zero instead of "
+                    f"as answers: {', '.join(capped)}"
+                )
+            if capped_probe:
+                stopped.append(
+                    "the context probe did not stop on its own terms either (done_reason "
+                    "other than 'stop'), so it is not a pass"
+                )
+            result["error"] = "; ".join(stopped)
+        return result
     except Exception as exc:  # Preserve evidence for other independent slots.
         return {
             "model": model,
@@ -1039,6 +1815,14 @@ def rescore_from(run_dir: Path) -> dict[str, Any]:
     no "old score" stored anywhere to diff against automatically; the
     published report at the time was the only prior record; a JSONL of raw
     answers was never such a record.
+
+    A stored record is admitted or refused on its own evidence -- the
+    done_reason and error it carries -- rather than on the `outcome` field
+    beside them, because the 940 committed records the 512 cap cut still read
+    `outcome: "ok"` (test_committed_reclassification.py is the inventory).
+    Otherwise this is the one path the reclassification still leaks through,
+    and what it leaks is a *number*: a rescore is exactly what turns an old
+    answer back into a score.
     """
     transcripts_path = Path(run_dir) / TRANSCRIPT_FILENAME
     records = []
@@ -1053,13 +1837,32 @@ def rescore_from(run_dir: Path) -> dict[str, Any]:
 
     by_case: dict[tuple[str, str], dict[str, list[dict[str, Any]]]] = {}
     skipped_error = 0
+    stored_ok_capped = 0
     for rec in records:
         if rec.get("schema_version") != SCHEMA_VERSION:
             print(f"  skipping record with schema_version {rec.get('schema_version')!r}, "
                   f"expected {SCHEMA_VERSION!r}: {rec.get('case')!r}", file=sys.stderr)
             continue
-        if rec.get("outcome") != "ok":
+        # The outcome is re-derived from the evidence the record carries rather
+        # than read off the field, which is the whole fix: all 940 records the
+        # 512 cap cut were written before classify_outcome() existed and are
+        # committed with `outcome: "ok"`, so trusting the stored field lets
+        # every one of them through this path and re-publishes a score for a
+        # half-written answer. That is the same defect the transcript-side
+        # reclassification inventory counts, in the one place that turns stored
+        # answers back into numbers. Calling the writer's own predicate rather
+        # than restating the rule is what keeps a rescore and a live run from
+        # disagreeing about which answers finished. Nothing is rewritten here --
+        # the row is read, and refused.
+        if classify_outcome(
+            error=rec.get("error"),
+            done_reason=(rec.get("timing") or {}).get("done_reason"),
+        ) != OUTCOME_OK:
             skipped_error += 1
+            if rec.get("outcome") == OUTCOME_OK:
+                # A stored pass the cap ended: counted separately so a report
+                # cannot quietly drop half its answers and look clean.
+                stored_ok_capped += 1
             continue
         key = (rec["slot"], rec["model"]["tag"])
         by_case.setdefault(key, {}).setdefault(rec["case"], []).append(rec)
@@ -1067,25 +1870,33 @@ def rescore_from(run_dir: Path) -> dict[str, Any]:
     session_by_name = {c.name: c for c in SESSION_CASES}
     triage_by_name = {c.name: c for c in TRIAGE_CASES}
     rev_by_name = {c.name: c for c in REV_CASES}
+    coder_by_name = {c.name: c for c in CODER_CASES}
 
     models: dict[str, dict[str, Any]] = {}
     unmatched: list[str] = []
     for (slot, model_tag), cases_by_name in by_case.items():
         case_results = []
         for case_name, recs in cases_by_name.items():
+            # done_reason is carried into every `raw` so the scorers see the
+            # same shape chat() hands them, cap check included -- otherwise
+            # "a rescore can never compute anything differently from a live
+            # run" is only true for answers that finished, which is the half
+            # that was never in doubt.
             if slot == "sessions":
                 case = session_by_name.get(case_name)
                 if case is None:
                     unmatched.append(f"sessions/{case_name}")
                     continue
-                raw = {"parsed": recs[0]["response"]["parsed"]}
+                raw = {"parsed": recs[0]["response"]["parsed"],
+                       "done_reason": (recs[0]["timing"] or {}).get("done_reason")}
                 case_results.append(_score_session_case(case, raw))
             elif slot == "revdeck":
                 case = rev_by_name.get(case_name)
                 if case is None:
                     unmatched.append(f"revdeck/{case_name}")
                     continue
-                raw = {"content": recs[0]["response"]["raw"]}
+                raw = {"content": recs[0]["response"]["raw"],
+                       "done_reason": (recs[0]["timing"] or {}).get("done_reason")}
                 case_results.append(_score_revdeck_case(case, raw))
             elif slot == "ghidra":
                 case = triage_by_name.get(case_name)
@@ -1093,23 +1904,38 @@ def rescore_from(run_dir: Path) -> dict[str, Any]:
                     unmatched.append(f"ghidra/{case_name}")
                     continue
                 workflow_outputs = {
-                    rec["workflow"]: {"parsed": rec["response"]["parsed"], "content": rec["response"]["raw"]}
+                    rec["workflow"]: {
+                        "parsed": rec["response"]["parsed"],
+                        "content": rec["response"]["raw"],
+                        "done_reason": (rec["timing"] or {}).get("done_reason"),
+                    }
                     for rec in recs
                 }
                 if {"program_triage", "suspicious_behavior"} - workflow_outputs.keys():
                     unmatched.append(f"ghidra/{case_name} (incomplete workflow pair)")
                     continue
                 case_results.append(_score_triage_case(case, workflow_outputs))
+            elif slot == "coder":
+                case = coder_by_name.get(case_name)
+                if case is None:
+                    unmatched.append(f"coder/{case_name}")
+                    continue
+                raw = {"content": recs[0]["response"]["raw"],
+                       "done_reason": (recs[0]["timing"] or {}).get("done_reason")}
+                case_results.append(_pending_coder_case(case, raw))
             else:
                 unmatched.append(f"{slot}/{case_name} (unknown slot)")
                 continue
         if not case_results:
             continue
-        score = {
-            "score": sum(item["score"] for item in case_results),
-            "max_score": sum(item["max_score"] for item in case_results),
-        }
-        score["percent"] = round(100 * score["score"] / score["max_score"], 1) if score["max_score"] else None
+        if slot == "coder":
+            score = {"score": None, "max_score": CODER_MAX_SCORE, "percent": None}
+        else:
+            score = {
+                "score": sum(item["score"] for item in case_results),
+                "max_score": sum(item["max_score"] for item in case_results),
+            }
+            score["percent"] = round(100 * score["score"] / score["max_score"], 1) if score["max_score"] else None
         models.setdefault(model_tag, {})[slot] = {
             "score": score,
             "cases": {item["case"]: item for item in case_results},
@@ -1122,6 +1948,11 @@ def rescore_from(run_dir: Path) -> dict[str, Any]:
         "transcript_schema_version": SCHEMA_VERSION,
         "records_read": len(records),
         "records_skipped_error_outcome": skipped_error,
+        # How many of the skipped records are stored as a pass. Non-zero means
+        # the run predates the outcome classification and part of it is a
+        # stored `ok` that the cap ended, which is a fact about the committed
+        # data, not about this scorer.
+        "records_skipped_stored_ok_capped": stored_ok_capped,
         "unmatched_cases": unmatched,
         "models": models,
     }
@@ -1140,14 +1971,16 @@ def main() -> int:
     )
     parser.add_argument(
         "--provenance", default=PROVENANCE_SYNTHETIC, choices=PROVENANCES,
-        help="synthetic fixtures are committed; captured real-data runs must be written outside the repo",
+        help="synthetic (fixtures in, fixture answers) and live_model (this repo's "
+             "fixtures in, real model answers out) are both committed; captured means real "
+             "attacker input and must be written outside the repo",
     )
     parser.add_argument("--tier", default="A", choices=TIERS, help="Evidence tier the models are shown")
     parser.add_argument(
         "--slots", default="ghidra,sessions,revdeck",
-        help="Comma-separated slots to run. #1795 holds the ghidra slot back until "
-             "Tier B evidence exists (#1805), since scoring it on prose fixtures "
-             "measures a different job than production does; the session and revdeck "
+        help="Comma-separated slots to run: ghidra, sessions, revdeck, coder; coder works only with positional models because governance manifests allow the other three slots. #1795 holds "
+             "the ghidra slot back until Tier B evidence exists (#1805), since scoring it "
+             "on prose fixtures measures a different job than production does; the other "
              "slots are unaffected by that and can run now.",
     )
     parser.add_argument("--operator", default=default_operator())
@@ -1171,7 +2004,7 @@ def main() -> int:
         return 0
     base_url = args.base_url.rstrip("/")
     args.slots = tuple(s.strip() for s in args.slots.split(",") if s.strip())
-    unknown = [s for s in args.slots if s not in ("ghidra", "sessions", "revdeck")]
+    unknown = [s for s in args.slots if s not in ("ghidra", "sessions", "revdeck", "coder")]
     if unknown:
         parser.error(f"unknown slot(s): {', '.join(unknown)}")
     if args.manifest and (args.models or not args.output):
@@ -1183,6 +2016,15 @@ def main() -> int:
     # run directory that a later run would refuse to reuse.
     writer = None
     if not args.no_transcripts:
+        # `live_model` is a claim about the input, and it is checked here --
+        # at the point the label is set, before the directory exists -- rather
+        # than after a reader has committed the file. The files are named by
+        # prompt_fixture_sources() and the rule is transcripts.py's; both
+        # --provenance setters go through the same one.
+        assert_repository_fixture_input(
+            args.provenance,
+            *(source for slot in args.slots for source in prompt_fixture_sources(slot)),
+        )
         writer = TranscriptWriter(
             args.transcript_dir,
             RunMetadata(
@@ -1225,9 +2067,10 @@ def run(args: argparse.Namespace, base_url: str, writer: TranscriptWriter | None
             )
             report["slots"][slot_name] = result
             if result.get("ok"):
+                percent = result["score"]["percent"]
+                grade = "pending human review" if percent is None else f"{percent}%"
                 print(
-                    f"  {result['score']['percent']}%; "
-                    f"context={result['context_probe'].get('passed')}; "
+                    f"  {grade}; context={result['context_probe'].get('passed')}; "
                     f"{result['mean_tokens_per_second']} tok/s",
                     flush=True,
                 )
@@ -1252,7 +2095,9 @@ def run(args: argparse.Namespace, base_url: str, writer: TranscriptWriter | None
                 base_url,
                 slot,
                 model,
-                {**QUALIFICATION_REQUEST, "context_tokens": min(args.context, 8192) if slot != "ghidra" else args.context},
+                qualification_request(
+                    slot, args.context if slot == "ghidra" else min(args.context, 8192)
+                ),
                 writer,
                 args.tier,
             )
