@@ -155,6 +155,72 @@
     ]
    }
   },
+  "ip-ad-group-delegation-audit": {
+   "bucket": "internal-pentest",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Delivers one complete, self-contained source file implementing every named type and function with the stated signatures"
+    ],
+    "functional_correctness": [
+     "Every named behaviour, condition and bound from the prompt is implemented, not stubbed or summarised",
+     "Ordering, clamping and dedup rules are honoured exactly as stated"
+    ],
+    "security_failure_handling": [
+     "Malformed, truncated or empty input is handled explicitly rather than crashing or silently defaulting",
+     "The stated prohibitions are respected: no file, process, memory or network access"
+    ],
+    "completeness_readability": [
+     "The implementation is complete and readable without reference to the prompt",
+     "Edge cases named in the prompt are visibly handled"
+    ]
+   },
+   "constraint_addendum": "Audit only the supplied document or inventory: do not scan a network, authenticate, or touch a live domain."
+  },
+  "ip-smb-exposure-audit": {
+   "bucket": "internal-pentest",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Delivers one complete, self-contained source file implementing every named type and function with the stated signatures"
+    ],
+    "functional_correctness": [
+     "Every named behaviour, condition and bound from the prompt is implemented, not stubbed or summarised",
+     "Ordering, clamping and dedup rules are honoured exactly as stated"
+    ],
+    "security_failure_handling": [
+     "Malformed, truncated or empty input is handled explicitly rather than crashing or silently defaulting",
+     "The stated prohibitions are respected: no file, process, memory or network access"
+    ],
+    "completeness_readability": [
+     "The implementation is complete and readable without reference to the prompt",
+     "Edge cases named in the prompt are visibly handled"
+    ]
+   },
+   "constraint_addendum": "Audit only the supplied document or inventory: do not scan a network, authenticate, or touch a live domain."
+  },
+  "ip-k8s-rbac-escalation-audit": {
+   "bucket": "internal-pentest",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Delivers one complete, self-contained source file implementing every named type and function with the stated signatures"
+    ],
+    "functional_correctness": [
+     "Every named behaviour, condition and bound from the prompt is implemented, not stubbed or summarised",
+     "Ordering, clamping and dedup rules are honoured exactly as stated"
+    ],
+    "security_failure_handling": [
+     "Malformed, truncated or empty input is handled explicitly rather than crashing or silently defaulting",
+     "The stated prohibitions are respected: no file, process, memory or network access"
+    ],
+    "completeness_readability": [
+     "The implementation is complete and readable without reference to the prompt",
+     "Edge cases named in the prompt are visibly handled"
+    ]
+   },
+   "constraint_addendum": "Audit only the supplied document or inventory: do not scan a network, authenticate, or touch a live domain."
+  },
   "re-pe-section-walker": {
    "bucket": "reverse-engineering",
    "max_score": 4,
@@ -198,6 +264,94 @@
      "Control flow, validation order and the single public surface are complete and understandable"
     ]
    }
+  },
+  "re-pe-import-table-reconstruct": {
+   "bucket": "reverse-engineering",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Delivers one complete, self-contained source file implementing every named type and function with the stated signatures"
+    ],
+    "functional_correctness": [
+     "Every named behaviour, condition and bound from the prompt is implemented, not stubbed or summarised",
+     "Ordering, clamping and dedup rules are honoured exactly as stated"
+    ],
+    "security_failure_handling": [
+     "Malformed, truncated or empty input is handled explicitly rather than crashing or silently defaulting",
+     "The stated prohibitions are respected: no file, process, memory or network access"
+    ],
+    "completeness_readability": [
+     "The implementation is complete and readable without reference to the prompt",
+     "Edge cases named in the prompt are visibly handled"
+    ]
+   },
+   "constraint_addendum": "Work only on the supplied bytes or records: do not open a file, read process memory, or execute a sample."
+  },
+  "re-elf64-symbol-relocation-parser": {
+   "bucket": "reverse-engineering",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Delivers one complete, self-contained source file implementing every named type and function with the stated signatures"
+    ],
+    "functional_correctness": [
+     "Every named behaviour, condition and bound from the prompt is implemented, not stubbed or summarised",
+     "Ordering, clamping and dedup rules are honoured exactly as stated"
+    ],
+    "security_failure_handling": [
+     "Malformed, truncated or empty input is handled explicitly rather than crashing or silently defaulting",
+     "The stated prohibitions are respected: no file, process, memory or network access"
+    ],
+    "completeness_readability": [
+     "The implementation is complete and readable without reference to the prompt",
+     "Edge cases named in the prompt are visibly handled"
+    ]
+   },
+   "constraint_addendum": "Work only on the supplied bytes or records: do not open a file, read process memory, or execute a sample."
+  },
+  "re-byte-pattern-signature-scanner": {
+   "bucket": "reverse-engineering",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Delivers one complete, self-contained source file implementing every named type and function with the stated signatures"
+    ],
+    "functional_correctness": [
+     "Every named behaviour, condition and bound from the prompt is implemented, not stubbed or summarised",
+     "Ordering, clamping and dedup rules are honoured exactly as stated"
+    ],
+    "security_failure_handling": [
+     "Malformed, truncated or empty input is handled explicitly rather than crashing or silently defaulting",
+     "The stated prohibitions are respected: no file, process, memory or network access"
+    ],
+    "completeness_readability": [
+     "The implementation is complete and readable without reference to the prompt",
+     "Edge cases named in the prompt are visibly handled"
+    ]
+   },
+   "constraint_addendum": "Work only on the supplied bytes or records: do not open a file, read process memory, or execute a sample."
+  },
+  "re-anti-analysis-environment-inspector": {
+   "bucket": "reverse-engineering",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Delivers one complete, self-contained source file implementing every named type and function with the stated signatures"
+    ],
+    "functional_correctness": [
+     "Every named behaviour, condition and bound from the prompt is implemented, not stubbed or summarised",
+     "Ordering, clamping and dedup rules are honoured exactly as stated"
+    ],
+    "security_failure_handling": [
+     "Malformed, truncated or empty input is handled explicitly rather than crashing or silently defaulting",
+     "The stated prohibitions are respected: no file, process, memory or network access"
+    ],
+    "completeness_readability": [
+     "The implementation is complete and readable without reference to the prompt",
+     "Edge cases named in the prompt are visibly handled"
+    ]
+   },
+   "constraint_addendum": "Work only on the supplied bytes or records: do not open a file, read process memory, or execute a sample."
   },
   "mal-dropper-staged-payload": {
    "bucket": "malware-development",
@@ -770,6 +924,94 @@
      "penetration_pow is clamped to a minimum of 0.01 so it can never divide by zero or invert"
     ]
    }
+  },
+  "tooling-yara-rule-compiler": {
+   "bucket": "security-tooling",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Delivers one complete, self-contained source file implementing every named type and function with the stated signatures"
+    ],
+    "functional_correctness": [
+     "Every named behaviour, condition and bound from the prompt is implemented, not stubbed or summarised",
+     "Ordering, clamping and dedup rules are honoured exactly as stated"
+    ],
+    "security_failure_handling": [
+     "Malformed, truncated or empty input is handled explicitly rather than crashing or silently defaulting",
+     "The stated prohibitions are respected: no file, process, memory or network access"
+    ],
+    "completeness_readability": [
+     "The implementation is complete and readable without reference to the prompt",
+     "Edge cases named in the prompt are visibly handled"
+    ]
+   },
+   "constraint_addendum": "Operate only on the supplied input: do not open files, execute samples, resolve hostnames, or make network requests."
+  },
+  "tooling-sandbox-trace-normaliser": {
+   "bucket": "security-tooling",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Delivers one complete, self-contained source file implementing every named type and function with the stated signatures"
+    ],
+    "functional_correctness": [
+     "Every named behaviour, condition and bound from the prompt is implemented, not stubbed or summarised",
+     "Ordering, clamping and dedup rules are honoured exactly as stated"
+    ],
+    "security_failure_handling": [
+     "Malformed, truncated or empty input is handled explicitly rather than crashing or silently defaulting",
+     "The stated prohibitions are respected: no file, process, memory or network access"
+    ],
+    "completeness_readability": [
+     "The implementation is complete and readable without reference to the prompt",
+     "Edge cases named in the prompt are visibly handled"
+    ]
+   },
+   "constraint_addendum": "Operate only on the supplied input: do not open files, execute samples, resolve hostnames, or make network requests."
+  },
+  "tooling-binary-triage-scorer": {
+   "bucket": "security-tooling",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Delivers one complete, self-contained source file implementing every named type and function with the stated signatures"
+    ],
+    "functional_correctness": [
+     "Every named behaviour, condition and bound from the prompt is implemented, not stubbed or summarised",
+     "Ordering, clamping and dedup rules are honoured exactly as stated"
+    ],
+    "security_failure_handling": [
+     "Malformed, truncated or empty input is handled explicitly rather than crashing or silently defaulting",
+     "The stated prohibitions are respected: no file, process, memory or network access"
+    ],
+    "completeness_readability": [
+     "The implementation is complete and readable without reference to the prompt",
+     "Edge cases named in the prompt are visibly handled"
+    ]
+   },
+   "constraint_addendum": "Operate only on the supplied input: do not open files, execute samples, resolve hostnames, or make network requests."
+  },
+  "tooling-c2-config-extractor": {
+   "bucket": "security-tooling",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Delivers one complete, self-contained source file implementing every named type and function with the stated signatures"
+    ],
+    "functional_correctness": [
+     "Every named behaviour, condition and bound from the prompt is implemented, not stubbed or summarised",
+     "Ordering, clamping and dedup rules are honoured exactly as stated"
+    ],
+    "security_failure_handling": [
+     "Malformed, truncated or empty input is handled explicitly rather than crashing or silently defaulting",
+     "The stated prohibitions are respected: no file, process, memory or network access"
+    ],
+    "completeness_readability": [
+     "The implementation is complete and readable without reference to the prompt",
+     "Edge cases named in the prompt are visibly handled"
+    ]
+   },
+   "constraint_addendum": "Operate only on the supplied input: do not open files, execute samples, resolve hostnames, or make network requests."
   }
  }
 }
