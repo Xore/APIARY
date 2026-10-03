@@ -19,21 +19,44 @@ transcripts are discarded:
 So the raw text is the durable artifact and the score is derived from it, not
 the other way round.
 
-Storage is split by data provenance, not by convenience:
+Storage is split by the provenance of the INPUT, not by convenience:
 
 - `synthetic` -- #159's corpus binaries and `evaluate-models.py`'s fixtures
   (TEST-NET addresses, reserved names, fake credentials, reviewed before
-  commit). Committed to the repo under `docs/benchmarks/runs/<date>-<run_id>/`
-  so rounds stay comparable across time. There is no secret in them.
+  commit), run against a model whose answers are themselves fixtures. Committed
+  to the repo under `docs/benchmarks/runs/<date>-<run_id>/` so rounds stay
+  comparable across time. There is no secret in them.
+- `live_model` -- synthetic input, live answers. The prompts are still this
+  repository's fixtures, which is what makes the transcripts committable, but
+  they were answered by a real served model rather than replayed: a pinned
+  artifact digest, a `done_reason` the harness did not choose, and an answer no
+  one wrote by hand. It is a separate member rather than `synthetic` because
+  reading a real measurement as a fixture answer is the error that lets a
+  fabricated-looking result pass unexamined, and it is silent -- nothing
+  downstream reads the field. It is *not* `captured`: nothing in such a run is
+  attacker-supplied, so the reason `captured` is kept out of the working tree
+  does not apply and the transcripts belong in the repo with the rest.
 - `captured` -- runs against real honeypot data. These contain real attacker
   IPs and payloads, so they are written outside the repository with bounded
   retention and the issue carries only aggregates and pointers. Writing them
   into the working tree is refused here rather than left to reviewer vigilance.
 
+The first two are committable and the third is not, so `PROVENANCES` orders the
+committable members first and the refused one last: the tuple is also the
+`--provenance` choices list, and the refusal below is the one value it has to
+single out.
+
+The committable half is a claim about the *input*, so the producers check it
+rather than assert it: `assert_repository_fixture_input()` refuses a
+`live_model` run whose prompt sources are not files in this tree, which is the
+source-side twin of the destination-side refusal in `TranscriptWriter.__init__`.
+A free argparse choice is what made the claim worthless; the enum member is
+only worth having once something reads it.
+
 This partly supersedes `docs/analysis/ghidra/benchmarks/README.md`, which tells
 the operator to preserve the raw report outside the repository for everything.
 That rule was written when the report was a score summary; it still governs
-`captured` runs, and `synthetic` runs now commit their transcripts instead.
+`captured` runs, and the other two now commit their transcripts instead.
 """
 
 from __future__ import annotations
@@ -48,9 +71,94 @@ from typing import Any
 
 SCHEMA_VERSION = "apiary-benchmark-transcript-v1"
 
+OUTCOME_OK = "ok"
+OUTCOME_ERROR = "error"
+# A generation that did not finish on its own terms. Ollama answers
+# done_reason="length" when generation stops at num_predict. Recording that
+# as `ok` is what let 940 truncated answers in the committed runs -- 928 revdeck
+# and 12 sessions -- pass every `outcome != "ok"` filter downstream and score
+# as full ones.
+#
+# Those 940 records keep the `ok` they were stored with. classify_outcome runs
+# only when a record is written, and the writer refuses to overwrite an existing
+# transcript (see __init__), so this value decides the shape of future rows and
+# reinterprets no committed row. History stays suspect on purpose; fixing it
+# would mean rewriting scores other reports were derived from.
+OUTCOME_TRUNCATED = "truncated"
+# The only done_reason that means the model stopped because it was done.
+# Deliberately a positive list: a done_reason this harness has not seen is a
+# generation it cannot vouch for, and must not be stored as a pass. `None` is
+# carved out because Ollama omits done_reason entirely on some paths -- the
+# #2233 harmony signature returns empty content with no done_reason at all
+# (evaluate-models.py:570-572), and 14 records in docs/benchmarks/runs/ carry
+# none (11 of them errors, 3 ok). Absent is not evidence of truncation; `length`
+# is. Those 3 ok records store content:"" with output_tokens 0, so they were
+# empty when written and stay readable at rescore time.
+CLEAN_DONE_REASONS = ("stop",)
+
+
+def classify_outcome(*, error: str | None, done_reason: Any = None) -> str:
+    """The one place a stored outcome is decided.
+
+    An answer that ran into the output cap is not a completed answer, and
+    every consumer filters on `outcome != "ok"` -- so the value here is what
+    decides whether a partial answer counts downstream.
+
+    `error` is checked first, so a transport failure stays `error` rather than
+    being relabelled by the absence of a done_reason.
+    """
+    if error:
+        return OUTCOME_ERROR
+    if done_reason is not None and done_reason not in CLEAN_DONE_REASONS:
+        return OUTCOME_TRUNCATED
+    return OUTCOME_OK
+
+
+def was_capped(raw: dict[str, Any]) -> bool:
+    """True when generation stopped on the output cap instead of finishing, so
+    `raw` holds half an answer and never got to state a verdict.
+
+    A capped answer scores zero everywhere and is never `ok`. It is not a
+    refusal either: a refusal is a deliberate decline that earns partial
+    credit, whereas a cap-cut answer never reached a verdict to decline with,
+    and paying it the refusal point would hand out credit for an answer the
+    model did not give.
+
+    Deliberately the *same* predicate classify_outcome() stores the record
+    with, so the published score and the stored outcome cannot disagree about
+    which answers completed -- an unrecognised finish reason is
+    uncapped-for-scoring for exactly the reason it is not stored as a pass.
+    Reusing that function rather than restating the rule is what keeps the two
+    from drifting apart again.
+
+    Lives here, beside classify_outcome(), rather than in the one scorer that
+    happened to need it first: the producers that can be handed a capped
+    answer are three (evaluate-models.py, corpus/record_baseline.py and this
+    module's own consumers in claims.py) and `evaluate-models.py` cannot be
+    `import`ed by name. A predicate two of them cannot reach is a predicate one
+    of them reimplements, and the reimplementation is what let a capped corpus
+    answer keep its group hits and a capped record keep its claims.
+
+    `raw` is any mapping carrying a `done_reason` key -- a chat() result, a
+    record_baseline result, or a stored record's `timing` block. `error` is not
+    consulted: a transport failure is an `outcome`, and a caller scoring model
+    output has already decided what to do about one.
+    """
+    return classify_outcome(error=None, done_reason=raw.get("done_reason")) != OUTCOME_OK
+
+
 PROVENANCE_SYNTHETIC = "synthetic"
+# Synthetic input, live answers. See the module docstring: the split is by the
+# provenance of the *input*, and this member is the case that is neither of the
+# other two -- committable like `synthetic` (its prompts are this repo's
+# fixtures, so there is no attacker IP or payload in it) but not fixture
+# answers, which is what `captured` would falsely claim.
+PROVENANCE_LIVE_MODEL = "live_model"
 PROVENANCE_CAPTURED = "captured"
-PROVENANCES = (PROVENANCE_SYNTHETIC, PROVENANCE_CAPTURED)
+# Committable members first, the repo-refused one last: the order is the
+# `--provenance` choices order and it lines the enum up with the single guard
+# in TranscriptWriter.__init__, which has to name `captured` on its own.
+PROVENANCES = (PROVENANCE_SYNTHETIC, PROVENANCE_LIVE_MODEL, PROVENANCE_CAPTURED)
 
 # Tier A: objdump disassembly, what record_baseline.py has always fed models.
 # Tier B: real Ghidra headless JSON, what production actually sees.
@@ -161,6 +269,47 @@ def _is_inside_repo(path: Path) -> bool:
     return True
 
 
+def assert_repository_fixture_input(
+    provenance: str, *sources: os.PathLike[str] | str
+) -> None:
+    """`live_model` claims the run's INPUT is this repository's fixtures.
+
+    That claim is the entire reason the member is committable -- the answers are
+    live, but nothing attacker-supplied is in the file -- and nothing checked
+    it. Both `--provenance` setters are argparse `choices=PROVENANCES`, so
+    before this a caller could file real attacker data under the one label the
+    captured refusal does not catch, and the enum member asserted a property no
+    code ever looked at.
+
+    So the producers name the files their prompts are read from, and this is
+    the check: each one has to be a file inside this repository. That is the
+    same boundary TranscriptWriter.__init__ applies to the *destination* of a
+    captured run, pointed at the *source* of a live-model one. A provenance
+    that does not claim repository-fixture input is none of this function's
+    business and returns immediately, so this adds nothing to what `synthetic`
+    and `captured` do.
+
+    What it cannot catch, stated rather than implied: a prompt pasted from
+    somewhere else into a committed fixture, or a fixture that itself holds
+    real data. Both are diffs a reviewer sees and neither is a flag problem.
+    What is checked is that every byte the harness sends as a prompt is read
+    out of a file in this tree, which is the strongest statement available
+    without a data-flow analysis of the corpus.
+    """
+    if provenance != PROVENANCE_LIVE_MODEL:
+        return
+    for source in sources:
+        path = Path(source)
+        if not path.is_file() or not _is_inside_repo(path):
+            raise ValueError(
+                f"refusing to label this run {PROVENANCE_LIVE_MODEL!r}: its prompts are read "
+                f"from {path}, which is not a file inside the repository ({REPO_ROOT}). "
+                f"{PROVENANCE_LIVE_MODEL!r} means this repository's fixtures in and live model "
+                f"answers out; label it {PROVENANCE_SYNTHETIC!r}, or write it outside the "
+                f"repository with --provenance {PROVENANCE_CAPTURED!r}."
+            )
+
+
 class TranscriptWriter:
     """Appends one JSONL record per model call.
 
@@ -172,6 +321,12 @@ class TranscriptWriter:
     def __init__(self, root: str | os.PathLike[str], run: RunMetadata) -> None:
         self.run = run
         self.directory = Path(root).expanduser() / run.directory_name
+        # `captured` alone, named explicitly rather than expressed as "every
+        # member that is not committable": adding `live_model` to the enum must
+        # not turn this into a set membership test, or real attacker data
+        # relabelled as live-model would walk straight into the working tree.
+        # The other two members are committable because their *input* is this
+        # repository's fixtures, and that is the only thing this guard is about.
         if run.provenance == PROVENANCE_CAPTURED and _is_inside_repo(self.directory):
             raise ValueError(
                 "refusing to write captured-data transcripts inside the repository: "
@@ -251,7 +406,12 @@ class TranscriptWriter:
             # Populated by #1805-f's claim extraction, so an adjudicated verdict
             # can always be traced back to the sentence that produced it.
             "claim_ids": [],
-            "outcome": "error" if error else "ok",
+            # done_reason is the only evidence of how generation ended, and
+            # it is read here rather than at each call site so no caller can
+            # store a cap-truncated answer as a success by forgetting to.
+            "outcome": classify_outcome(
+                error=error, done_reason=(response or {}).get("done_reason")
+            ),
             "error": error,
         }
         self._handle.write(json.dumps(record, sort_keys=True) + "\n")
