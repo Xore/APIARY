@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1421,6 +1422,52 @@ def _human_grade_subject(artifact: dict[str, Any], run_id: str) -> tuple[str, di
 
 CODER_ARTIFACTS_DIRNAME = "coder-artifacts"
 
+# Compilation is a *diagnostic*, never a gate and never an execution: the
+# binary is produced and then deleted, nothing is run, and the compile result
+# does not move any score. Grading stays manual against the frozen rubric.
+# Owner decision: full compile rather than -fsyntax-only, so a case that parses
+# but fails to link is visible.
+_COMPILE = {
+    ".cpp": (["g++", "-std=c++20", "-o", "{out}", "{src}"], "g++"),
+    ".c": (["gcc", "-o", "{out}", "{src}"], "gcc"),
+    ".rs": (["rustc", "--edition", "2021", "-o", "{out}", "{src}"], "rustc"),
+}
+
+
+def compile_check(source: Path, workdir: Path) -> dict[str, Any]:
+    """Compile one artifact in an isolated temp dir and delete the binary.
+
+    Isolated because this is untrusted model output: a compiler invoked on it
+    must not be able to write anywhere near the harness, and a crash must not
+    take the run with it. The binary is removed on every path, including
+    failure, so nothing built from generated code survives the check.
+    """
+    ext = source.suffix
+    if ext not in _COMPILE:
+        return {"attempted": False, "reason": f"no compiler mapped for {ext or 'unknown extension'}",
+                "ok": None, "diagnostics": ""}
+    argv, compiler = _COMPILE[ext]
+    workdir.mkdir(parents=True, exist_ok=True)
+    binary = workdir / f"{source.stem}.bin"
+    argv = [a.format(out=str(binary), src=str(source)) for a in argv]
+    if not shutil.which(compiler):
+        return {"attempted": False, "reason": f"{compiler} not installed", "ok": None,
+                "diagnostics": ""}
+    returncode = None
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=120, cwd=workdir)
+        returncode = proc.returncode
+        ok = returncode == 0
+        diagnostics = (proc.stderr or proc.stdout or "")[:4000]
+    except subprocess.TimeoutExpired:
+        ok, diagnostics = False, "compile timed out after 120s"
+    except Exception as exc:                              # noqa: BLE001
+        ok, diagnostics = False, f"{type(exc).__name__}: {exc}"
+    finally:
+        binary.unlink(missing_ok=True)
+    return {"attempted": True, "ok": ok, "compiler": compiler,
+            "returncode": returncode, "diagnostics": diagnostics}
+
 _EXT_BY_LANGUAGE = {
     "C++": ".cpp", "C": ".c", "Python": ".py", "Rust": ".rs", "PHP": ".php",
 }
@@ -1458,13 +1505,17 @@ def write_coder_artifacts(writer: TranscriptWriter, artifact: dict[str, Any],
     file carries a short header comment noting the model, the case and the
     graded status, so a file opened out of context still says what it is.
 
-    Nothing here is executed, compiled or parsed. These are inert text files
-    holding model output; the benchmark never runs generated code.
+    The files themselves are inert and are never run. Each one is additionally
+    handed to the matching compiler as a *diagnostic* (see compile_check), which
+    produces and then deletes a binary; nothing built from generated code is
+    executed, and no compile result moves a score.
     """
-    meta = _coder_case_files()
-    tag = artifact.get("tag", "unknown").replace("/", "_")
     if not cases:
         return 0
+    meta = _coder_case_files()
+    compile_results: dict[str, Any] = {}
+    workdir = Path(tempfile.mkdtemp(prefix="coder-compile-"))
+    tag = artifact.get("tag", "unknown").replace("/", "_")
     root = writer.directory / CODER_ARTIFACTS_DIRNAME / tag
     root.mkdir(parents=True, exist_ok=True)
     written = 0
@@ -1479,8 +1530,19 @@ def write_coder_artifacts(writer: TranscriptWriter, artifact: dict[str, Any],
             f"// capped: {record.get('capped')}  degenerate: {record.get('degenerate')}\n"
             f"// INERT MODEL OUTPUT -- never executed, compiled or parsed by the benchmark\n\n"
         )
-        (root / f"{case_id}{ext}").write_text(header + content, encoding="utf-8")
+        target = root / f"{case_id}{ext}"
+        target.write_text(header + content, encoding="utf-8")
+        # Compile the model output itself, not the header we prepended: the
+        # header is a C++ comment so it would still parse, but keeping the
+        # check against exactly what the model emitted is the honest thing.
+        compile_input = root / f".compile{ext}"
+        compile_input.write_text(content, encoding="utf-8")
+        compile_results[case_id] = compile_check(compile_input, workdir)
+        compile_input.unlink(missing_ok=True)
         written += 1
+    (root / "compile-report.json").write_text(
+        json.dumps(compile_results, indent=2), encoding="utf-8")
+    shutil.rmtree(workdir, ignore_errors=True)
     return written
 
 
@@ -1600,7 +1662,15 @@ def evaluate_slot(
             # in hand. Never executed or compiled -- these are inert files so a
             # human grader can read the code instead of unescaped JSON.
             if writer is not None:
-                write_coder_artifacts(writer, artifact, {c["case"]: c for c in cases})
+                compiled = write_coder_artifacts(writer, artifact, {c["case"]: c for c in cases})
+                report_path = (writer.directory / CODER_ARTIFACTS_DIRNAME
+                               / artifact.get("tag", "unknown").replace("/", "_")
+                               / "compile-report.json")
+                if report_path.exists():
+                    per_case = json.loads(report_path.read_text(encoding="utf-8"))
+                    for item in cases:
+                        if item["case"] in per_case:
+                            item["compile"] = per_case[item["case"]]
             probe = {"passed": None, "not_required": True}
             timings = [item["output"] for item in cases]
         else:

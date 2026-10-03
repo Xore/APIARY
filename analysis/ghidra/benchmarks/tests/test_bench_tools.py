@@ -185,9 +185,11 @@ class TestCoderArtifacts(unittest.TestCase):
             w = self._writer(Path(tmp))
             n = ev.write_coder_artifacts(w, {"tag": "m:q4"}, self._cases())
             self.assertEqual(n, 2)
-            files = sorted(p.name for p in (Path(tmp) / "coder-artifacts" / "m:q4").iterdir())
-            self.assertEqual(files, ["game-cheat-map-vmap-parser-bvh.cpp",
-                                     "tooling-yara-rule-compiler.py"])
+            root = Path(tmp) / "coder-artifacts" / "m:q4"
+            sources = sorted(p.name for p in root.iterdir() if p.suffix in (".cpp", ".py"))
+            self.assertEqual(sources, ["game-cheat-map-vmap-parser-bvh.cpp",
+                                       "tooling-yara-rule-compiler.py"])
+            self.assertTrue((root / "compile-report.json").exists())
 
     def test_file_carries_provenance_header_and_content(self):
         import tempfile
@@ -254,6 +256,106 @@ class TestCoderArtifacts(unittest.TestCase):
             ext = Path(declared).suffix or ev._EXT_BY_LANGUAGE.get(language, ".txt")
             self.assertTrue(ext.startswith("."), case_id)
             self.assertNotEqual(ext, ".txt", f"{case_id} fell back to .txt")
+
+
+class TestCompileCheck(unittest.TestCase):
+    """Compilation is a diagnostic: it may produce a binary, it never runs one,
+    and no result moves a score. The critical property is that nothing built
+    from generated code survives the check."""
+
+    def setUp(self):
+        self.ev = _load_evaluator()
+
+    def test_valid_cpp_compiles(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as t:
+            src = Path(t) / "ok.cpp"
+            src.write_text("int main(){return 0;}\n")
+            r = self.ev.compile_check(src, Path(t) / "work")
+            self.assertTrue(r["attempted"])
+            self.assertTrue(r["ok"])
+            self.assertEqual(r["returncode"], 0)
+
+    def test_invalid_cpp_fails_with_diagnostics(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as t:
+            src = Path(t) / "bad.cpp"
+            src.write_text("int main(){ this is not c++ }\n")
+            r = self.ev.compile_check(src, Path(t) / "work")
+            self.assertTrue(r["attempted"])
+            self.assertFalse(r["ok"])
+            self.assertNotEqual(r["returncode"], 0)
+            self.assertTrue(r["diagnostics"].strip())
+
+    def test_binary_is_deleted_on_success_and_failure(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as t:
+            work = Path(t) / "work"
+            for name, body in (("ok.cpp", "int main(){return 0;}\n"),
+                               ("bad.cpp", "int main(){ @@@ }\n")):
+                src = Path(t) / name
+                src.write_text(body)
+                self.ev.compile_check(src, work)
+                self.assertEqual(list(work.glob("*.bin")), [], f"{name} left a binary")
+
+    def test_python_and_php_are_skipped_not_failed(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as t:
+            for name in ("x.py", "x.php"):
+                src = Path(t) / name
+                src.write_text("print(1)\n")
+                r = self.ev.compile_check(src, Path(t) / "work")
+                self.assertFalse(r["attempted"])
+                self.assertIsNone(r["ok"])
+                self.assertIn("no compiler mapped", r["reason"])
+
+    def test_missing_compiler_is_reported_not_raised(self):
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as t:
+            src = Path(t) / "x.cpp"
+            src.write_text("int main(){return 0;}\n")
+            with mock.patch.object(self.ev.shutil, "which", return_value=None):
+                r = self.ev.compile_check(src, Path(t) / "work")
+            self.assertFalse(r["attempted"])
+            self.assertIn("not installed", r["reason"])
+
+    def test_compiler_crash_does_not_propagate(self):
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as t:
+            src = Path(t) / "x.cpp"
+            src.write_text("int main(){return 0;}\n")
+            with mock.patch.object(self.ev.subprocess, "run",
+                                   side_effect=OSError("boom")):
+                r = self.ev.compile_check(src, Path(t) / "work")
+            self.assertFalse(r["ok"])
+            self.assertIn("boom", r["diagnostics"])
+
+    def test_compile_report_is_written_alongside_artifacts(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as t:
+            class W:
+                directory = Path(t)
+            ev = self.ev
+            ev.CODER_CASES = ev.CODER_CASES[:1]
+            cases = {"game-cheat-map-vmap-parser-bvh": {
+                "case": "game-cheat-map-vmap-parser-bvh",
+                "output": {"content": "int main(){return 0;}\n"}}}
+            ev.write_coder_artifacts(W(), {"tag": "m:q4"}, cases)
+            report = Path(t) / "coder-artifacts" / "m:q4" / "compile-report.json"
+            self.assertTrue(report.exists())
+            import json
+            data = json.loads(report.read_text())
+            self.assertIn("game-cheat-map-vmap-parser-bvh", data)
+            self.assertTrue(data["game-cheat-map-vmap-parser-bvh"]["ok"])
 
 
 class TestCoderRounds(unittest.TestCase):
