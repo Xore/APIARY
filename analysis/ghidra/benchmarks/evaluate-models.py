@@ -152,7 +152,7 @@ CODER_CORPUS_DIR = Path(__file__).resolve().parent / "corpus"
 CODER_CASES_PATH = CODER_CORPUS_DIR / "coder_cases_v1.json"
 CODER_RUBRIC_PATH = CODER_CORPUS_DIR / "coder_cases_v1_rubric.json"
 CODER_CONTRACT_PATH = CODER_CORPUS_DIR / "coder_cases_v1_contract.json"
-CODER_BUCKETS = ("rust", "python", "c", "php", "internal-pentest")
+CODER_BUCKETS = ("rust", "python", "c", "php", "internal-pentest", "reverse-engineering")
 CODER_CHECKS = (
     "deliverable_present",
     "functional_correctness",
@@ -178,8 +178,15 @@ def _load_coder_artifacts() -> tuple[dict[str, Any], dict[str, Any], dict[str, A
         raise ValueError("coder rubric file does not match its contract hash")
     if case_ids != contract["cases"] or len(case_ids) != contract["case_count"]:
         raise ValueError("coder case order or count does not match its contract")
-    if buckets != list(CODER_BUCKETS) or contract["buckets"] != list(CODER_BUCKETS):
-        raise ValueError("coder corpus must contain one ordered case per required bucket")
+    # One or more cases per bucket, bucket order as declared: v1 carries two
+    # reverse-engineering cases (PE section walking, packed-layer unpacking)
+    # and one case in each of the other buckets. The invariant is coverage of
+    # every bucket in order, not a single case each.
+    if contract["buckets"] != list(CODER_BUCKETS):
+        raise ValueError("coder corpus buckets do not match the required bucket set")
+    ordered = [b for b in CODER_BUCKETS for x in buckets if x == b][:len(buckets)]
+    if buckets != ordered or sorted(set(buckets)) != sorted(CODER_BUCKETS):
+        raise ValueError("coder corpus must contain the required buckets in the declared order")
     if rubric_case_ids != case_ids or generic_checks != CODER_CHECKS:
         raise ValueError("coder rubric cases or generic checks do not match the contract")
     if any(
