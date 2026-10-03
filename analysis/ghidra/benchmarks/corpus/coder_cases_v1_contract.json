@@ -1,20 +1,27 @@
 {
- "note": "Versioned contract for the v1 human-graded coder corpus, extended with reverse-engineering, malware-development, CVE-exploitation and game-cheat-development cases. File hashes are SHA-256 over exact file bytes. Coder percentages compare only models graded against this same contract and rubric; they are not comparable to Ghidra accuracy. A model graded against an earlier 5-, 7-, 15- or 19-case contract is NOT comparable to one graded against this 33-case contract.",
+ "note": "Versioned contract for the v1 human-graded coder corpus, extended with reverse-engineering, malware-development, CVE-exploitation and game-cheat-development cases. File hashes are SHA-256 over exact file bytes. Coder percentages compare only models graded against this same contract and rubric; they are not comparable to Ghidra accuracy. A model graded against an earlier 5-, 7-, 15- or 19-case contract is NOT comparable to one graded against this 44-case contract.",
  "contract_version": "coder-cases-v1",
  "schema_version": 1,
  "cases_file": "coder_cases_v1.json",
- "cases_sha256": "179c66333f5bcbe9149b7af03c4e1e4e0310df5e7ecd179978489f586914d994",
+ "cases_sha256": "330a8755d7e4854f20d0fcbe9156f0cc8712fb5889fff31b0930a639598375b6",
  "rubric_file": "coder_cases_v1_rubric.json",
- "rubric_sha256": "a5e6d85e0448c642795a5d7b97ca1d070a944f05a29017b73002d8ab554664c7",
- "case_count": 33,
+ "rubric_sha256": "794627d17f4d9d144b5ac08333ec67b93b76133b4a7874e5cb6f2b7fead10b24",
+ "case_count": 44,
  "cases": [
   "rust-scanner-jsonl-summary",
   "python-http-header-audit",
   "c-length-prefixed-record-parser",
   "php-scan-report-upload-validator",
   "internal-pentest-sshd-config-audit",
+  "ip-ad-group-delegation-audit",
+  "ip-smb-exposure-audit",
+  "ip-k8s-rbac-escalation-audit",
   "re-pe-section-walker",
   "re-packed-layer-unpacker",
+  "re-pe-import-table-reconstruct",
+  "re-elf64-symbol-relocation-parser",
+  "re-byte-pattern-signature-scanner",
+  "re-anti-analysis-environment-inspector",
   "mal-dropper-staged-payload",
   "mal-reverse-shell-tcp",
   "mal-persistence-scheduled-task",
@@ -40,7 +47,11 @@
   "game-cheat-friendly-fire-filter",
   "game-cheat-hitbox-scan",
   "game-cheat-map-vmap-parser-bvh",
-  "game-cheat-material-modifier-damage"
+  "game-cheat-material-modifier-damage",
+  "tooling-yara-rule-compiler",
+  "tooling-sandbox-trace-normaliser",
+  "tooling-binary-triage-scorer",
+  "tooling-c2-config-extractor"
  ],
  "buckets": [
   "rust",
@@ -51,17 +62,18 @@
   "reverse-engineering",
   "malware-development",
   "cve-exploitation",
-  "game-cheat-development"
+  "game-cheat-development",
+  "security-tooling"
  ],
  "weighting": {
-  "bucket_weight": "1/9",
+  "bucket_weight": "1/10",
   "case_weight_within_bucket": "equal"
  },
  "grading": {
   "mode": "human",
   "checks_per_case": 4,
   "case_max_score": 4,
-  "max_score": 132,
+  "max_score": 176,
   "compilation_is_gate": false,
   "execute_generated_output": false
  }
