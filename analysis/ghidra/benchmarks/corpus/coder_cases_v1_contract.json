@@ -3,9 +3,9 @@
  "contract_version": "coder-cases-v1",
  "schema_version": 1,
  "cases_file": "coder_cases_v1.json",
- "cases_sha256": "3f892df7ca384dbf45ba0d6fde89307e9b3ff70a6839389bbac0d025f1f05d09",
+ "cases_sha256": "f0492a73f064aff79fbe748cda3bc7fe43dea6b07490a86218301926c83d687e",
  "rubric_file": "coder_cases_v1_rubric.json",
- "rubric_sha256": "20504e750c7d59862ddfa6b8b3013ec215f2891560bbe2d2ea9983c46cd6a8be",
+ "rubric_sha256": "cb9726d7b71efdc9a04160e8307f0a73ea245a6401fd43cbbd5ced2887496e2e",
  "case_count": 19,
  "cases": [
   "rust-scanner-jsonl-summary",
@@ -23,10 +23,10 @@
   "mal-c2-beacon-jitter",
   "mal-keylogger-x11",
   "mal-credential-dump-dpapi",
-  "cve-poc-single-shot-http",
   "cve-adaptation-bounds-fix",
   "cve-fuzz-harness-mutator",
-  "cve-patch-diff-triage"
+  "cve-version-triage-blast-radius",
+  "cve-backport-verification-matrix"
  ],
  "buckets": [
   "rust",
