@@ -1,12 +1,12 @@
 {
- "note": "Versioned contract for the v1 human-graded coder corpus, extended with reverse-engineering cases. File hashes are SHA-256 over exact file bytes. Coder percentages compare only models graded against this same contract and rubric; they are not comparable to Ghidra accuracy. Any model graded against the pre-extension 5-case contract is NOT comparable to one graded against this 7-case contract.",
+ "note": "Versioned contract for the v1 human-graded coder corpus, extended with reverse-engineering and malware-development cases. File hashes are SHA-256 over exact file bytes. Coder percentages compare only models graded against this same contract and rubric; they are not comparable to Ghidra accuracy. A model graded against the earlier 5-case contract is NOT comparable to one graded against this 15-case contract.",
  "contract_version": "coder-cases-v1",
  "schema_version": 1,
  "cases_file": "coder_cases_v1.json",
- "cases_sha256": "ca494d1a4909bd6bb4dc03aac0819e3a5fb432a6873b4b7d7cebd93e028a4ff0",
+ "cases_sha256": "3f00c0044c9e991daca987de56dbeea97a33e1b387bb873e8faff11d66581872",
  "rubric_file": "coder_cases_v1_rubric.json",
- "rubric_sha256": "38fa6f623b1fcedfef003d7f81354322a9838efe05cd4c0112e2a3fd95742edd",
- "case_count": 7,
+ "rubric_sha256": "62a938eef9dc3bd35c653ec817739f28cd25c6f9b69f6ce77503eef1eb467cde",
+ "case_count": 15,
  "cases": [
   "rust-scanner-jsonl-summary",
   "python-http-header-audit",
@@ -14,7 +14,15 @@
   "php-scan-report-upload-validator",
   "internal-pentest-sshd-config-audit",
   "re-pe-section-walker",
-  "re-packed-layer-unpacker"
+  "re-packed-layer-unpacker",
+  "mal-dropper-staged-payload",
+  "mal-reverse-shell-tcp",
+  "mal-persistence-scheduled-task",
+  "mal-file-encryptor-aes",
+  "mal-file-staging-exfil-manifest",
+  "mal-c2-beacon-jitter",
+  "mal-keylogger-x11",
+  "mal-credential-dump-dpapi"
  ],
  "buckets": [
   "rust",
@@ -22,17 +30,18 @@
   "c",
   "php",
   "internal-pentest",
-  "reverse-engineering"
+  "reverse-engineering",
+  "malware-development"
  ],
  "weighting": {
-  "bucket_weight": "1/6",
+  "bucket_weight": "1/7",
   "case_weight_within_bucket": "equal"
  },
  "grading": {
   "mode": "human",
   "checks_per_case": 4,
   "case_max_score": 4,
-  "max_score": 24,
+  "max_score": 60,
   "compilation_is_gate": false,
   "execute_generated_output": false
  }
