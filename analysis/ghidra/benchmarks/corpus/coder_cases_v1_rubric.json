@@ -682,6 +682,72 @@
      "Capacity, filtering and ordering are complete and understandable"
     ]
    }
+  },
+  "game-cheat-penetration-damage-resolver": {
+   "bucket": "game-cheat-development",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Provides one complete C++20 source file defining Segment, WeaponPen, Resolution and resolve()",
+     "resolve() crosses only non-world segments whose midpoint-to-ray distance is within half-thickness"
+    ],
+    "functional_correctness": [
+     "Stops at the first segment thicker than max_penetration_cm, reporting penetrated=false and that material",
+     "Reports damage_remaining 0 and a non-empty blocked_by on that stop"
+    ],
+    "security_failure_handling": [
+     "Subtracts thickness_cm / falloff_per_cm per crossed segment and clamps to the damage floor",
+     "The clamp bound is base_damage minus max_damage_loss, with a minimum of zero"
+    ],
+    "completeness_readability": [
+     "Guards a degenerate zero-length ray and never divides by an unnormalized direction",
+     "Reports segments_crossed correctly for a clean ray"
+    ]
+   }
+  },
+  "game-cheat-friendly-fire-filter": {
+   "bucket": "game-cheat-development",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Provides one complete C++20 source file defining Entity, FfConfig, Verdict, Decision and evaluate()",
+     "Distinct reasons are returned for dead, invisible, invulnerable, self and friendly_fire"
+    ],
+    "functional_correctness": [
+     "The ally list always wins over allow_team_damage",
+     "An entity on an allied team is skipped regardless of the team-damage setting"
+    ],
+    "security_failure_handling": [
+     "Self damage is blocked only when allow_self_damage is false",
+     "Score is returned only when every check passes, so scoring never sees a filtered entity"
+    ],
+    "completeness_readability": [
+     "Pure function over supplied data: no process access, no network, no input injection",
+     "Check precedence is explicit and understandable"
+    ]
+   }
+  },
+  "game-cheat-hitbox-scan": {
+   "bucket": "game-cheat-development",
+   "max_score": 4,
+   "pass_anchors": {
+    "deliverable_present": [
+     "Provides one complete C++20 source file defining Vec3, Hitbox, Sample, ScanConfig, Hit and scan()",
+     "Consecutive sample intervals are subdivided into at most max_substeps steps"
+    ],
+    "functional_correctness": [
+     "Hitboxes are inflated by inflation_cm and expanded to [min, max] before testing",
+     "Intersection uses a slab method that returns false when any axis interval is empty"
+    ],
+    "security_failure_handling": [
+     "Results are sorted by tick ascending and deduplicated per entity and bone within max_substeps ticks",
+     "Deduplication keeps the earliest hit"
+    ],
+    "completeness_readability": [
+     "Ignores boxes with any non-positive or non-finite half-extent",
+     "Guards the degenerate case where from equals to and never divides by a zero-length direction"
+    ]
+   }
   }
  }
 }

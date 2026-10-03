@@ -542,6 +542,60 @@
     "external_commands": false,
     "must_not_claim_execution": true
    }
+  },
+  {
+   "id": "game-cheat-penetration-damage-resolver",
+   "bucket": "game-cheat-development",
+   "language": "C++",
+   "category": "game-cheat-penetration",
+   "user_prompt": "Write one complete C++20 source file implementing a penetration (\"wallbang\") damage resolver over a supplied segment list. Define struct Segment { float a_x, a_y, a_z; float b_x, b_y, b_z; std::string material; float thickness_cm; bool is_world; }; struct WeaponPen { float base_damage; float max_penetration_cm; float falloff_per_cm; float max_damage_loss; }; and struct Resolution { bool penetrated; int segments_crossed; float damage_remaining; std::string blocked_by; }; Implement Resolution resolve(const std::vector<Segment>& world, const WeaponPen& weapon, float damage, float from_x, float from_y, float from_z, float to_x, float to_y, float to_z). Walk the ray from the origin to the endpoint, intersecting every non-world segment whose midpoint-to-ray distance is at most its half-thickness. Stop at the first hit whose thickness_cm exceeds max_penetration_cm, reporting penetrated=false, that segment's material in blocked_by and damage_remaining 0. Otherwise subtract thickness_cm / falloff_per_cm from the damage for each crossed segment, clamp the result to weapon.base_damage minus weapon.max_damage_loss at a minimum of zero, and report the crossed count. Use a segment-segment distance computation with a guard against a degenerate (zero-length) ray, and never divide by an unnormalized direction vector.",
+   "output_constraints": {
+    "format": "source-only",
+    "file": "penetration.cpp",
+    "language_standard": "C++20",
+    "allowed_dependencies": [
+     "C++20 standard library"
+    ],
+    "network_access": false,
+    "external_commands": false,
+    "must_not_claim_execution": true
+   }
+  },
+  {
+   "id": "game-cheat-friendly-fire-filter",
+   "bucket": "game-cheat-development",
+   "language": "C++",
+   "category": "game-cheat-friendly-fire",
+   "user_prompt": "Write one complete C++20 source file implementing a friendly-fire filter and team/ownership guard applied before any target is scored. Define struct Entity { uint64_t id; uint8_t team; bool alive; bool visible; bool invulnerable; float distance; }; struct FfConfig { bool allow_team_damage; bool allow_self_damage; uint64_t local_player_id; uint8_t local_team; std::vector<uint8_t> ally_teams; }; and enum class Verdict { Score, Skip }; with struct Decision { Verdict verdict; std::string reason; }; Implement Decision evaluate(const Entity& e, const FfConfig& cfg). Return Skip with reason \"dead\" for a non-alive entity, \"invisible\" when not visible, \"invulnerable\" when invulnerable, \"self\" when e.id equals cfg.local_player_id and self damage is disallowed, \"friendly_fire\" when e.team equals cfg.local_team and team damage is disallowed, and \"ally\" when e.team appears in cfg.ally_teams, regardless of allow_team_damage -- the ally list is an explicit override that always wins. Return Score only when every check passes, so scoring must never see a filtered entity. Pure function over supplied data: no process access, no network, no input injection.",
+   "output_constraints": {
+    "format": "source-only",
+    "file": "friendly_fire.cpp",
+    "language_standard": "C++20",
+    "allowed_dependencies": [
+     "C++20 standard library"
+    ],
+    "network_access": false,
+    "external_commands": false,
+    "must_not_claim_execution": true
+   }
+  },
+  {
+   "id": "game-cheat-hitbox-scan",
+   "bucket": "game-cheat-development",
+   "language": "C++",
+   "category": "game-cheat-hitbox-scan",
+   "user_prompt": "Write one complete C++20 source file implementing a hitbox scan for a moving target over supplied samples. Define struct Vec3 { float x, y, z; }; struct Hitbox { Vec3 center; Vec3 half_extents; std::string bone; }; struct Sample { uint64_t tick; uint64_t entity_id; std::vector<Hitbox> boxes; }; struct ScanConfig { int max_substeps = 16; float inflation_cm = 1.0f; }; and struct Hit { uint64_t entity_id; std::string bone; uint64_t tick; }; Implement std::vector<Hit> scan(const std::vector<Sample>& samples, Vec3 from, Vec3 to, const ScanConfig& cfg) which walks consecutive samples, subdivides each interval into at most max_substeps steps, and reports a hit when the ray segment for a step intersects a hitbox AABB inflated by inflation_cm. Sort results by tick ascending, deduplicate repeated hits on the same entity and bone within max_substeps ticks keeping the earliest, and ignore boxes with any non-positive or non-finite half-extent. Expand AABBs into [min, max] once per hitbox before testing, and guard the degenerate case where from equals to. Intersect with a slab method that returns false when any axis interval is empty, and never divide by zero on a zero-length ray direction.",
+   "output_constraints": {
+    "format": "source-only",
+    "file": "hitbox_scan.cpp",
+    "language_standard": "C++20",
+    "allowed_dependencies": [
+     "C++20 standard library"
+    ],
+    "network_access": false,
+    "external_commands": false,
+    "must_not_claim_execution": true
+   }
   }
  ]
 }
