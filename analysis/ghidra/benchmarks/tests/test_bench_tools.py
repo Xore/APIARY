@@ -6,11 +6,29 @@ because that is how CI executes the rest of benchmarks/tests/.
 import sys
 import unittest
 from pathlib import Path
+import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import bench_tools as bt
 import transcripts as tr
+
+
+def _load_evaluator():
+    """evaluate-models.py is not importable by name (hyphen); load by path."""
+    import importlib.util
+    # The target filename contains a hyphen, so spec_from_file_location needs
+    # the explicit ".py" suffix or it returns a spec with no loader.
+    path = Path(__file__).resolve().parents[1] / "evaluate-models.py"
+    spec = importlib.util.spec_from_file_location("coder_evaluator", str(path))
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load evaluator from {path}")
+    module = importlib.util.module_from_spec(spec)
+    # @dataclass resolves annotations via sys.modules; without this the
+    # decorators blow up on a module that was never registered.
+    sys.modules["coder_evaluator"] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 class TestToolDefinitions(unittest.TestCase):
@@ -130,6 +148,202 @@ class TestToolRounds(unittest.TestCase):
         self.assertEqual(turn["role"], "user")
         self.assertEqual(turn["tool_name"], "web_fetch")
         self.assertEqual(turn["content"], "body text")
+
+
+class TestCoderArtifacts(unittest.TestCase):
+    """One readable source file per generated answer.
+
+    The answers were already captured, but only inside JSON. Grading code out
+    of an escaped string is the tax these files remove, so they must exist and
+    must be readable. They are inert: nothing here executes or compiles them.
+    """
+
+    def _writer(self, tmp):
+        class W:
+            directory = tmp
+        return W()
+
+    def _cases(self):
+        return {
+            "game-cheat-map-vmap-parser-bvh": {
+                "case": "game-cheat-map-vmap-parser-bvh", "capped": False,
+                "degenerate": False,
+                "output": {"content": "int main() { return 0; }\n"},
+            },
+            "tooling-yara-rule-compiler": {
+                "case": "tooling-yara-rule-compiler", "capped": True,
+                "degenerate": False,
+                "output": {"content": "def parse(text):\n    return []\n"},
+            },
+        }
+
+    def test_writes_one_file_per_case_with_declared_extension(self):
+        import tempfile
+        ev=_load_evaluator()
+        with tempfile.TemporaryDirectory() as tmp:
+            from pathlib import Path
+            w = self._writer(Path(tmp))
+            n = ev.write_coder_artifacts(w, {"tag": "m:q4"}, self._cases())
+            self.assertEqual(n, 2)
+            files = sorted(p.name for p in (Path(tmp) / "coder-artifacts" / "m:q4").iterdir())
+            self.assertEqual(files, ["game-cheat-map-vmap-parser-bvh.cpp",
+                                     "tooling-yara-rule-compiler.py"])
+
+    def test_file_carries_provenance_header_and_content(self):
+        import tempfile
+        ev=_load_evaluator()
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp:
+            w = self._writer(Path(tmp))
+            ev.write_coder_artifacts(w, {"tag": "m:q4"}, self._cases())
+            p = Path(tmp) / "coder-artifacts" / "m:q4" / "tooling-yara-rule-compiler.py"
+            body = p.read_text()
+            self.assertIn("model: m:q4", body)
+            self.assertIn("case:  tooling-yara-rule-compiler", body)
+            self.assertIn("capped: True", body)
+            self.assertIn("INERT MODEL OUTPUT", body)
+            self.assertTrue(body.rstrip().endswith("return []"))
+
+    def test_tag_directory_is_exactly_the_tag_with_slashes_removed(self):
+        # Only "/" is rewritten. A colon is legal in a directory name on Linux
+        # and appears in every Ollama tag, so rewriting it would lose the
+        # identity of the model in the path.
+        import tempfile
+        ev = _load_evaluator()
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp:
+            w = self._writer(Path(tmp))
+            ev.write_coder_artifacts(w, {"tag": "hf.co/a/b:Q4_K_M"}, self._cases())
+            self.assertTrue((Path(tmp) / "coder-artifacts" / "hf.co_a_b:Q4_K_M").is_dir())
+
+    def test_tag_with_slash_cannot_escape_the_directory(self):
+        import tempfile
+        ev=_load_evaluator()
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp:
+            w = self._writer(Path(tmp))
+            ev.write_coder_artifacts(w, {"tag": "hf.co/a/b:c"}, self._cases())
+            self.assertTrue((Path(tmp) / "coder-artifacts" / "hf.co_a_b:c").is_dir())
+
+    def test_empty_content_still_writes_a_file(self):
+        import tempfile
+        ev=_load_evaluator()
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp:
+            w = self._writer(Path(tmp))
+            n = ev.write_coder_artifacts(w, {"tag": "m"}, {
+                "re-pe-pe-section-walker": {"case": "re-pe-pe-section-walker",
+                                            "output": {}}})
+            self.assertEqual(n, 1)
+            self.assertTrue((Path(tmp) / "coder-artifacts" / "m").iterdir())
+
+    def test_no_cases_writes_no_model_directory(self):
+        import tempfile
+        ev=_load_evaluator()
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp:
+            w = self._writer(Path(tmp))
+            self.assertEqual(ev.write_coder_artifacts(w, {"tag": "m"}, {}), 0)
+            self.assertFalse((Path(tmp) / "coder-artifacts").exists())
+
+    def test_every_corpus_case_resolves_to_an_extension(self):
+        ev=_load_evaluator()
+        meta = ev._coder_case_files()
+        self.assertGreater(len(meta), 0)
+        for case_id, (language, declared) in meta.items():
+            ext = Path(declared).suffix or ev._EXT_BY_LANGUAGE.get(language, ".txt")
+            self.assertTrue(ext.startswith("."), case_id)
+            self.assertNotEqual(ext, ".txt", f"{case_id} fell back to .txt")
+
+
+class TestCoderRounds(unittest.TestCase):
+    """The model continues its own work until it declares completion.
+
+    A one-shot generation is not a fair coding test -- most single-round
+    answers are incomplete rather than wrong. The loop must therefore carry
+    the previous answer forward, stop on the marker, and always record why it
+    stopped.
+    """
+
+    def setUp(self):
+        self.ev = _load_evaluator()
+
+    def test_marker_detection(self):
+        for text in ("...\nIMPLEMENTATION COMPLETE", "Task Complete", "all checks pass"):
+            self.assertTrue(self.ev._declares_done(text), text)
+        for text in ("", "here is the file", "complete=1", "unfinished"):
+            self.assertFalse(self.ev._declares_done(text), text)
+
+    def test_continuation_prompt_carries_the_previous_answer(self):
+        case = self.ev.CODER_CASES[0]
+        prompt = self.ev._continuation_prompt(case, "int main(){}", 2)
+        self.assertIn("int main(){}", prompt)
+        self.assertIn(case.prompt, prompt)
+        self.assertIn("Continuation round 2", prompt)
+        self.assertIn("IMPLEMENTATION COMPLETE", prompt)
+
+    def _run_with(self, replies, max_rounds=5):
+        """Drive score_coder against canned replies; return the records."""
+        self.ev.CODER_CASES = self.ev.CODER_CASES[:1]
+        self.ev.CODER_MAX_ROUNDS = max_rounds
+        seen = []
+
+        def fake_chat(base_url, model, system, prompt, context, thinking, **kw):
+            seen.append(prompt)
+            return {"content": replies[len(seen) - 1], "output_tokens": 10,
+                    "done_reason": "stop", "prompt_tokens": 5, "wall_seconds": 1.0}
+        self.ev.chat = fake_chat
+        return self.ev.score_coder("u", "m", 16384), seen
+
+    def test_stops_immediately_when_declared_done(self):
+        records, seen = self._run_with(["int main(){}\nIMPLEMENTATION COMPLETE"])
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(records[0]["round_count"], 1)
+        self.assertEqual(records[0]["stopped_because"], "declared_complete")
+
+    def test_loops_until_the_marker(self):
+        records, seen = self._run_with(
+            ["draft one", "draft two", "final\nIMPLEMENTATION COMPLETE"])
+        self.assertEqual(len(seen), 3)
+        self.assertEqual(records[0]["round_count"], 3)
+        self.assertEqual(records[0]["stopped_because"], "declared_complete")
+        # round 2 must have been shown round 1's answer
+        self.assertIn("draft one", seen[1])
+        self.assertIn("draft two", seen[2])
+
+    def test_round_cap_is_enforced(self):
+        records, seen = self._run_with(["a", "b", "c", "d", "e"], max_rounds=3)
+        self.assertEqual(len(seen), 3)
+        self.assertEqual(records[0]["stopped_because"], "round_cap")
+
+    def test_empty_response_stops_immediately(self):
+        records, seen = self._run_with([""])
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(records[0]["stopped_because"], "empty_response")
+
+    def test_only_the_final_round_is_graded(self):
+        records, _ = self._run_with(["draft", "better\nIMPLEMENTATION COMPLETE"])
+        record = records[0]
+        self.assertEqual(record["output"]["content"], "better\nIMPLEMENTATION COMPLETE")
+        self.assertEqual(len(record["rounds"]), 2)
+
+    def test_round_history_records_cap_state_per_round(self):
+        def fake_chat(base_url, model, system, prompt, context, thinking, **kw):
+            return {"content": "x", "output_tokens": 10, "done_reason": "length",
+                    "prompt_tokens": 5, "wall_seconds": 1.0}
+        self.ev.CODER_CASES = self.ev.CODER_CASES[:1]
+        self.ev.CODER_MAX_ROUNDS = 2
+        self.ev.chat = fake_chat
+        record = self.ev.score_coder("u", "m", 16384)[0]
+        self.assertEqual([r["capped"] for r in record["rounds"]], [True, True])
+        self.assertEqual(record["capped"], True)
+
+    def test_degenerate_signal_still_computed_on_the_final_round(self):
+        loop = "for (int i = 0; i < n.tri_count; ++i) { const auto& t = n.triangles[n.first + i]; }"
+        block = loop + " " * (20 - len(loop) % 20 if len(loop) % 20 else 0)
+        records, _ = self._run_with([block * 12 + "\nIMPLEMENTATION COMPLETE"])
+        self.assertTrue(records[0]["degenerate"])
+        self.assertGreater(records[0]["repetition_ratio"], 0.6)
 
 
 class TestRepetition(unittest.TestCase):

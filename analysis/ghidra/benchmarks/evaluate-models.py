@@ -1294,17 +1294,87 @@ def _pending_coder_case(case: RevCase, raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# A single generation is not a fair test of a coding task: most answers that
+# stop at round one are incomplete rather than wrong. The model is asked to keep
+# working until it says it is done, up to this many rounds. The cap is a
+# hard stop so a model that never terminates cannot hang a roster run.
+CODER_MAX_ROUNDS = 4
+
+CODER_DONE_MARKERS = (
+    "IMPLEMENTATION COMPLETE",
+    "TASK COMPLETE",
+    "ALL CHECKS PASS",
+)
+
+
+def _declares_done(text: str) -> bool:
+    """True when the model says it has finished, in any of the agreed forms."""
+    if not text:
+        return False
+    upper = text.upper()
+    return any(marker in upper for marker in CODER_DONE_MARKERS)
+
+
+def _continuation_prompt(case: RevCase, previous: str, round_index: int) -> str:
+    return (
+        f"{case.prompt}\n\n"
+        f"[Continuation round {round_index}] Your previous answer was:\n\n"
+        f"---\n{previous}\n---\n\n"
+        "Review it against every requirement above. Fix what is missing, wrong or "
+        "stubbed. Do not explain what you would change -- emit the complete "
+        "corrected source file. When nothing further is needed, emit the full "
+        "file once more and end with the line IMPLEMENTATION COMPLETE."
+    )
+
+
 def score_coder(
     base_url: str, model: str, context: int, recorder: SlotRecorder | None = None
 ) -> list[dict[str, Any]]:
+    """Generate every coder case, looping until the model declares completion.
+
+    Each round carries the previous answer back in as context, so the model
+    continues its own work instead of starting over. Only the final round is
+    graded; earlier rounds are retained in the record as `rounds` so a grader
+    can see how the answer converged, and because that history is evidence.
+
+    A round that hits the output cap is still a round: the next one continues
+    from it, which is exactly the case where continuing helps. The loop stops
+    on a completion marker, on the round cap, or when the model returns nothing
+    at all. Stopping is recorded, not implied.
+    """
     results = []
     for case in CODER_CASES:
-        raw = chat(
-            base_url, model, CODER_SYSTEM, case.prompt, min(context, 8192), False,
-            num_predict=budget_for("coder"), recorder=recorder, case=case.name,
-            workflow="coder_generation",
-        )
-        results.append(_pending_coder_case(case, raw))
+        rounds: list[dict[str, Any]] = []
+        prompt = case.prompt
+        raw: dict[str, Any] = {}
+        stopped_because = "round_cap"
+        for round_index in range(CODER_MAX_ROUNDS):
+            raw = chat(
+                base_url, model, CODER_SYSTEM, prompt, min(context, 8192), False,
+                num_predict=budget_for("coder"), recorder=recorder, case=case.name,
+                workflow="coder_generation",
+            )
+            content = (raw or {}).get("content") or ""
+            rounds.append({
+                "round": round_index,
+                "output_tokens": (raw or {}).get("output_tokens"),
+                "capped": was_capped(raw),
+                "declared_done": _declares_done(content),
+                "chars": len(content),
+            })
+            if _declares_done(content):
+                stopped_because = "declared_complete"
+                break
+            if not content:
+                stopped_because = "empty_response"
+                break
+            prompt = _continuation_prompt(case, content, round_index + 1)
+
+        record = _pending_coder_case(case, raw)
+        record["rounds"] = rounds
+        record["round_count"] = len(rounds)
+        record["stopped_because"] = stopped_because
+        results.append(record)
     return results
 
 
@@ -1347,6 +1417,71 @@ def _human_grade_subject(artifact: dict[str, Any], run_id: str) -> tuple[str, di
         },
         "adjudication": None,
     }
+
+
+CODER_ARTIFACTS_DIRNAME = "coder-artifacts"
+
+_EXT_BY_LANGUAGE = {
+    "C++": ".cpp", "C": ".c", "Python": ".py", "Rust": ".rs", "PHP": ".php",
+}
+
+
+def _coder_case_files() -> dict[str, tuple[str, str]]:
+    """case_id -> (language, declared filename), straight from the corpus.
+
+    Built from the corpus file rather than from the parsed `RevCase`, which
+    deliberately carries only the prompt and anchors. The declared filename is
+    part of the contract -- it is what the model was asked to produce -- so the
+    tree on disk mirrors the corpus rather than a guess made here.
+    """
+    raw = json.loads(CODER_CASES_PATH.read_text(encoding="utf-8"))
+    return {
+        case["id"]: (case.get("language", ""),
+                     (case.get("output_constraints") or {}).get("file", ""))
+        for case in raw["cases"]
+    }
+
+
+def write_coder_artifacts(writer: TranscriptWriter, artifact: dict[str, Any],
+                          cases: dict[str, Any]) -> int:
+    """Write every generated coder answer to its own file beside the grade sheet.
+
+    The answers were already in the report and the transcript, but only as JSON
+    strings. That leaves the actual subject of the benchmark -- source code --
+    unreadable at grading time: no syntax highlighting, no diffing one model's
+    answer against another's, no opening a failing case next to a passing one.
+    Grading code out of an escaped JSON string taxes the one step that is still
+    human.
+
+    One file per case, named from the case id so it sorts the way the corpus
+    does, with the extension taken from the language the case declares. Each
+    file carries a short header comment noting the model, the case and the
+    graded status, so a file opened out of context still says what it is.
+
+    Nothing here is executed, compiled or parsed. These are inert text files
+    holding model output; the benchmark never runs generated code.
+    """
+    meta = _coder_case_files()
+    tag = artifact.get("tag", "unknown").replace("/", "_")
+    if not cases:
+        return 0
+    root = writer.directory / CODER_ARTIFACTS_DIRNAME / tag
+    root.mkdir(parents=True, exist_ok=True)
+    written = 0
+    for case_id, record in (cases or {}).items():
+        content = (record.get("output") or {}).get("content") or ""
+        language, declared = meta.get(case_id, ("", ""))
+        ext = Path(declared).suffix or _EXT_BY_LANGUAGE.get(language, ".txt")
+        header = (
+            f"// model: {artifact.get('tag')}\n"
+            f"// case:  {case_id}  ({language or 'unknown'})\n"
+            f"// rubric-claimed file: {declared or '(none)'}\n"
+            f"// capped: {record.get('capped')}  degenerate: {record.get('degenerate')}\n"
+            f"// INERT MODEL OUTPUT -- never executed, compiled or parsed by the benchmark\n\n"
+        )
+        (root / f"{case_id}{ext}").write_text(header + content, encoding="utf-8")
+        written += 1
+    return written
 
 
 def write_human_grades_template(writer: TranscriptWriter, artifact: dict[str, Any]) -> Path:
@@ -1461,6 +1596,11 @@ def evaluate_slot(
             if writer is not None:
                 write_human_grades_template(writer, artifact)
             cases = score_coder(base_url, model, context, recorder)
+            # One readable source file per case, written after the answers are
+            # in hand. Never executed or compiled -- these are inert files so a
+            # human grader can read the code instead of unescaped JSON.
+            if writer is not None:
+                write_coder_artifacts(writer, artifact, {c["case"]: c for c in cases})
             probe = {"passed": None, "not_required": True}
             timings = [item["output"] for item in cases]
         else:
