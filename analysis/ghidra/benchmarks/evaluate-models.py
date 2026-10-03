@@ -152,7 +152,8 @@ CODER_CORPUS_DIR = Path(__file__).resolve().parent / "corpus"
 CODER_CASES_PATH = CODER_CORPUS_DIR / "coder_cases_v1.json"
 CODER_RUBRIC_PATH = CODER_CORPUS_DIR / "coder_cases_v1_rubric.json"
 CODER_CONTRACT_PATH = CODER_CORPUS_DIR / "coder_cases_v1_contract.json"
-CODER_BUCKETS = ("rust", "python", "c", "php", "internal-pentest", "reverse-engineering")
+CODER_BUCKETS = ("rust", "python", "c", "php", "internal-pentest", "reverse-engineering",
+                "malware-development")
 CODER_CHECKS = (
     "deliverable_present",
     "functional_correctness",
