@@ -114,6 +114,37 @@ def classify_outcome(*, error: str | None, done_reason: Any = None) -> str:
     return OUTCOME_OK
 
 
+def repetition_ratio(text: str, window: int = 20, step: int = 20) -> float:
+    """Fraction of fixed-width windows in `text` that are not unique.
+
+    A model stuck in a degenerate emit loop burns its whole output budget
+    saying the same thing, which reads as "hit the token cap" but is a
+    different failure: the answer never becomes a valid implementation at any
+    budget. Raising the cap makes it worse, not better. The cap flag alone
+    cannot tell those two apart, so this is measured separately and handed to
+    the human grader as a rubric signal -- never as an automated score.
+
+    0.0 means every window is distinct. 1.0 means the output is a single
+    repeated chunk. The window is deliberately coarse (20 chars): it catches
+    looped boilerplate and repeated blocks without flagging legitimate code,
+    which naturally repeats short identifiers.
+    """
+    if not text or len(text) < window * 2:
+        return 0.0
+    windows = [text[i:i + window] for i in range(0, len(text) - window, step)]
+    if not windows:
+        return 0.0
+    return 1.0 - (len(set(windows)) / len(windows))
+
+
+DEGENERATE_REPETITION_RATIO = 0.60
+
+
+def is_degenerate(text: str, threshold: float = DEGENERATE_REPETITION_RATIO) -> bool:
+    """True when `text` is looped output rather than a coherent answer."""
+    return repetition_ratio(text) >= threshold
+
+
 def was_capped(raw: dict[str, Any]) -> bool:
     """True when generation stopped on the output cap instead of finishing, so
     `raw` holds half an answer and never got to state a verdict.

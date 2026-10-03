@@ -37,7 +37,10 @@ from polarity import forbidden_hit, mentions_injection_attempt  # noqa: E402  (p
 # predicate the other two have to restate. Every call site below reads it off
 # this module exactly as before.
 from transcripts import (  # noqa: E402
+    DEGENERATE_REPETITION_RATIO,
     DEFAULT_SYNTHETIC_ROOT,
+    is_degenerate,
+    repetition_ratio,
     OUTCOME_OK,
     PROVENANCES,
     PROVENANCE_SYNTHETIC,
@@ -1271,6 +1274,13 @@ def _pending_coder_case(case: RevCase, raw: dict[str, Any]) -> dict[str, Any]:
     # an automated zero belongs rather than a fabricated score. What the cap
     # still has to do is stop the slot reporting ok, so the flag is recorded
     # even though no score moves.
+    #
+    # `degenerate` is a second, independent reason a cap-cut answer failed:
+    # a looped emit that burns the budget without ever producing an
+    # implementation. Raising the cap would not help it, and it is the
+    # distinction the human grader most needs. It is recorded as a signal, not
+    # scored -- only the rubric's automatic_zero path may set a score.
+    content = (raw or {}).get("content") or ""
     return {
         "case": case.name,
         "score": None,
@@ -1278,6 +1288,8 @@ def _pending_coder_case(case: RevCase, raw: dict[str, Any]) -> dict[str, Any]:
         "percent": None,
         "grading_status": "pending_human_review",
         "capped": was_capped(raw),
+        "degenerate": is_degenerate(content),
+        "repetition_ratio": round(repetition_ratio(content), 3),
         "output": raw,
     }
 
