@@ -331,12 +331,23 @@ class RequestBodyTest(unittest.TestCase):
         return bodies
 
     def test_coder_uses_its_complete_source_output_budget(self):
+        """Every coder request carries the full source budget.
+
+        Coder now runs up to CODER_MAX_ROUNDS generations per case, so the
+        call count is cases x rounds, not cases. The invariant being defended
+        is the budget on each request, which is why it is asserted over every
+        captured body rather than by counting.
+        """
         bodies = self._capture_requests(evaluate_models.score_coder)
-        self.assertEqual(len(bodies), len(evaluate_models.CODER_CASES))
+        self.assertGreaterEqual(len(bodies), len(evaluate_models.CODER_CASES))
+        self.assertLessEqual(
+            len(bodies),
+            len(evaluate_models.CODER_CASES) * evaluate_models.CODER_MAX_ROUNDS,
+        )
         self.assertTrue(all(
             body["options"]["num_predict"] == evaluate_models.CODER_NUM_PREDICT
             for body in bodies
-        ))
+        ), "a coder request dropped below the full source budget")
 
     def test_revdeck_request_body_shape(self):
         """The recorded wire shape, byte for byte, apart from the budget.
