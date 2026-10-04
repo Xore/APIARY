@@ -2317,6 +2317,86 @@ def model_artifact(base_url: str, model: str) -> dict[str, Any]:
     raise ValueError(f"model tag is not installed: {model}")
 
 
+# The capability the coder slot is the only one that cannot work without. The
+# other slots send plain prose, so only the tools probe stands between a model
+# that cannot serve them and a slot that discovers it by failing.
+CODER_REQUIRED_CAPABILITY = "tools"
+# A read of metadata, not a generation: the whole point is to reach a verdict
+# without a model load or an output budget, so it gets a short explicit wait
+# instead of request_timeout()'s generation-sized default. Ollama answers
+# /api/show from the manifest -- 14ms on a 27B tag that is not loaded.
+CAPABILITY_PROBE_TIMEOUT_SECONDS = 60
+# Its own case name so the record is never mistaken for a coder case answer by
+# a reader or by rescore_from(), which matches stored cases against the corpus.
+CAPABILITY_PROBE_CASE = "capability_probe"
+
+
+def model_capabilities(base_url: str, model: str) -> list[str] | None:
+    """What the server says this model can do, or None when it says nothing.
+
+    Ollama's /api/show reports a `capabilities` array including "tools" (measured
+    on 0.32.13: `["tools","thinking","completion"]` for a Qwen3 tag,
+    `["completion"]` for codegeex4:9b). POST-only -- GET /api/show is 405 -- so
+    this is the same request_json the rest of the harness uses, with a body.
+
+    None is a deliberate third answer, distinct from both `[]` and a list without
+    "tools". It means the verdict is unknown, and only a known verdict may skip
+    a slot: an endpoint that is absent (an older server), a transport failure, a
+    non-list `capabilities`, or a key the server never sent all land here. An
+    unknown verdict must fall through to attempting the slot, because skipping a
+    capable model on a missing field is a false negative the run can never
+    correct.
+    """
+    try:
+        show = request_json(
+            f"{base_url}/api/show", {"model": model},
+            timeout=CAPABILITY_PROBE_TIMEOUT_SECONDS,
+        )
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+        return None
+    capabilities = show.get("capabilities")
+    if not isinstance(capabilities, list):
+        return None
+    return [str(item) for item in capabilities]
+
+
+def missing_capability_reason(
+    base_url: str, model: str, recorder: SlotRecorder | None = None
+) -> str | None:
+    """Why the coder slot must not be attempted, or None to attempt it.
+
+    Returns a reason naming the capability that is actually absent -- not a
+    hardcoded "does not support tools" -- so a model skipped for a different
+    gap does not claim a tools verdict it was never given, and so the reason
+    still reads correctly if the coder slot ever requires more than tools.
+
+    The verdict is recorded, not just returned: a skip that exists only as a
+    gap in a transcript is indistinguishable from a slot that was never run,
+    which is the ambiguity this probe exists to remove. The stored request body
+    is the literal /api/show body, so the probe is as reconstructable as any
+    model call in the run.
+    """
+    capabilities = model_capabilities(base_url, model)
+    if recorder is not None:
+        recorder.record(
+            case=CAPABILITY_PROBE_CASE,
+            workflow=CAPABILITY_PROBE_CASE,
+            request_body={"model": model},
+            # `message` is where transcripts.py reads a stored answer from, so
+            # the verdict rides there and stays readable by the same readers as
+            # every other record in the run.
+            response={"message": {"capabilities": capabilities}},
+        )
+    if not capabilities or CODER_REQUIRED_CAPABILITY in capabilities:
+        return None
+    advertised = ", ".join(sorted(capabilities)) or "none"
+    return (
+        f"{model} does not support {CODER_REQUIRED_CAPABILITY}: Ollama reports "
+        f"capabilities [{advertised}] for this tag, so the coder slot's tool "
+        f"contract cannot be served and no request was attempted"
+    )
+
+
 # --- Harmony serving family (#2233) ----------------------------------------
 # gpt-oss-family tags are served through Ollama's harmony renderer, which
 # behaves differently from the Qwen family this harness was calibrated on:
@@ -3628,6 +3708,24 @@ def evaluate_slot(
             model=artifact,
             reproducibility=Reproducibility(tier=tier, prompt_contract=contract),
         )
+        # Before the slot is attempted, and only for the coder slot: it is the
+        # only one whose contract needs a capability. Learning the verdict here
+        # costs one metadata read instead of a model load plus a rejected
+        # generation, and it makes the skip a stated verdict instead of an
+        # error that only looks like one. A model that advertises tools and
+        # still rejects them falls through to the existing 400 handler below --
+        # this is the fast path, not its replacement.
+        if slot == "coder" and (reason := missing_capability_reason(
+                base_url, model, recorder)) is not None:
+            return {
+                "model": model,
+                "ok": False,
+                "skipped": True,
+                "skip_reason": reason,
+                "qualification_request": request,
+                "contract": contract,
+                "elapsed_seconds": round(time.time() - started, 2),
+            }
         if slot == "ghidra":
             cases = score_triage(base_url, model, context, recorder)
             probe = context_probe(base_url, model, context, recorder)
@@ -4072,6 +4170,27 @@ def main() -> int:
             }))
 
 
+def slot_summary(result: dict[str, Any]) -> str:
+    """The one line the runner prints per slot, for both manifest and roster runs.
+
+    A capability gap and a crash reach the same `ok: false` branch, so the skip
+    is checked first and says so in those words: a reader who sees "failed" on a
+    model that was never asked to do anything is looking at a defect this line
+    exists to remove. Both callers format through here rather than each growing
+    its own branch, so the two runners cannot drift on what a skip looks like.
+    """
+    if result.get("skipped"):
+        return f"skipped: {result.get('skip_reason')}"
+    if not result.get("ok"):
+        return f"failed: {result.get('error')}"
+    percent = result["score"]["percent"]
+    grade = "pending human review" if percent is None else f"{percent}%"
+    return (
+        f"{grade}; context={result['context_probe'].get('passed')}; "
+        f"{result['mean_tokens_per_second']} tok/s"
+    )
+
+
 def run(args: argparse.Namespace, base_url: str, writer: TranscriptWriter | None) -> int:
     if args.manifest:
         with open(args.manifest, encoding="utf-8") as source:
@@ -4091,16 +4210,7 @@ def run(args: argparse.Namespace, base_url: str, writer: TranscriptWriter | None
                 base_url, slot_name, model, slot["qualification_request"], writer, args.tier
             )
             report["slots"][slot_name] = result
-            if result.get("ok"):
-                percent = result["score"]["percent"]
-                grade = "pending human review" if percent is None else f"{percent}%"
-                print(
-                    f"  {grade}; context={result['context_probe'].get('passed')}; "
-                    f"{result['mean_tokens_per_second']} tok/s",
-                    flush=True,
-                )
-            else:
-                print(f"  failed: {result['error']}", flush=True)
+            print(f"  {slot_summary(result)}", flush=True)
         digest = write_atomic(args.output, report)
         print(json.dumps({"report_sha256": digest, "verbose_report_written": True}))
         return 0 if all(item.get("ok") for item in report["slots"].values()) else 1
@@ -4128,6 +4238,8 @@ def run(args: argparse.Namespace, base_url: str, writer: TranscriptWriter | None
             )
             for slot in args.slots
         }
+        for slot in args.slots:
+            print(f"  {slot}: {slot_summary(result[slot])}", flush=True)
         report["models"].append({"model": model, "slots": result})
     print("=== JSON REPORT ===")
     print(json.dumps(report, indent=2, sort_keys=True))
