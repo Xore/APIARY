@@ -597,13 +597,57 @@ class TestCoderRounds(unittest.TestCase):
         for text in ("", "here is the file", "complete=1", "unfinished"):
             self.assertFalse(self.ev._declares_done(text), text)
 
-    def test_continuation_prompt_carries_the_previous_answer(self):
+    def test_continuation_prompt_does_not_resend_the_previous_answer(self):
+        """The prior answer is delegated to read_file, not re-sent inline.
+
+        Re-sending it whole is what the owner's complaint named ("do not
+        simply resend the whole source code as answer"), and it is also a
+        measured window defect: at the 16000-token budget a full-budget answer
+        is ~64,000 chars, so the continuation prompt needed 32,302 tokens
+        against a 24,576 window and truncated silently from round 2 on. The
+        window-sizing assertion lives in test_truncation_outcome.py; this one
+        pins the prompt's own shape.
+        """
         case = self.ev.CODER_CASES[0]
         prompt = self.ev._continuation_prompt(case, "int main(){}", 2)
-        self.assertIn("int main(){}", prompt)
+        self.assertNotIn("int main(){}", prompt)
         self.assertIn(case.prompt, prompt)
         self.assertIn("Continuation round 2", prompt)
         self.assertIn("IMPLEMENTATION COMPLETE", prompt)
+        # The iteration is delegated to the file on disk, which is what the
+        # model reads instead -- so the prompt has to name that tool.
+        self.assertIn("read_file", prompt)
+
+    def test_continuation_prompt_requires_real_platform_code(self):
+        """Explicit Windows and Linux, real APIs, no simulated lookups.
+
+        The owner's requirement verbatim: make the code explicit for windows
+        and linux, no fake group searches or whatever, always use windows API
+        or linux. Asserted on the prompt because the prompt is the only lever
+        the harness has -- there is no other place a model is told what to do.
+        """
+        case = self.ev.CODER_CASES[0]
+        prompt = self.ev._continuation_prompt(case, "", 2).lower()
+        for needle in ("windows", "linux", "/proc", "hkey_local_machine",
+                       "systemroot", "never fake"):
+            self.assertIn(needle, prompt)
+        # The named anti-patterns, not just the platforms.
+        self.assertIn("simulated group lookup", prompt)
+        self.assertIn("invented api", prompt)
+
+    def test_continuation_prompt_is_not_a_review_request(self):
+        """Not "here is the source code, find what is missing and implement".
+
+        The complaint being fixed was exactly that shape, so the replacement
+        has to be a procedure the model can execute: read back, walk the
+        requirements one at a time, fix, write back, re-read.
+        """
+        case = self.ev.CODER_CASES[0]
+        prompt = self.ev._continuation_prompt(case, "", 2)
+        self.assertIn("one at a time", prompt)
+        self.assertIn("actually on disk", prompt)
+        self.assertIn("Re-read the file", prompt)
+        self.assertNotIn("here is the source code", prompt.lower())
 
     def _run_with(self, replies, max_rounds=5):
         """Drive score_coder against canned replies; return the records."""
@@ -633,9 +677,18 @@ class TestCoderRounds(unittest.TestCase):
         self.assertEqual(len(seen), 3)
         self.assertEqual(records[0]["round_count"], 3)
         self.assertEqual(records[0]["stopped_because"], "declared_complete")
-        # round 2 must have been shown round 1's answer
-        self.assertIn("draft one", seen[1])
-        self.assertIn("draft two", seen[2])
+        # Each round is a continuation of the work, not a fresh start: round N's
+        # prompt carries the case and the iteration protocol, and reads the
+        # prior state off disk rather than re-sending the prior answer (see
+        # test_continuation_prompt_does_not_resend_the_previous_answer -- the
+        # re-send is what pushed round 2 past the window).
+        self.assertIn("Continuation round 1", seen[1])
+        self.assertIn("Continuation round 2", seen[2])
+        self.assertNotIn("draft one", seen[1])
+        self.assertNotIn("draft two", seen[2])
+        # The case is still restated every round, so the requirements are in
+        # front of the model each time rather than only in round 1.
+        self.assertIn(self.ev.CODER_CASES[0].prompt, seen[1])
 
     def test_round_cap_is_enforced(self):
         records, seen = self._run_with(["a", "b", "c", "d", "e"], max_rounds=3)

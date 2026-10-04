@@ -362,6 +362,15 @@ class OutputBudgetTest(unittest.TestCase):
     # what NUM_CTX was sized for, so it is the number the window has to cover.
     WIDEST_PROMPT_TOKENS = 7176
 
+    # 2.12 chars/token, measured on the one committed record storing both the
+    # prompt and prompt_tokens (revdeck `tlv_parser`, 4,487 / 2,117). The same
+    # divisor the NUM_CTX comment uses, so a test and the constant it checks
+    # cannot disagree about how many tokens a string is.
+    CHARS_PER_TOKEN = 2.12
+
+    def _tokens(self, text):
+        return round(len(text) / self.CHARS_PER_TOKEN)
+
     def test_every_slot_budget_fits_inside_the_window_it_is_sent(self):
         """num_ctx is the real ceiling: a num_predict larger than the window
         minus the prompt is cut short by the window instead of the cap, and
@@ -393,6 +402,73 @@ class OutputBudgetTest(unittest.TestCase):
                 f"({budget}) plus the widest prompt, or the window truncates the "
                 f"answer below num_predict",
             )
+
+    def test_the_coder_window_covers_the_budget_plus_accumulated_history(self):
+        """The assertion that was missing, and the one the review found.
+
+        The two tests above assert `window > budget + widest_first_prompt`.
+        Coder is multi-round, so round 2 does not send round 1's prompt -- it
+        sends `_continuation_prompt(case, previous, 2)`, and while that prompt
+        re-sent the whole previous answer it grew with the previous answer.
+        Measured before this fix: 65,209 chars, ~16,302 tokens, so
+        16000 + 16,302 = 32,302 against a 24,576 window. From round 2 on, a
+        model that spent its budget was window-truncated *silently* -- cut by
+        the window rather than the cap, which is indistinguishable from a model
+        failure in the transcript -- and the round-1 test could not see it.
+
+        So this one measures the real continuation prompt, over every coder
+        case, with the system prompt chat() sends alongside it. It is the
+        widest prompt the coder slot ever sends, which is the number the window
+        has to cover.
+        """
+        widest = max(
+            self._tokens(evaluate_models.CODER_TOOL_SYSTEM
+                         + evaluate_models._continuation_prompt(case, "", 2))
+            for case in evaluate_models.CODER_CASES
+        )
+        budget = evaluate_models.budget_for("coder")
+        num_ctx = evaluate_models.num_ctx_for(8192)
+        self.assertGreater(
+            num_ctx, budget + widest,
+            f"the coder window {num_ctx} must cover its budget ({budget}) plus "
+            f"the widest continuation prompt ({widest} tokens), or a model that "
+            f"spent its budget is window-truncated from round 2 on -- silently, "
+            f"and reading as a model failure",
+        )
+
+    def test_the_continuation_prompt_does_not_grow_with_the_previous_answer(self):
+        """The cap that makes the assertion above hold, asserted directly.
+
+        `_continuation_prompt` re-sent the whole previous answer, which is both
+        the owner's complaint ("do not simply resend the whole source code as
+        answer") and the measured window defect. It must now be a function of
+        the case alone, so the window needed in round N is the same in every
+        round no matter how much the answer in round N-1 grew -- including when
+        that answer spent the entire budget.
+        """
+        case = max(evaluate_models.CODER_CASES, key=lambda c: len(c.prompt))
+        # A prior answer that spent the whole budget: 16000 tokens at 2.12
+        # chars/token, which is the case the old prompt measured at 16,302.
+        full_budget_answer = "x" * round(evaluate_models.budget_for("coder")
+                                         * self.CHARS_PER_TOKEN)
+        short = evaluate_models._continuation_prompt(case, "fn main() {}", 2)
+        full = evaluate_models._continuation_prompt(case, full_budget_answer, 2)
+        self.assertEqual(
+            len(short), len(full),
+            "the continuation prompt grew with the previous answer; re-sending "
+            "it is what pushed round 2 past the window",
+        )
+        self.assertNotIn(full_budget_answer, full)
+        # And the prompt it replaced would not have fit, so this is a real
+        # regression assertion rather than a restatement of the same number.
+        old = f"{case.prompt}\n\n---\n{full_budget_answer}\n---\n"
+        self.assertGreater(
+            self._tokens(old) + evaluate_models.budget_for("coder"),
+            evaluate_models.num_ctx_for(8192),
+            "the old continuation prompt is asserted to have overflowed the "
+            "window; if it now fits, the fixture is wrong and this test has "
+            "stopped proving anything",
+        )
 
     def test_the_window_is_raised_not_clamped_to_the_declared_context(self):
         """The committed manifest declares 8192 for sessions and revdeck, which

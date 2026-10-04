@@ -178,23 +178,53 @@ def is_looped(
     however long it gets.
 
     Only the tail is examined. A loop starts somewhere and then never stops, so
-    the last few thousand characters are where the repetition is unambiguous;
-    requiring the block to repeat to the very end also means an answer that
-    looped and then recovered is not flagged, which is the honest call.
+    the last few thousand characters are where the repetition is unambiguous.
 
-    Measured over all 1,503 committed analysis-slot records: 15 flagged (8
-    distinct), all `done_reason: length`, zero flags on any answer that
-    finished on its own terms.
+    A repetition that runs into the output budget is still a repetition, even
+    though the budget cut it mid-block, so the trailing copy is allowed to be a
+    partial one -- see the loop below for why, and
+    tests/test_loop_detection.py for the offsets that were previously missed.
+    What keeps a recovered answer from being flagged is unchanged and is the
+    honest call: the differing tail breaks the alignment.
+
+    Measured over all 1,503 committed analysis-slot records: 15 flagged, all
+    `done_reason: length`, zero flags on any answer that finished on its own
+    terms. That count is unchanged by accepting a partial trailing copy -- the
+    relaxation adds no false positive on the committed corpus, and
+    tests/test_loop_detection.py asserts both halves against the real records.
     """
     body = text or ""
+    # min_repeats is 3 by construction: two whole copies plus one character of
+    # a third is the least that is evidence rather than a coincidence. Guarded
+    # here rather than trusted, because the parameter is overridable.
+    if min_repeats < 3:
+        raise ValueError(f"min_repeats must be at least 3, got {min_repeats}")
     if len(body) < min_period * min_repeats:
         return False
     tail = body[-tail_chars:]
-    longest = min(max_period, len(tail) // min_repeats)
+    # A partial trailing copy still needs min_repeats - 1 whole ones above it,
+    # so this is the widest period that can be established at all.
+    longest = min(max_period, len(tail) // (min_repeats - 1))
     for period in range(min_period, longest + 1):
-        span = period * min_repeats
-        block = tail[-span:][:period]
-        if block * min_repeats == tail[-span:]:
+        # `period` is a period of the tail's final region when every character
+        # matches the one `period` earlier. Scanning backwards from the end is
+        # both cheap and phase-independent: it stops at the first character that
+        # does not line up, which for a correct answer is the very first
+        # comparison for almost every candidate period, and for a real loop is
+        # the character just before the loop started.
+        #
+        # A run of `min_repeats - 1` whole copies plus one more character is
+        # what a loop cut by the budget leaves behind: the trailing copy is a
+        # prefix of the block, never a whole one, so demanding whole copies all
+        # the way to the final character (`block * min_repeats == tail`) missed
+        # the case a truncation produces -- which is the case loops occur in.
+        needed = period * (min_repeats - 2) + 1
+        limit = len(tail) - period
+        matched = 0
+        while matched < needed and matched < limit \
+                and tail[-1 - matched] == tail[-1 - period - matched]:
+            matched += 1
+        if matched >= needed:
             return True
     return False
 
