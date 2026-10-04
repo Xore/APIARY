@@ -90,6 +90,12 @@ Analysis and sandbox components:
 [GHOSTS sandbox plan](sandbox/ghosts/IMPLEMENTATION_PLAN.md) ·
 [living analysis workstation research](sandbox/windows_kimi/RESEARCH.md)
 
+## Maps — generated views of the tree
+
+[knowledge graph](architecture/graph-report.md) — auto-generated map of every
+file, function and community in this repo, with an explorable viewer; indexed
+from `graphify update .`
+
 ## Records — audit trails
 
 [runtime compatibility record](runtime-compatibility-record.md) ·

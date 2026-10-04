@@ -57,3 +57,23 @@ round7/
 # phantom diff in unrelated work and was one `git add -A` away from committing
 # a machine-local artifact. Same failure mode as the Python bytecode above.
 arcane/home/honeypot-http/http-honeypot/http-honeypot
+
+# graphify knowledge-graph output (#3497). `graphify update .` writes ~890 MB
+# here: a 282 MB graph.json, a 311 MB AST cache, and a per-run-date copy of
+# both. All of it is regenerable from the tree and nothing in the repo reads
+# it, so only the two reader-facing artifacts are tracked -- the explorer
+# (graph.html) and the dated report (YYYY-MM-DD/GRAPH_REPORT.md), both indexed
+# from docs/architecture/graph-report.md. Ignoring the rest is the same
+# failure mode as .ci-artifacts/ and .playwright-mcp/ above: generated output
+# that a `git add -A` would otherwise put in a public repository.
+graphify-out/cache/
+graphify-out/graph.json
+graphify-out/manifest.json
+graphify-out/.graphify_analysis.json
+graphify-out/.graphify_labels.json
+graphify-out/.graphify_labels.json.sig
+graphify-out/.graphify_root
+graphify-out/.graph.html.stale
+graphify-out/20??-??-??/*
+!graphify-out/20??-??-??/graph.html
+!graphify-out/20??-??-??/GRAPH_REPORT.md
