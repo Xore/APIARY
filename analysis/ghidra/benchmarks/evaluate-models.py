@@ -1329,7 +1329,8 @@ def _continuation_prompt(case: RevCase, previous: str, round_index: int) -> str:
 
 
 def score_coder(
-    base_url: str, model: str, context: int, recorder: SlotRecorder | None = None
+    base_url: str, model: str, context: int, recorder: SlotRecorder | None = None,
+    on_case_done: Callable[[dict[str, Any]], None] | None = None,
 ) -> list[dict[str, Any]]:
     """Generate every coder case, looping until the model declares completion.
 
@@ -1376,6 +1377,10 @@ def score_coder(
         record["round_count"] = len(rounds)
         record["stopped_because"] = stopped_because
         results.append(record)
+        # Stream the artifact to disk now rather than after all 44 cases: a
+        # run interrupted mid-model used to leave nothing behind at all.
+        if on_case_done is not None:
+            on_case_done(record)
     return results
 
 
@@ -1520,30 +1525,56 @@ def write_coder_artifacts(writer: TranscriptWriter, artifact: dict[str, Any],
     root.mkdir(parents=True, exist_ok=True)
     written = 0
     for case_id, record in (cases or {}).items():
-        content = (record.get("output") or {}).get("content") or ""
-        language, declared = meta.get(case_id, ("", ""))
-        ext = Path(declared).suffix or _EXT_BY_LANGUAGE.get(language, ".txt")
-        header = (
-            f"// model: {artifact.get('tag')}\n"
-            f"// case:  {case_id}  ({language or 'unknown'})\n"
-            f"// rubric-claimed file: {declared or '(none)'}\n"
-            f"// capped: {record.get('capped')}  degenerate: {record.get('degenerate')}\n"
-            f"// INERT MODEL OUTPUT -- never executed, compiled or parsed by the benchmark\n\n"
-        )
-        target = root / f"{case_id}{ext}"
-        target.write_text(header + content, encoding="utf-8")
-        # Compile the model output itself, not the header we prepended: the
-        # header is a C++ comment so it would still parse, but keeping the
-        # check against exactly what the model emitted is the honest thing.
-        compile_input = root / f".compile{ext}"
-        compile_input.write_text(content, encoding="utf-8")
-        compile_results[case_id] = compile_check(compile_input, workdir)
-        compile_input.unlink(missing_ok=True)
+        write_coder_artifact_file(root, artifact, case_id, record,
+                                  compile_results, workdir)
         written += 1
     (root / "compile-report.json").write_text(
         json.dumps(compile_results, indent=2), encoding="utf-8")
     shutil.rmtree(workdir, ignore_errors=True)
     return written
+
+
+def write_coder_artifact_file(root: Path, artifact: dict[str, Any], case_id: str,
+                              record: dict[str, Any], compile_results: dict[str, Any],
+                              workdir: Path) -> None:
+    """Write and compile ONE case artifact, filling in compile_results.
+
+    Split out of write_coder_artifacts so it can also run the moment a case
+    finishes. Artifacts used to land only after all 44 cases completed, which
+    at ~53s a case means roughly 40 minutes of a run with nothing on disk: a
+    run killed in that window produced no artifacts at all and read exactly
+    like "the feature never worked". Writing per case makes the evidence
+    appear as it is produced.
+
+    The files are inert and never run. Each is handed to its compiler as a
+    diagnostic, which produces and then deletes a binary; no compile result
+    moves a score.
+    """
+    meta = _coder_case_files()
+    content = (record.get("output") or {}).get("content") or ""
+    language, declared = meta.get(case_id, ("", ""))
+    ext = Path(declared).suffix or _EXT_BY_LANGUAGE.get(language, ".txt")
+    # Case ids already end in their extension (rust-scanner.jsonl is a .rs
+    # case), so appending it again produced "case.rs.rs" for every file.
+    if not case_id.endswith(ext):
+        case_id_for_file = case_id + ext
+    else:
+        case_id_for_file = case_id
+    header = (
+        f"// model: {artifact.get('tag')}\n"
+        f"// case:  {case_id}  ({language or 'unknown'})\n"
+        f"// rubric-claimed file: {declared or '(none)'}\n"
+        f"// capped: {record.get('capped')}  degenerate: {record.get('degenerate')}\n"
+        f"// INERT MODEL OUTPUT -- never executed, compiled or parsed by the benchmark\n\n"
+    )
+    (root / case_id_for_file).write_text(header + content, encoding="utf-8")
+    # Compile the model output itself, not the header we prepended: the header
+    # is a C++ comment so it would still parse, but keeping the check against
+    # exactly what the model emitted is the honest thing.
+    compile_input = root / f".compile{ext}"
+    compile_input.write_text(content, encoding="utf-8")
+    compile_results[case_id] = compile_check(compile_input, workdir)
+    compile_input.unlink(missing_ok=True)
 
 
 def write_human_grades_template(writer: TranscriptWriter, artifact: dict[str, Any]) -> Path:
@@ -1657,7 +1688,27 @@ def evaluate_slot(
         elif slot == "coder":
             if writer is not None:
                 write_human_grades_template(writer, artifact)
-            cases = score_coder(base_url, model, context, recorder)
+            stream_state: dict[str, Any] = {}
+            if writer is not None:
+                def _stream_one(record: dict[str, Any]) -> None:
+                    root = (writer.directory / CODER_ARTIFACTS_DIRNAME
+                            / artifact.get("tag", "unknown").replace("/", "_"))
+                    if "workdir" not in stream_state:
+                        root.mkdir(parents=True, exist_ok=True)
+                        stream_state["root"] = root
+                        stream_state["compile"] = {}
+                        stream_state["workdir"] = Path(
+                            tempfile.mkdtemp(prefix="coder-compile-"))
+                    write_coder_artifact_file(
+                        root, artifact, record["case"], record,
+                        stream_state["compile"], stream_state["workdir"])
+                    (root / "compile-report.json").write_text(
+                        json.dumps(stream_state["compile"], indent=2),
+                        encoding="utf-8")
+
+                cases = score_coder(base_url, model, context, recorder, _stream_one)
+            else:
+                cases = score_coder(base_url, model, context, recorder)
             # One readable source file per case, written after the answers are
             # in hand. Never executed or compiled -- these are inert files so a
             # human grader can read the code instead of unescaped JSON.

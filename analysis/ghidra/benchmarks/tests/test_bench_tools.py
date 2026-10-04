@@ -4,9 +4,9 @@ Registered in .github/workflows/quality.yml. Kept as a plain unittest script
 because that is how CI executes the rest of benchmarks/tests/.
 """
 import sys
+import tempfile
 import unittest
 from pathlib import Path
-import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -256,6 +256,59 @@ class TestCoderArtifacts(unittest.TestCase):
             ext = Path(declared).suffix or ev._EXT_BY_LANGUAGE.get(language, ".txt")
             self.assertTrue(ext.startswith("."), case_id)
             self.assertNotEqual(ext, ".txt", f"{case_id} fell back to .txt")
+
+
+class TestStreamingArtifacts(unittest.TestCase):
+    """Artifacts must appear per case, not after the whole model finishes.
+
+    A run interrupted mid-model used to leave no artifacts at all, which reads
+    as "the feature never worked" rather than "the run stopped".
+    """
+
+    def _module(self):
+        return _load_evaluator()
+
+    def test_score_coder_calls_sink_per_case(self):
+        m = self._module()
+        seen = []
+
+        def fake_chat(*a, **k):
+            return {"content": "DONE: complete", "output_tokens": 5}
+
+        m.chat = fake_chat
+        m.CODER_MAX_ROUNDS = 2
+        m.CODER_CASES = [
+            type("C", (), {"name": "a.rs", "prompt": "p", "bucket": "b"})(),
+            type("C", (), {"name": "b.rs", "prompt": "p", "bucket": "b"})(),
+        ]
+        m.score_coder("u", "mod", 4096, None, seen.append)
+        self.assertEqual([r["case"] for r in seen], ["a.rs", "b.rs"])
+
+    def test_sink_is_optional(self):
+        m = self._module()
+        m.chat = lambda *a, **k: {"content": "DONE", "output_tokens": 1}
+        m.CODER_MAX_ROUNDS = 1
+        m.CODER_CASES = [type("C", (), {"name": "a.rs", "prompt": "p",
+                                        "bucket": "b"})()]
+        self.assertEqual(len(m.score_coder("u", "mod", 4096, None)), 1)
+
+    def test_streamed_file_is_on_disk_before_end(self):
+        m = self._module()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "arts"
+            root.mkdir()
+            compile_results = {}
+            workdir = Path(tempfile.mkdtemp())
+            rec = {"output": {"content": "fn main() {}"},
+                   "capped": False, "degenerate": False}
+            m._coder_case_files = lambda: {"a.rs": ("rust", "a.rs")}
+            m.write_coder_artifact_file(root, {"tag": "mod:q4"}, "a.rs", rec,
+                                        compile_results, workdir)
+            f = root / "a.rs"
+            self.assertTrue(f.exists())
+            self.assertIn("fn main() {}", f.read_text())
+            self.assertIn("a.rs", compile_results)
+            self.assertFalse((root / ".compile.rs").exists())
 
 
 class TestCompileCheck(unittest.TestCase):
