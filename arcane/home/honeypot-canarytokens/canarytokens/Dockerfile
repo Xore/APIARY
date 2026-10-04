@@ -24,7 +24,7 @@
 ARG ARCH=amd64
 # the build pins its target platform on purpose (ARCH above)
 # hadolint ignore=DL3029
-FROM --platform=linux/${ARCH} python:3.13@sha256:138ea0589fbe6c86a54ec0734b1183d2955f0531285254ea962feb0f1d4d920d AS builder
+FROM --platform=linux/${ARCH} python:3.13.16-slim@sha256:3dd7cc108ec1493442514f5c2a871af6af0ec31d768ff6e378a93340c3b3db5f AS builder
 COPY --from=ghcr.io/astral-sh/uv:0.11.24 /uv /uvx /usr/local/bin/
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 ENV UV_LINK_MODE=copy

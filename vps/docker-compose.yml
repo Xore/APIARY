@@ -124,7 +124,7 @@ services:
 
   # ===== TRAEFIK =====
   traefik:
-    image: traefik:v3.7.12@sha256:9c2a54d87f76f5c2f5f2682c68394af92fb12c0a2686798d6462a3f84bd78eaf
+    image: traefik:v3.7.13@sha256:24841fe2de7304c149343d877d2923b4c8800a38ba015dea9174c23b20e344a0
     container_name: traefik
     restart: unless-stopped
     ports:
@@ -602,7 +602,7 @@ services:
   # up either way, it just polls BLACKHOLE_LIST on a timer (blackhole.go).
   # See portbridge-blackhole-refresh.sh for the full reasoning.
   portbridge-blackhole-refresh:
-    image: curlimages/curl:8.21.0@sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13
+    image: curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777
     container_name: hp-portbridge-blackhole-refresh
     restart: unless-stopped
     user: root
@@ -637,7 +637,7 @@ services:
   # scripts/github-ci-runner/dashboard-source-health.sh uses to reach the Rust
   # tier from a shell. That route is auth-gated (#2183), hence the token below.
   portbridge-manual-blackhole-refresh:
-    image: curlimages/curl:8.21.0@sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13
+    image: curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777
     container_name: hp-portbridge-manual-blackhole-refresh
     restart: unless-stopped
     user: root
