@@ -79,7 +79,81 @@ flowchart LR
   dash <-.->|"hash-only spools"| host
 ```
 
-## Deployment and trust boundaries
+## Trust boundaries as drawn edges (#3497)
+
+The ten-second diagram above shows *what* talks to *what*. It does not show
+where trust changes hands, which is the question an operator actually has
+when deciding whether a sensor can be treated as hostile. Every thick edge
+below is one boundary crossing (`B1`…`B5`); every thin edge is a hop
+*within* a zone, where no privilege change happens.
+
+```mermaid
+flowchart TB
+  attacker["Untrusted internet"]
+
+  subgraph z0["VPS — zone 0 · public exposure"]
+    direction TB
+    suri["Suricata + p0f<br/>raw sockets · sees real client IPs"]
+    traefik["Traefik + oauth2-proxy ×6<br/>TLS terminates here · :443"]
+    pb["portbridge<br/>raw TCP/UDP relay · TLS passthrough"]
+  end
+
+  wg["WireGuard — zone 1<br/>home initiates · nothing inbound to home"]
+
+  subgraph z2["Home sensors — zone 2 · hostile by assumption"]
+    direction TB
+    sensors["Sensor stacks<br/>each stack's networks stay private to it<br/>none joins honeynet"]
+    tanner["honeypot-tanner · SNARE + TANNER"]
+  end
+
+  logsT[("Shared host log dirs<br/>logs/ bind mounts · root-owned")]
+
+  subgraph z3["Analysis plane — zone 3 · shared honeynet"]
+    direction TB
+    fb["Filebeat · 19 processors<br/>2 with ignore_failure<br/>ES default_pipeline: geoip-honeypot"]
+    es[("Elasticsearch<br/>honeypot-v2-* · ILM")]
+    loops["Worker loops<br/>identity · correlator · agent-intrusion<br/>inventory · alert-notifier · rollups"]
+    dash["honeypot-dashboard<br/>frontend-next · backend-service"]
+    kc["honeypot-keycloak<br/>OIDC issuer"]
+  end
+
+  subgraph z4["Root-owned host — zone 4 · detonation"]
+    direction TB
+    spools[("requests/pending<br/>hash-only .request markers")]
+    sand["sandbox/ · Linux KVM · Windows KVM<br/>CAPE · GHOSTS · Ghidra"]
+  end
+
+  subgraph z5["Model plane — zone 5"]
+    ollama["Ollama<br/>expected-digest pinned"]
+  end
+
+  attacker ==>|"B1 · raw sensor traffic"| suri
+  attacker ==>|"B1 · TLS to :443"| traefik
+  attacker ==>|"B1 · relayed raw ports"| pb
+  suri ==>|"B2 · the tunnel is the only way in"| wg
+  traefik ==>|"B2 · the tunnel is the only way in"| wg
+  pb ==>|"B2 · the tunnel is the only way in"| wg
+  wg --> sensors
+  wg --> tanner
+  sensors ==>|"B3 · filesystem handoff, no socket"| logsT
+  tanner ==>|"B3 · filesystem handoff, no socket"| logsT
+  logsT --> fb
+  fb ==>|"B4 · the one normalizing ingest path"| es
+  es ==>|"B4 · read-only scan for workers"| loops
+  loops ==>|"B4 · durable entities"| es
+  es --> dash
+  dash ==>|"B4 · analyst session, service tokens"| kc
+  loops ==>|"B5 · hash-only markers"| spools
+  spools --> sand
+  sand ==>|"B5 · bounded JSON back"| dash
+  loops ==>|"B5 · scoring never a browser-facing hop"| ollama
+```
+
+Reading the zones: zone 2 is the only one that *expects* to be attacked, so
+nothing in it is trusted downstream — bytes leave it by bind mount, never by
+socket. Zone 4 holds the only code that executes captured samples, and the
+only thing crossing into it is a hash. Zone 5 is reached by the scoring loops
+alone; the browser never addresses a model endpoint directly.
 
 The home side is deliberately **not** one deployment unit. #258 split the
 original monolith; #1502 moved every piece onto Arcane's directory-aware
@@ -91,7 +165,9 @@ from each other the way the VPS/home boundary is: most share the
 without any direct socket between sensor and analyzer
 ([NETWORK.md](NETWORK.md) carries the isolation rules).
 
-Trust boundaries, strongest first:
+The same boundaries in prose, strongest first (the numbering below is
+independent of `B1`…`B5` above — these are ordered by strength, those by
+position):
 
 1. **Internet ↔ VPS**: only Suricata/p0f raw sockets, Traefik :443, and
    portbridge's relayed ports are reachable; ufw seeds the rest.
@@ -221,6 +297,43 @@ flowchart TB
 `depends_on` cannot span stacks, dependents poll marker files at
 entrypoint instead — the cross-stack readiness contract documented in
 [STORAGE.md](STORAGE.md#host-tree).
+
+## Deployment modes (#3497)
+
+Three independent decisions. None of them is the same axis, and conflating
+them is how a fleet ends up running a sensor roster nobody declared.
+
+```mermaid
+flowchart LR
+  inst["1 · scripts/install.sh --profile<br/>home or vps · exactly two<br/>vps first, then home"]
+  prof["2 · deploy-profiles/<br/>full · ics-focused · minimal-web"]
+  val["scripts/validate-deploy-profile.sh<br/>scripts/deploy-profile-sizing.py"]
+  sync["3 · Arcane GitOps sync<br/>39 entries · arcane/manifests/home-production.json"]
+  stacks["arcane/home/honeypot-*/<br/>one independently synced stack each"]
+
+  inst -->|"installs the OS layer"| prof
+  prof -->|"validated before deploy"| val
+  prof -->|"declares the roster"| sync
+  sync -->|"each entry syncs + restarts alone"| stacks
+```
+
+- **Host roles** — `scripts/install.sh` takes exactly `--profile home|vps`.
+  Bootstrap order for a fresh pair is `vps` first (it mints
+  `VPS_WG_PUBLIC_KEY`), then `home`.
+- **Roster** — [`deploy-profiles/`](../deploy-profiles/) lists stack names
+  only; [`docs/deploy-profiles/README.md`](deploy-profiles/README.md) carries
+  the structural-dependency rules the validator enforces, plus the known gap
+  (`full.txt` omits `honeypot-sonicwall-sma`).
+- **Sync** — `arcane/manifests/home-production.json` is the source of truth
+  for *what runs*; `.github/workflows/deploy.yml` deploys no home stack
+  itself since #1502. An operator can run a narrower roster than the
+  manifest lists.
+
+The profile list and the manifest are deliberately separate concerns: the
+manifest says what Arcane knows how to sync, the profile says what this
+deployment chooses to run. `deploy-profiles/` is checked by the validator
+against the real `arcane/home/` directories, so a retired stack name fails
+at validation rather than mid-deploy.
 
 ## Event ingestion (summary)
 
