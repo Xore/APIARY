@@ -142,6 +142,13 @@ flowchart TB
   dm3 -.->|"places every stack"| z2
 ```
 
+As a standalone file this diagram is also explorable — hover any node for
+its stores and loops, follow a route, toggle themes:
+[`diagrams/apiary-trust-boundaries.html`](diagrams/apiary-trust-boundaries.html)
+(interactive) and [`diagrams/apiary-trust-boundaries.svg`](diagrams/apiary-trust-boundaries.svg)
+(static, for embedding). Open the HTML from the filesystem or any static
+host; GitHub will not render it inline.
+
 Reading it: zone 2 is the only zone that *expects* to be attacked, so
 nothing in it is trusted downstream — bytes leave by bind mount, never by
 socket. Zone 4 holds the only code that executes captured samples, and the

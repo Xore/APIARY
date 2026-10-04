@@ -58,6 +58,10 @@ round7/
 # a machine-local artifact. Same failure mode as the Python bytecode above.
 arcane/home/honeypot-http/http-honeypot/http-honeypot
 
+# archify's working folder (#3497): the typed candidate, the rendered HTML and
+# its gate receipts. Intermediate -- the shipped artifact is docs/diagrams/.
+.archify/
+
 # graphify knowledge-graph output (#3497). `graphify update .` writes ~890 MB
 # here: a 282 MB graph.json, a 311 MB AST cache, and a per-run-date copy of
 # both. All of it is regenerable from the tree and nothing in the repo reads
@@ -78,8 +82,8 @@ graphify-out/20??-??-??/*
 !graphify-out/20??-??-??/graph.html
 !graphify-out/20??-??-??/GRAPH_REPORT.md
 
-# Ad-hoc coder worktrees that get created in the repository ROOT during
-# dispatched in the repository root during dispatch (oc-<issue>-wt/). They are
+# Ad-hoc coder worktrees that get created in the repository root during
+# dispatch (oc-<issue>-wt/). They are
 # untracked scratch, but they sit inside the tree graphify indexes, so every
 # artifact they produce counts them as real files: a published report listed a
 # script under one of them that #3310 had already deleted from the mainline
