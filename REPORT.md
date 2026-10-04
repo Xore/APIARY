@@ -944,3 +944,202 @@ $ /usr/bin/python3.12 -m pytest scripts/tests tests/docs -q
 - **No existing lane, row or aggregator removed.** The workflow diff is +29
   −11, all inside the existing scan step: its flags, group annotations,
   unresolved-classification branch and trivy invocation are untouched.
+
+---
+
+# Session 2 — the golang toolchain pins
+
+Two commits, continuing the pin-bump work. Branch `ci/3501-base-image-gate`.
+
+| # | commit | contents |
+|---|---|---|
+| 1 | `dab1a0bd` | `build(3501)` — four stale `golang:1.23*` pins moved |
+| 2 | `00447a6e` | `ci(3501)` — one reasoned `ACCEPTED_CVES` entry, for the one that cannot move |
+
+These are the three entries the previous run deliberately left out, plus the
+one exemption that decision forced.
+
+## What moved, and why each case came out different
+
+The four stale pins were not one case but three. Deciding per-image rather
+than by tag is what separates them.
+
+| image | old ref | new ref | before | after | how it built |
+|---|---|---|---|---|---|
+| honeyfs-implant | `golang:1.23-bookworm@sha256:167053a2…` | `golang:1.27-alpine@sha256:8a5910f3…` | 1386 total | 0 | scratch final, `CGO_ENABLED=0` |
+| galah-llm-broker | `golang:1.23@sha256:60deed95…` | `golang:1.27-alpine@sha256:8a5910f3…` | 1386 total | 0 | alpine final, `CGO_ENABLED=0` |
+| hellpot | `golang:1.23@sha256:60deed95…` | `golang:1.27-alpine@sha256:8a5910f3…` | 1386 total | 0 | alpine final, `CGO_ENABLED=0` |
+| galah | `golang:1.23@sha256:60deed95…` | `golang:1.27-bookworm@sha256:69a7b978…` | 1386 total | 7 | bookworm-slim final, `CGO_ENABLED=1` |
+
+Three took alpine and one could not. The constraint that separates them is
+galah's `CGO_ENABLED=1` against `mattn/go-sqlite3`, which has no pure-Go
+fallback — the binary is dynamically linked to glibc and ships into a
+`debian:bookworm-slim` final stage, so its toolchain has to be glibc too.
+That is a property of the program, not of the Go version.
+
+hellpot's build stage also traded `apt-get install python3 git` for
+`apk add --no-cache python3 git`. Its two patch scripts import only
+`pathlib`, so nothing behind that line required Debian, and the final stage
+was already alpine.
+
+### The bookworm family is uniformly 7 — there is no clean version to move to
+
+This is the measurement that decides galah's case, so it is worth the full
+command:
+
+```
+$ trivy image --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
+    --exit-code 1 --no-progress golang:1.27-bookworm@sha256:69a7b978…
+exit=1
+2026-…  INFO  Detected OS  family="debian" version="12.15"
+Total: 7 (HIGH: 7, CRITICAL: 0)
+```
+
+```
+$ for t in 1.26-bookworm 1.27-bookworm tip-bookworm 1.27-trixie 1.27-alpine; do …; done
+golang:1.26-bookworm    debian 12.15   exit=1   Total: 7  (HIGH: 7, CRITICAL: 0)
+golang:1.27-bookworm    debian 12.15   exit=1   Total: 7  (HIGH: 7, CRITICAL: 0)
+golang:tip-bookworm     debian 12.15   exit=1   Total: 7  (HIGH: 7, CRITICAL: 0)
+golang:1.27-trixie      debian 13.7    exit=1   Total: 48 (HIGH: 48, CRITICAL: 0)
+golang:1.27-alpine      alpine 3.24.2  exit=0   (no findings)
+```
+
+`tip-bookworm` is the newest rebuild upstream publishes, and it measures
+the same 7 as 1.26 and 1.27. The 7 are debian 12.15's own `libexpat1`
+(6 CVEs, fixed in `deb12u4`) and `libpcre2-8-0` (1, fixed in `deb12u2`),
+neither rebuilt into the tag. Enumerated from the JSON report:
+
+```
+  CVE-2024-28757   HIGH  libexpat1      2.5.0-1+deb12u3 -> deb12u4
+  CVE-2025-59375   HIGH  libexpat1      2.5.0-1+deb12u3 -> deb12u4
+  CVE-2026-25210   HIGH  libexpat1      2.5.0-1+deb12u3 -> deb12u4
+  CVE-2026-45186   HIGH  libexpat1      2.5.0-1+deb12u3 -> deb12u4
+  CVE-2026-66046   HIGH  libexpat1      2.5.0-1+deb12u3 -> deb12u4
+  CVE-2026-93990   HIGH  libexpat1      2.5.0-1+deb12u3 -> deb12u4
+  CVE-2026-103111  HIGH  libpcre2-8-0   10.42-1+deb12u1 -> deb12u2
+```
+
+The 1386 total the old pins carried was 635 fixable (626 HIGH, 9
+CRITICAL) on the base image's own OS layer, so the bump is 635 → 7 even
+where it could not be 0.
+
+### The exemption, and the comment it replaces
+
+`golang:1.27-bookworm` gets an entry keyed to its digest. The entry that
+was there said the golang tags scan clean and were deliberately absent —
+true when written, false now, and the reason this entry is necessary. It is
+corrected rather than left to rot. `golang:1.27-alpine` gets no entry: it
+measures 0, and an entry for a clean image is the false claim rule 1 above
+the dict exists to prevent.
+
+## Verification — real output
+
+### All four images rebuild after the bump
+
+```
+$ docker build --no-cache -t honeyfs-implant:test   arcane/home/honeypot-cowrie/honeyfs-implant/
+   … DONE 0.5s
+$ docker build --no-cache -t galah-llm-broker:test  arcane/home/honeypot-galah/galah-llm-broker/
+   … DONE 1.2s
+$ docker build --no-cache -t hellpot:test           arcane/home/honeypot-hellpot/hellpot/
+   #17 [build 10/10] RUN CGO_ENABLED=0 GOOS=linux go build -trimpath … -o /hellpot cmd/HellPot/*.go
+   #17 DONE 13.4s
+$ docker build --no-cache -t galah:test             arcane/home/honeypot-galah/galah/
+   #20 exporting manifest sha256:c3e3653e518ebbb1b3bb96b3e9397fd4… DONE 2.3s
+```
+
+hellpot's alpine build stage ran both patch scripts and `go mod download`
+and produced the binary, so the `apt-get` → `apk` swap is exercised, not
+assumed.
+
+### Emission unchanged, exemption live and narrow
+
+```
+$ python3 scripts/list-docker-base-images.py | wc -l
+66
+$ python3 scripts/list-docker-base-images.py 2>&1 >/dev/null
+not scannable: dustinupdyke/ghosts-client-universal -- never published: …
+```
+
+66 refs before this session's work and 66 after: the three pins that moved
+to an existing tag (`1.27-alpine`, already in the tree) and the one that
+moved within an existing tag (`1.27-bookworm`, new) net out to no new
+distinct artifacts.
+
+```
+$ python3 -c "… allow_cve_findings('golang:1.27-bookworm@sha256:69a7b978…')"
+accepted_ref: golang:1.27-bookworm@sha256:69a7b9788769bec032d238959b61854e9ae87f57be9029ec04e9885fabf99195
+allow_cve_findings -> True
+neighbour 1.27-alpine -> False
+```
+
+### Tests
+
+```
+$ /usr/bin/python3.12 -m pytest scripts/tests/test_3501_base_image_cve_exemptions.py tests/docs/test_2314_fix.py -q
+45 passed in 0.88s
+
+$ /usr/bin/python3.12 -m pytest scripts/tests tests/docs -q
+1000 passed, 6 skipped, 1 xfailed, 93 subtests passed in 173.18s (0:02:53)
+```
+
+`tests/docs/test_2314_fix.py` needed no change and that is worth stating
+plainly rather than glossing: it guards the six `golang:1.26-alpine` pins,
+which this work does not touch. The new entry is written as a `(tag,
+digest, reason)` tuple rather than a joined `tag@sha256:…` string
+specifically so the `#2314` repo-wide consistency check cannot read it as a
+seventh pin file — the reason for that two-field shape is already in the
+dict's own comment, and this is the case it was written for.
+
+### No AI attribution
+
+```
+$ git log -2 --format='%B' > /tmp/msg.txt
+$ python3 scripts/check-ai-attribution.py --text /tmp/msg.txt
+no AI/assistant attribution found
+exit=0
+```
+
+## What is still red, and what I could not measure
+
+**The gate is still red, and further out than the golang work alone
+suggests.** I ran the gate logic over all 66 emitted refs in this session.
+The Docker Hub anonymous pull rate limit was hit partway through, so the
+run does not have a single trustworthy total. Splitting what actually
+happened:
+
+| outcome | count | meaning |
+|---|---|---|
+| scanned clean | 13 | trivy exit 0 |
+| matched a written exemption | 5 | incl. the new `golang:1.27-bookworm` |
+| real findings, no exemption | 18 | the actual backlog |
+| unverified — rate limited | 30 | **coverage gap, not a finding** |
+| unresolvable reference | 0 | |
+
+The previous report's headline was 54 flagged. That number is not
+comparable to the 18 above and neither is the arithmetic that would connect
+them: the 30 rate-limited images were never measured, and this session's
+Docker Hub budget does not permit measuring them. `golang:1.27-alpine`
+appears under "unverified" here and measured 0 fixable earlier in the same
+session — the re-scan is what hit the limit, which is the clearest evidence
+in this report that the 30 are unmeasured rather than clean.
+
+The 18 with real findings are untouched by this session and are the next
+work: zeek, elasticsearch, arkime, ollama, keycloak, unsloth, dionaea and
+the rest, each needing a candidate scanned before its pin moves. I did not
+start them, because the rate limit means I could not verify a candidate
+digest for any of them, and an unverified bump is the failure mode the
+brief names.
+
+**Explicitly not done:**
+
+- **Nothing pushed. No PR.** Two commits on `ci/3501-base-image-gate`.
+- **No lane, row, aggregator or check removed or weakened.** The workflow
+  file is untouched by this session — the diff is 5 Dockerfiles and
+  `scripts/list-docker-base-images.py`.
+- **No `--ignore-unfixed` added anywhere by me, no severity threshold
+  raised, no blanket ignore rule.** `--ignore-unfixed` appears in every
+  command quoted above because it is already in the gate's own invocation
+  at `image-security-scan.yml:120`; it is the gate's flag, not mine.
+- **No exemption written for an image whose scan did not run.** The 30
+  rate-limited images are reported as a coverage gap and left failing.
