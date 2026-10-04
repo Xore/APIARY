@@ -206,14 +206,23 @@ ACCEPTED_CVES: dict[str, tuple[str | None, str]] = {
         "digest-pins this tag, so main() emits it bare and the digest field "
         "is None."
     ),
-    # The golang toolchain tags are deliberately absent. Both pin a stale
-    # digest -- scanning each tag's current digest returns 0 fixable
-    # CRITICAL/HIGH -- so the fix is to bump the pin, not to exempt the
-    # image, and an entry here would be a false claim that this repo cannot
-    # move them. They are also the only images in the tree whose pins #2314
-    # pins repo-wide to one refreshed digest, so an exemption entry naming
-    # them reads to tests/docs/test_2314_fix.py as a seventh pin file and
-    # fails the check that guards those six.
+    "golang:1.27-bookworm": (
+        "sha256:69a7b9788769bec032d238959b61854e9ae87f57be9029ec04e9885fabf99195",
+        "build stage only -- galah names it `AS build` and ships a separate "
+        "debian:bookworm-slim final image; measured 7 fixable CRITICAL/HIGH, "
+        "all debian 12.15 libexpat1 and libpcre2-8-0 that upstream has not "
+        "rebuilt into this tag (1.26, 1.27 and tip-bookworm each measure the "
+        "same 7). It cannot move to alpine: galah builds CGO_ENABLED=1 "
+        "against mattn/go-sqlite3, which has no pure-Go fallback, and runs "
+        "that glibc binary in the bookworm-slim final stage, so the "
+        "toolchain has to be glibc."
+    ),
+    # The other golang toolchain tags are deliberately absent. The stale
+    # 1.23-bookworm and bare 1.23 pins are gone -- their three Dockerfiles
+    # moved to golang:1.27-alpine, which measures 0 fixable CRITICAL/HIGH,
+    # so the fix there was the bump rather than an exemption.
+    # golang:1.27-alpine needs no entry for the same reason: measured clean.
+    # The entry above is the one that had to be argued rather than bumped.
 }
 
 
