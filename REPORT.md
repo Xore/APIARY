@@ -839,3 +839,108 @@ $ python3.12 -c "import yaml; yaml.safe_load(open('.github/workflows/quality.yml
 - **`ACCEPTED_CVES`** still uncommitted in the working tree, unchanged.
 - **No existing lane, row or aggregator removed.** The `quality.yml` diff is 13
   added lines inside the existing `Full-history secret scan (gitleaks, #3501)` row.
+
+---
+
+# Commits 5–8 — arm the container-scan CVE gate (#3501 GAP 1)
+
+Four commits on top of the secret-scan work above.
+
+| # | sha | subject |
+|---|---|---|
+| 5 | `0ff159d0` | `ci(3501)` — define the exemption table and its matching rule |
+| 6 | `4c62ae3d` | `test(3501)` — hold the exemption set against rot |
+| 7 | `9f0a9cae` | `ci(3501)` — arm the gate |
+| 8 | `498ec541` | `docs(3501)` — record the gate decision |
+
+## ⚠️ The gate is armed and currently RED
+
+This is the headline, and it is not the outcome the brief assumed. The gate
+fails on **54 base images with fixable CRITICAL/HIGH findings and no written
+reason**. That is the measured backlog of `.task.md` defect 3 (17 refs with no
+key) plus the 37 whose written reasons were contradicted by the scans, minus
+the four that are genuinely immovable and are now exempted.
+
+**Arming a gate that fails means every push touching a Dockerfile goes red.**
+That is the correct behaviour for the gate as specified, and it is also why
+the brief's step 2 ("a proof the gate FAILS when an exemption is removed") is
+not a discriminating test in this state — see below.
+
+## The four exemptions
+
+All four are build stages that no shipped image inherits, resolved by
+walking every tracked Dockerfile's stage graph. Each count is trivy 0.74.0's
+own tally for the pinned digest, 2026-10-04:
+
+| tag | digest | fixable CRITICAL/HIGH |
+|---|---|---|
+| `node:22` | `sha256:8a34c4ab…` | 160 (28 at the tag's current digest) |
+| `rust:1-bookworm` | `sha256:82150a52…` | 147 (18) |
+| `rust:1-slim-bookworm` | `sha256:94e9efa4…` | 74 (1) |
+| `mcr.microsoft.com/dotnet/sdk:10.0.101` | unpinned | 64 |
+
+The `golang:*` tags are deliberately **absent**: their pins are stale but
+movable, so the fix is to bump them, not to exempt them.
+
+## Commands and real output
+
+### The gate, exemptions in place
+
+```
+$ /usr/bin/python3.12 scripts/list-docker-base-images.py > images.txt
+$ bash /tmp/scan3501/gate_raw.sh          # the workflow's scan step verbatim
+GATE EXIT = 1
+::notice::4 image(s) matched a written exemption in ACCEPTED_CVES.
+::error::54 base image(s) have fixable CRITICAL/HIGH vulnerabilities and no
+         written reason -- see the grouped logs above. Fix the finding (bump
+         the pin), or add a reasoned entry to ACCEPTED_CVES.
+```
+
+### Negative control — and why it does not prove what it looks like it proves
+
+Removing the `node:22` entry and re-running:
+
+```
+NEGATIVE CONTROL GATE EXIT = 1
+::error title=Vulnerable base image::node:22@sha256:8a34c4ab… has fixable CRITICAL/HIGH vulnerabilities
+::notice::3 image(s) matched a written exemption in ACCEPTED_CVES.
+::error::54 base image(s) have fixable CRITICAL/HIGH vulnerabilities and no written reason
+```
+
+The count moves 4 → 3 and `node:22` is named, so `allow_cve_findings()` is
+demonstrably consulted and the removal is demonstrably detected. **But the
+exit code is 1 either way**, so as a pass/fail proof this test discriminates
+nothing. It would only be conclusive if the gate were green with exemptions
+in place first.
+
+### Emission unchanged
+
+```
+$ git show origin/main:scripts/list-docker-base-images.py > baseline.py
+$ python3.12 baseline.py > /tmp/images_main.txt     # run inside the tree:
+                                                   # REPO_ROOT is __file__
+                                                   # -relative, so it must
+                                                   # live in scripts/
+origin/main: 67 refs | HEAD: 67 refs
+STDOUT IDENTICAL to origin/main
+```
+
+### Full suite
+
+```
+$ /usr/bin/python3.12 -m pytest scripts/tests tests/docs -q
+1000 passed, 6 skipped, 1 xfailed, 93 subtests passed in 200.40s (0:03:20)
+```
+
+## Not done in these commits
+
+- **The 54-image backlog is not cleared.** The brief's rule is that an image
+  with a published fix gets the fix — a pin bump in the Dockerfile or compose
+  file — not an exemption. That work is 52 distinct images plus 2 duplicate
+  spellings, each needing a scan to confirm the new digest is actually clean
+  before the pin moves. It is not done here, and it is what stands between
+  this branch and a green gate.
+- **Nothing pushed. No PR.** Commits only.
+- **No existing lane, row or aggregator removed.** The workflow diff is +29
+  −11, all inside the existing scan step: its flags, group annotations,
+  unresolved-classification branch and trivy invocation are untouched.
