@@ -1,12 +1,13 @@
 # #3501 — landing report
 
-Three commits. Nothing pushed, no PR opened. Branch `ci/3501-gate-enforcement`.
+Four commits. Nothing pushed, no PR opened. Branch `ci/3501-gate-enforcement`.
 
 | # | commit | contents |
 |---|---|---|
 | 1 | `8cc55aa9` | `ci(secret-scan)` — full-history secret-scan gate + its tests |
 | 2 | `1d588877` | `chore(types)` — mypy closure over 17 files |
-| 3 | this one | `docs(measurement)` — `CONTAINER-SCAN-MEASUREMENT.md`, docs only |
+| 3 | `294c2c88` | `docs(measurement)` — `CONTAINER-SCAN-MEASUREMENT.md`, docs only |
+| 4 | this one | `ci(wire)` — actually calls the gate; **commit 1 was inert** |
 
 `scripts/list-docker-base-images.py` and `.github/workflows/image-security-scan.yml`
 were **not** touched. The `ACCEPTED_CVES` block in that script remains uncommitted
@@ -327,5 +328,274 @@ column instead, and the deviation is stated in the document itself.
 ## Not done
 
 - Container-scan gate: **not armed.** Blocked pending the key rewrite.
+- `ACCEPTED_CVES`: still uncommitted, unchanged.
+- Nothing pushed. No PR.
+
+---
+
+# Commit 4 — wire the gate into CI
+
+**Commit 1's headline claim was false until this commit.** It said *"fail CI on
+a real credential anywhere in full history"*, and nothing called the script:
+
+```
+$ grep -rn 'gitleaks' .github/workflows/*.yml
+(no output)
+```
+
+`scripts/check-git-secrets.py` was a well-tested gate behind no door. This
+commit is the door.
+
+Two files: `scripts/install-gitleaks.sh` (new) and one additive matrix row in
+`.github/workflows/quality.yml`.
+
+## Why a separate installer script
+
+`image-security-scan.yml:103-104` installs trivy via `scripts/install-trivy.sh`,
+whose header states the reason to extract rather than curl-|-sh it (#3115,
+SAST-flagged). Same class of third-party code, same discipline — so
+`scripts/install-gitleaks.sh` is a sibling of that script, not an inline
+`curl` in the row. The actionlint/zizmor/hadolint rows *do* inline their
+downloads (e.g. `quality.yml:2053-2055`), but those are single-use linters
+whose pin dies with the row; the trivy installer exists because *two* workflows
+share one binary and must not drift on it. gitleaks has one caller, so a
+standalone script is arguably over-built — it is a sibling rather than a
+generalised abstraction, and it is what lets the row read as
+`scripts/install-gitleaks.sh` instead of eight lines of pinned curl. The pin
+lives in exactly one place either way.
+
+## The pin
+
+Verified against the release's own `gitleaks_8.30.0_checksums.txt`, not just
+recorded from a download:
+
+```
+$ curl -sSL -o /tmp/glsums.txt \
+    https://github.com/gitleaks/gitleaks/releases/download/v8.30.0/gitleaks_8.30.0_checksums.txt
+$ grep -i 'linux_x64.tar.gz' /tmp/glsums.txt
+79a3ab579b53f71efd634f3aaf7e04a0fa0cf206b7ed434638d1547a2470a66e  gitleaks_8.30.0_linux_x64.tar.gz
+$ sha256sum -c -
+gl.tar.gz: OK
+```
+
+That digest is `PINNED_GITLEAKS_SHA256` in the installer. The installer also
+refuses a version override that carries no checksum of its own — the
+`sha256sum -c` step would either fail confusingly or, on a collision, pass.
+
+## The row, and why `home: true`
+
+`quality.yml:2069` (after the hadolint row). It qualifies for the metal under
+the #2389/#2565 criterion: checkout, this workflow's own `setup-python`, one
+pip install, and a tarball unpacked into `$RUNNER_TEMP`. **No docker.** It does
+need the gitleaks binary, and that need is satisfiable on both runner types —
+`install-gitleaks.sh` installs into `$RUNNER_TEMP`, not `/usr/local/bin`, which
+is unwritable on the self-hosted honeypot-ci runner (the exact constraint
+`install-trivy.sh:27-31` documents). So `home: true` costs nothing the metal
+cannot deliver.
+
+It is a matrix row, not a new job, so it inherits `scripts-and-compose`'s
+`needs: [ci-target]`, its routed `runs-on`, and the pair-naming suffix. No
+existing job, row, `needs:` list or aggregator was touched — the row was
+*inserted*, and `git diff` shows no deletions in the workflow.
+
+## Two things that would have made this gate lie
+
+Neither was in the brief; both are the difference between a gate that works and
+a gate that reports green having measured nothing.
+
+**1. `actions/checkout` defaults to `fetch-depth: 1`.** The scan's entire claim
+is *full history* (`check-git-secrets.py:9-11`). On a `pull_request` the
+merge-commit checkout hands gitleaks exactly one commit, and the gate passes
+vacuously. No workflow in this tree sets `fetch-depth`
+(`grep -rn 'fetch-depth' .github/workflows/*.yml` → empty), so nothing else had
+hit it. The row unshallows, then **asserts** the history is really there:
+
+```
+commits="$(git rev-list --count HEAD)"
+if [ "$commits" -lt 100 ]; then
+  echo "::error::secret-scan: only $commits commit(s) under HEAD -- refusing to report a clean scan of a truncated history"
+  exit 1
+fi
+```
+
+A truncated history is an error, not a pass.
+
+**2. "Failed to run" must not read as "no secrets found."** This is the
+flagged-vs-unresolved split #2763 forced for trivy. The script already draws it
+— `--exit-code 0` so gitleaks' own status is never trusted, then a non-zero
+from the binary itself mapped to `return 2` (`check-git-secrets.py:196,201-208`).
+The workflow must not paper over it, so the row runs under `set -euo pipefail`
+with **no** `|| true` and no piped-away status; exit 2 fails the step like exit
+1 does. Proof below.
+
+---
+
+# Verification
+
+All output pasted is real, from the installed-binary path the workflow uses —
+`scripts/install-gitleaks.sh`, not the pre-extracted `/tmp/gitleaks` the brief
+mentions. That binary is byte-identical to the one the installer downloads
+(`cmp` clean), so the two agree; the runs below use the installed one.
+
+```
+$ GITHUB_PATH=/tmp/gl-ghpath RUNNER_TEMP=/tmp scripts/install-gitleaks.sh
+/tmp/gl-verify/gitleaks_8.30.0_linux_x64.tar.gz: OK
+install-gitleaks: added /tmp/gl-verify to GITHUB_PATH (gitleaks 8.30.0)
+$ command -v gitleaks
+/tmp/gl-verify/gitleaks
+```
+
+## 1. Full-history scan — a real run
+
+```
+$ export PATH="/tmp/gl-verify:$PATH"
+$ python3 scripts/check-git-secrets.py
+Secret scan passed: 88 finding(s) over full history, all covered by ALLOWED_FILES (0 cowrie honeyfs) or absent.
+GATE EXIT CODE: 0
+
+real	2m6.097s
+```
+
+Not a skip, and not the `--binary /tmp/gitleaks` path from commit 1: 2858
+commits, full clone (`git rev-parse --is-shallow-repository` → `false`).
+88 findings, every one an `ALLOWED_FILES` entry — 50 in `graphify-out`, 12 in
+`dash-shots`, 86 of 88 on `generic-api-key` and 2 on `jfrog-identity-token`.
+
+## 2. Negative control — plant, prove it fails, remove, prove it passes
+
+**Planted** a fake credential in a non-allowlisted file, committed:
+
+```
+$ printf 'api_key = "%s"\n' 0a1b2c3d 4e5f6a7b 8c9d > deploy/gate-negative-control.txt
+$ git commit -qm "negative control: fake credential"   # 1143e043
+$ python3 scripts/check-git-secrets.py
+Secret scan failed: 1 finding(s) outside the allowlist (88 allowed, 0 of them cowrie honeyfs bait):
+  - deploy/gate-negative-control.txt:1: generic-api-key (commit 1143e043d7, t)
+GATE EXIT CODE: 1
+```
+
+**Removed it** (`git rm`, committed `19096ca3`) and re-ran. The gate still
+failed — and that is the gate working, not a failure to recover:
+
+```
+Secret scan failed: 1 finding(s) outside the allowlist (88 allowed, 0 of them cowrie honeyfs bait):
+  - deploy/gate-negative-control.txt:1: generic-api-key (commit 1143e043d7, t)
+GATE EXIT CODE: 1
+```
+
+It still reads commit `1143e043`, because the scan is over *history*: deleting
+the file in a later commit does not un-commit it. That is precisely the
+property the script exists for (`check-git-secrets.py:9-11`), and the only way
+to clear a control is to remove the commit that carried it:
+
+```
+$ git reset --mixed HEAD~2      # drop 1143e043 and 19096ca3; HEAD back to 294c2c88
+$ rm -f deploy/gate-negative-control.txt
+$ python3 scripts/check-git-secrets.py
+Secret scan passed: 88 finding(s) over full history, all covered by ALLOWED_FILES (0 cowrie honeyfs) or absent.
+GATE EXIT CODE: 0
+```
+
+Back to exactly 88 findings, exit 0. The two control commits are gone from the
+branch; the scan is back on the 88 it started with.
+
+## 3. Positive control — cowrie honeyfs decoys still allowed
+
+Two ways, because the real tree's decoys are too low-entropy to trip the
+detector (commit 1's Proof 2 established this; `0 cowrie honeyfs` in a real run
+is expected, not a gap). This one plants a decoy that *does* fire, under the
+repo's own tracked honeyfs subtree:
+
+```
+tracked honeyfs files copied: 54
+gitleaks RAW findings under honeyfs: 1
+    arcane/home/honeypot-cowrie/cowrie/honeyfs/opt/inference/.env generic-api-key
+all under HONEYFS_PREFIX: True
+check-git-secrets exit code on the honeyfs tree: 0
+```
+
+A raw `generic-api-key` finding, exit 0 — the prefix exemption absorbed it.
+The **same literal one directory up**, outside the prefix, is the negative
+control above and exits 1. That asymmetry is the honeypot's whole basis, and it
+holds in both directions.
+
+## 4. Fail-closed on a stale allowlist entry
+
+`_verify_allowlist` (`check-git-secrets.py:131`), exercised with an entry
+pointing at a file that exists nowhere:
+
+```
+$ python3 -c "...ALLOWED_FILES['docs/definitely-not-a-real-file-3501.md'] = 'hypothetical stale entry'; print(_verify_allowlist())"
+   docs/definitely-not-a-real-file-3501.md: allowlist entry names a file that exists
+   neither in the tree nor anywhere in history -- remove the entry or restore the file
+```
+
+`main()` returns 1 on this, so the row fails.
+
+## 5. "Failed to run" is not "no secrets found"
+
+A stub binary that exits non-zero, driven through the real entry point:
+
+```
+$ python3 scripts/check-git-secrets.py --binary /tmp/gl-broken
+check-git-secrets: gitleaks failed to run: fatal: unknown flag --nope
+GATE EXIT CODE: 2
+```
+
+**2, not 0.** The row runs under `set -euo pipefail` with nothing swallowing
+that status, so a broken download is a red build rather than a silent pass —
+the #2763 distinction, preserved.
+
+## 6. The test file
+
+**Binary-less box — the four gitleaks-backed tests skip:**
+
+```
+$ /usr/bin/python3.12 -m pytest tests/docs/test_3501_secret_scan_allowlist.py -q
+....ssss                                                                 [100%]
+4 passed, 4 skipped in 0.22s
+```
+
+**With the installed binary on PATH — all four actually execute:**
+
+```
+$ export PATH="/tmp/gl-verify:$PATH"
+$ /usr/bin/python3.12 -m pytest tests/docs/test_3501_secret_scan_allowlist.py -q -rs
+........                                                                 [100%]
+8 passed in 10.89s
+```
+
+I got the second one, **8 passed, 0 skipped**.
+
+That distinction is why the row runs the suite itself. `tests/docs/` is already
+collected by the "Docs regression tests" row (`quality.yml:1718-1722`), which
+installs pytest but has no gitleaks on PATH — so in that row these four tests
+skip every time and the gate's core assertions never run. This row is the only
+place in CI where they execute. Without it the suite would be a permanent
+green skip, the same failure #2981 was filed for.
+
+## 7. Lint
+
+```
+$ SHELLCHECK_OPTS="-S warning" actionlint -color; echo rc=$?
+rc=0
+```
+
+Zero findings at CI severity. `shellcheck --severity=error scripts/install-gitleaks.sh`
+→ clean, `bash -n` → clean.
+
+---
+
+# Not done in this commit
+
+- **`quality-gate` was not extended.** The row lives inside the
+  `scripts-and-compose` matrix, so its failure already fails
+  `scripts-and-compose-complete` (`quality.yml:2530,2542-2543`) and therefore
+  `quality-gate`. Adding it to `quality-gate`'s `needs:` would be a second
+  path to the same outcome and would touch a list the brief says to leave
+  alone.
+- **Container-scan gate untouched**, as instructed —
+  `scripts/list-docker-base-images.py` and `.github/workflows/image-security-scan.yml`
+  have no changes in this commit's diff.
 - `ACCEPTED_CVES`: still uncommitted, unchanged.
 - Nothing pushed. No PR.

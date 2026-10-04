@@ -2056,6 +2056,59 @@ jobs:
               chmod +x "$bin"
               git ls-files -z | grep -zE '(^|/)Dockerfile[^/]*$' | xargs -0 "$bin" --config .hadolint.yaml
 
+          # #3501: fail CI on a real credential anywhere in FULL git history.
+          # scripts/check-git-secrets.py landed in 8cc55aa9 with nothing calling
+          # it -- `grep -rn gitleaks .github/workflows/` was empty -- so that
+          # commit's "fail CI on a real credential" claim was untrue. This row
+          # is what makes it true, and it is the only place gitleaks is on PATH.
+          #
+          # Its own lane rather than a row on the public-leak side: that check
+          # walks `git ls-files`, so it can only ever see the checked-out tree.
+          # A credential committed once and deleted in the next commit is
+          # still a credential, and this is the gate that sees it.
+          - name: "Full-history secret scan (gitleaks, #3501)"
+            home: true
+            run: |
+              set -euo pipefail
+              # The scan's entire claim is FULL history, and actions/checkout
+              # defaults to fetch-depth 1 -- so on a pull_request the
+              # merge-commit checkout hands gitleaks exactly one commit and the
+              # gate passes vacuously. That is the worst failure mode a secret
+              # scanner has: green, having measured nothing. Unshallow first,
+              # then prove the history is really there before believing a pass.
+              if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+                git fetch --unshallow --no-tags origin
+              fi
+              commits="$(git rev-list --count HEAD)"
+              if [ "$commits" -lt 100 ]; then
+                echo "::error::secret-scan: only $commits commit(s) under HEAD -- refusing to report a clean scan of a truncated history"
+                exit 1
+              fi
+              echo "secret-scan: scanning $commits commits of full history"
+              # Pinned version + sha256 verified before extraction, unpacked
+              # into $RUNNER_TEMP because the self-hosted honeypot-ci runner
+              # cannot write /usr/local/bin -- the constraint
+              # scripts/install-trivy.sh already works under, and the reason
+              # `home: true` is right here: checkout, this workflow's own
+              # setup-python, a download into a writable temp dir. No docker,
+              # no host state, nothing the metal cannot do.
+              scripts/install-gitleaks.sh
+              # check-git-secrets.py exits 2 when gitleaks fails TO RUN and 1
+              # when it finds something unallowlisted. Both are failures here
+              # and neither is softened: under `set -euo pipefail` an exit 2
+              # cannot be mistaken for a clean scan, which is the flagged vs
+              # unresolved split #2763 forced for trivy. Nothing in this step
+              # appends `|| true` or pipes the status away.
+              python3 scripts/check-git-secrets.py
+              # The gate's own regression suite. It lives in tests/docs/ and
+              # the docs-regression row above already collects it, but its
+              # four gitleaks-backed tests skip on a box with no binary -- and
+              # the docs row has none. This row does, so this is the only place
+              # they actually execute in CI; without it the suite would skip
+              # forever and quietly stop guarding the gate (#2981's shape).
+              python -m pip install pytest
+              python -m pytest tests/docs/test_3501_secret_scan_allowlist.py -q
+
           - name: Shell syntax and high-severity ShellCheck
             home: true
             run: |
