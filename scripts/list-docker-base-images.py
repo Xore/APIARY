@@ -177,24 +177,26 @@ ACCEPTED_CVES: dict[str, tuple[str | None, str]] = {
     # pin and requires exactly the six it names; an exemption table is not a
     # seventh pin -- it names an artifact without controlling it).
     "node:22": (
-        "sha256:8a34c4ab3ea2c5cd194f07e317b2a8f09461d3c8b05c4e34c8ccd56d56024c4d",
+        "sha256:363e1587494626837fa7f9a23bdb453d13b0ff3c67c705c2805cfc69c2d2fad7",
         "build stage only -- canarytokens names it `AS frontend-builder` and "
-        "the final image does not inherit it; measured 160 fixable "
-        "CRITICAL/HIGH, all in the discarded build layer. Scanning the tag's "
-        "current digest instead gives 28, so a bump reduces this but does not "
-        "clear it; it stays gated as soon as the pin in the Dockerfile moves."
+        "the final image does not inherit it; measured 28 fixable "
+        "CRITICAL/HIGH, all in the discarded build layer. The pin was moved "
+        "to the tag's current digest, which took this from 160 to 28; the "
+        "remainder is not reachable in any running image, and the key is "
+        "digest-keyed so the next pin move retires it."
     ),
     "rust:1-bookworm": (
-        "sha256:82150a52ec202c1b14d7817e14516c392bb7f5cfebd88f1ed531cb37ebd39922",
+        "sha256:59037199c44290f2befcdd58dcc540164763fc296950255aaefeef096a1866b0",
         "build stage only -- vps/huginn-sidecar names it `AS build` and ships "
-        "a separate final image; measured 147 fixable CRITICAL/HIGH (18 at "
-        "the tag's current digest)"
+        "a separate debian:bookworm-slim final image; measured 18 fixable "
+        "CRITICAL/HIGH after the pin moved to the tag's current digest, down "
+        "from 147"
     ),
     "rust:1-slim-bookworm": (
-        "sha256:94e9efa4033213dbb70d4f665527e7ece3944ddb7ba1dd2e43f6fd6e2490af58",
+        "sha256:452176c0cefca88c0b3184ce85a4eb03e3d4fa05d2afb5366abcba853221019e",
         "build stage only -- backend-service names it `AS build` and ships a "
-        "distroless final image; measured 74 fixable CRITICAL/HIGH (1 at the "
-        "tag's current digest)"
+        "debian:bookworm-slim final image; measured 1 fixable CRITICAL/HIGH "
+        "after the pin moved to the tag's current digest, down from 74"
     ),
     "mcr.microsoft.com/dotnet/sdk:10.0.101": (
         None,
