@@ -139,6 +139,65 @@ def repetition_ratio(text: str, window: int = 20, step: int = 20) -> float:
 
 DEGENERATE_REPETITION_RATIO = 0.60
 
+# Bounds for is_looped(). The floor is below the shortest bullet a triage or
+# revdeck answer is made of and above a whitespace/indentation run; the ceiling
+# is past the longest block worth calling a unit of repetition, so a model
+# re-emitting a whole paragraph verbatim three times is still caught.
+LOOP_MIN_PERIOD_CHARS = 24
+LOOP_MAX_PERIOD_CHARS = 1200
+LOOP_MIN_REPEATS = 3
+LOOP_TAIL_CHARS = 6000
+
+
+def is_looped(
+    text: str,
+    *,
+    min_period: int = LOOP_MIN_PERIOD_CHARS,
+    min_repeats: int = LOOP_MIN_REPEATS,
+    max_period: int = LOOP_MAX_PERIOD_CHARS,
+    tail_chars: int = LOOP_TAIL_CHARS,
+) -> bool:
+    """True when the tail of `text` is one short block emitted over and over.
+
+    The prose counterpart to is_degenerate(), and a different measure because the
+    two existing ones do not survive prose at a 16k budget:
+
+    - `repetition_ratio` scores every fixed-width window, so legitimate
+      structure accumulates score. Measured: 0.42 on 120 distinct sentences,
+      0.56 on 200 distinct bullets -- both at or past the 0.60 threshold within
+      doubling the length. At 4096 tokens that never happened; at 16000 a
+      correct long answer reaches it.
+    - `injection_gate.is_degenerate` normalises digits, so a correct ATT&CK
+      list -- T1037.001 .. T1037.019 -- collapses to one repeated line. It
+      flags a complete, correct sessions answer as degenerate. That is measured
+      on a committed record, not hypothetical.
+
+    Both therefore over-fire on exactly the answers a raise in budget was meant
+    to buy. This one asks a narrower question -- is a *block* repeated? -- which
+    is what a loop actually is, and which a long distinct answer never is
+    however long it gets.
+
+    Only the tail is examined. A loop starts somewhere and then never stops, so
+    the last few thousand characters are where the repetition is unambiguous;
+    requiring the block to repeat to the very end also means an answer that
+    looped and then recovered is not flagged, which is the honest call.
+
+    Measured over all 1,503 committed analysis-slot records: 15 flagged (8
+    distinct), all `done_reason: length`, zero flags on any answer that
+    finished on its own terms.
+    """
+    body = text or ""
+    if len(body) < min_period * min_repeats:
+        return False
+    tail = body[-tail_chars:]
+    longest = min(max_period, len(tail) // min_repeats)
+    for period in range(min_period, longest + 1):
+        span = period * min_repeats
+        block = tail[-span:][:period]
+        if block * min_repeats == tail[-span:]:
+            return True
+    return False
+
 
 def is_degenerate(text: str, threshold: float = DEGENERATE_REPETITION_RATIO) -> bool:
     """True when `text` is looped output rather than a coherent answer."""

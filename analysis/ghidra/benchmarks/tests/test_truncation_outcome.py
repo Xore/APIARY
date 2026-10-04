@@ -355,43 +355,52 @@ class OutputBudgetTest(unittest.TestCase):
         for slot, budget in evaluate_models.OUTPUT_BUDGETS.items():
             self.assertGreaterEqual(budget, 512, f"{slot} budget was lowered")
 
-    def test_every_slot_budget_fits_inside_the_context_it_is_sent(self):
+    # The widest prompt this harness sends is the ghidra slot's context probe
+    # (420 filler lines plus TRIAGE_SYSTEM, 15,209 chars -> ~7,176 tokens at the
+    # 2.12 chars/token measured on the one committed record storing both). It is
+    # not a case: the widest real case is revdeck at ~2,512. Probing the probe is
+    # what NUM_CTX was sized for, so it is the number the window has to cover.
+    WIDEST_PROMPT_TOKENS = 7176
+
+    def test_every_slot_budget_fits_inside_the_window_it_is_sent(self):
         """num_ctx is the real ceiling: a num_predict larger than the window
         minus the prompt is cut short by the window instead of the cap, and
         does so silently -- the answer stops at the window, not at num_predict,
         which reads as a model failure in the transcript (done_reason: length).
 
-        The window is per slot, not one global 8192. The coder slot sends
-        CODER_NUM_CTX; the analysis slots send min(context, 8192). So the
-        assertion has to be made per slot against the context that slot
-        actually sends, otherwise it either misses a too-small window or
-        reports a false failure for a slot whose window is fine."""
-        widest_recorded_prompt = 2117  # docs/benchmarks/runs/, revdeck slot
-        windows = {
-            # evaluate_slot(): min(args.context, 8192) for the analysis slots
-            "ghidra": 8192,
-            "sessions": 8192,
-            "revdeck": 8192,
-            # score_coder(): min(context, CODER_NUM_CTX)
-            "coder": evaluate_models.CODER_NUM_CTX,
-        }
+        There is one window now (NUM_CTX, via num_ctx_for()) rather than a
+        per-slot clamp that had to be restated here, so the assertion is made
+        per slot against the number that slot actually sends."""
         for slot, budget in evaluate_models.OUTPUT_BUDGETS.items():
-            num_ctx = windows[slot]
+            # 8192 is what the committed manifest declares for sessions and
+            # revdeck, so it is the smallest window any slot can be handed.
+            num_ctx = evaluate_models.num_ctx_for(8192)
             self.assertLess(
-                budget, num_ctx - widest_recorded_prompt,
+                budget, num_ctx - self.WIDEST_PROMPT_TOKENS,
                 f"{slot} budget {budget} does not fit in its num_ctx {num_ctx} "
-                f"beside the widest recorded prompt ({widest_recorded_prompt})",
+                f"beside the widest prompt ({self.WIDEST_PROMPT_TOKENS})",
             )
 
-    def test_coder_window_covers_the_coder_budget(self):
+    def test_the_window_covers_every_budget_and_the_widest_prompt(self):
         """The 8192 coder window allowed only 6075 tokens, so a raised
         num_predict was cut by the window and the fix looked like it had not
-        worked. The window must exceed the budget, not merely the old 4096."""
-        self.assertGreater(
-            evaluate_models.CODER_NUM_CTX, evaluate_models.CODER_NUM_PREDICT,
-            "coder num_ctx must exceed the coder budget or the window truncates "
-            "the answer below num_predict",
-        )
+        worked. The window must exceed every budget plus its prompt, not
+        merely the old 4096."""
+        for slot, budget in evaluate_models.OUTPUT_BUDGETS.items():
+            self.assertGreater(
+                evaluate_models.NUM_CTX, budget + self.WIDEST_PROMPT_TOKENS,
+                f"num_ctx {evaluate_models.NUM_CTX} must cover the {slot} budget "
+                f"({budget}) plus the widest prompt, or the window truncates the "
+                f"answer below num_predict",
+            )
+
+    def test_the_window_is_raised_not_clamped_to_the_declared_context(self):
+        """The committed manifest declares 8192 for sessions and revdeck, which
+        would put back the exact defect NUM_CTX exists to remove -- a 16000
+        budget cut at 8192 by the window, which reads as a model failure. The
+        operator may still go wider by declaring more."""
+        self.assertEqual(evaluate_models.num_ctx_for(8192), evaluate_models.NUM_CTX)
+        self.assertEqual(evaluate_models.num_ctx_for(32768), 32768)
 
     def test_harmony_never_lowers_a_slot_budget(self):
         """A slot asking for more than the harmony floor keeps what it asked for.
@@ -638,12 +647,17 @@ class CommittedManifestSessionsBudgetTest(unittest.TestCase):
 
     They did not. `approved-models.json` approved the sessions slot at
     `output_tokens: 512` while `budget_for("sessions")` sent 4096, so the
-    sessions slot could not be run through the manifest at all. Raising the
-    benchmark budget to 4096 for that slot is not available either: it is
-    llm-worker session classification, and `llm-worker/worker.py` reads
-    `env_int("LLM_OUTPUT_TOKENS", 512, 128, 2048)`, so 4096 is a
-    benchmark-only number the production worker can never be asked for. The
-    budget and the manifest both have to land on 2048.
+    sessions slot could not be run through the manifest at all. Both sides had
+    to be moved together, and did, at 2048 and then at 16000.
+
+    16000 is above `env_int("LLM_OUTPUT_TOKENS", 512, 128, 2048)` in
+    `llm-worker/worker.py`, so the qualified budget no longer describes a
+    production worker -- the benchmark asks for more than production can send.
+    That is acceptable only while the manifest says so out loud, which is what
+    the second assertion here checks: `qualification_status` names the budget
+    as measuring the benchmark, and `runtime_request` still declares the
+    production 512. A budget past the ceiling with neither admission would
+    read as an approved deployment budget, and this test is what stops that.
     """
 
     MANIFEST = REPO_ROOT / "analysis" / "ghidra" / "models" / "approved-models.json"
@@ -665,20 +679,32 @@ class CommittedManifestSessionsBudgetTest(unittest.TestCase):
             "cannot run the sessions slot",
         )
 
-        # And the number is production-representable, which is the whole reason
-        # it is 2048 and not 4096 -- checked so a later raise cannot quietly
-        # re-open the same gap.
+        # The number is the harness's own, and it is a raise past both the 512
+        # cap that ended answers mid-sentence and the 2048 production ceiling.
         self.assertEqual(
             request["output_tokens"], evaluate_models.budget_for("sessions"),
         )
-        self.assertLessEqual(
-            request["output_tokens"], self.PRODUCTION_OUTPUT_TOKEN_CEILING,
-            "the sessions budget exceeds what llm-worker will ever send",
-        )
         self.assertGreater(
-            request["output_tokens"], 512,
-            "the sessions budget is still the 512 cap that ended answers "
-            "mid-sentence; this is a raise, not a restatement",
+            request["output_tokens"], self.PRODUCTION_OUTPUT_TOKEN_CEILING,
+            "the sessions budget should be above the llm-worker ceiling, or the "
+            "raise to 16000 did not land",
+        )
+
+        # Past that ceiling, the manifest has to say the qualified budget
+        # measures the benchmark rather than a deployment it cannot produce.
+        slot = manifest["slots"]["sessions"]
+        status = slot.get("qualification_status", "")
+        self.assertIn(
+            f"output_tokens {request['output_tokens']}", status,
+            "the sessions budget exceeds what llm-worker will ever send, so the "
+            "manifest must admit that it describes the benchmark and not a "
+            "deployment",
+        )
+        self.assertLessEqual(
+            slot["runtime_request"]["output_tokens"],
+            self.PRODUCTION_OUTPUT_TOKEN_CEILING,
+            "runtime_request is what the deployed worker sends; it must stay "
+            "inside the ceiling even though the benchmark budget does not",
         )
 
         # End to end, against a stubbed transport: the committed manifest's own
@@ -874,12 +900,19 @@ class SessionsBudgetQualificationStatusTest(unittest.TestCase):
                 "the weaker one in place.",
             )
 
-        # The slot is still runnable, and still production-representable. This
-        # is a gap in the evidence, not a proposal to put the budget back to
-        # the 512 cap that ended answers mid-sentence.
+        # The slot is still runnable. This is a gap in the evidence, not a
+        # proposal to put the budget back to the 512 cap that ended answers
+        # mid-sentence -- nor, now that it is past the production ceiling, a
+        # claim that the deployed worker sends it. `runtime_request` is the
+        # deployment-facing number and stays inside the ceiling; the qualified
+        # budget measures the benchmark, which is what `qualification_status`
+        # above admits and anchors to this budget.
         self.assertEqual(slot["qualification_request"],
                          evaluate_models.qualification_request("sessions", 8192))
-        self.assertLessEqual(declared, self.PRODUCTION_OUTPUT_TOKEN_CEILING)
+        self.assertLessEqual(
+            slot["runtime_request"]["output_tokens"],
+            self.PRODUCTION_OUTPUT_TOKEN_CEILING,
+        )
 
     PRODUCTION_OUTPUT_TOKEN_CEILING = 2048
 
