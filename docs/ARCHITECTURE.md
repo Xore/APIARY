@@ -36,6 +36,205 @@ clusters, anomaly scores); and the dashboard tier serves it all to
 analysts. Nothing captured is ever executed inside the fleet, and no
 component's failure takes the analysis plane down with it.
 
+## The self-contained map (#3497)
+
+Everything #3497 asks for — event flow, trust boundaries, data stores,
+worker loops, deployment modes — in one view, readable without opening a
+second file. It is deliberately lossy: the three diagrams below and
+[PIPELINES.md](PIPELINES.md) stay the readable detail view, and this one
+exists so a reader never has to cross-reference a file to answer "where
+does trust change hands, and what writes what".
+
+Thick edges (`==>`) are **boundary crossings**, labelled `B1`…`B5`. Thin
+edges are hops **within** a zone, where no privilege changes hands.
+
+```mermaid
+flowchart TB
+  attacker["Untrusted internet"]
+
+  subgraph z0["B1 · VPS public surface"]
+    direction TB
+    suri["Suricata + p0f<br/>passive observation<br/>raw sockets · real client IPs"]
+    traefik["Traefik<br/>TLS terminates here · :443<br/>oauth2-proxy ×6 OIDC gateways"]
+    pb["portbridge<br/>raw TCP/UDP relay · TLS passthrough<br/>PROXY v1 + p0f OS guess"]
+  end
+
+  wg["B2 · WireGuard tunnel<br/>home initiates · nothing inbound to home"]
+
+  subgraph z2["B3 · Home sensors · hostile by assumption"]
+    direction TB
+    sensors["Sensor stacks<br/>private network per stack<br/>none joins honeynet"]
+    tanner["honeypot-tanner<br/>SNARE + TANNER · tanner_local"]
+  end
+
+  logsT[("Host bind mounts<br/>logs/ and state/<br/>root-owned · filesystem only")]
+
+  subgraph z3["B4 · Analysis plane · shared honeynet"]
+    direction TB
+    fb["honeypot-elk<br/>Filebeat · 12 filestream in<br/>19 processors · 2 ignore_failure"]
+    es[("Elasticsearch<br/>see index families + ILM below")]
+    ark["Arkime capture + viewer<br/>pcap-sync feeds it"]
+    kc["honeypot-keycloak<br/>OIDC issuer"]
+    dw["honeypot-dashboard<br/>frontend-next · backend-service<br/>KEYCLOAK_ISSUER_URL"]
+  end
+
+  subgraph zw["Worker loops · consumes → emits"]
+    direction TB
+    wdash["honeypot-dashboard loops<br/>alert-notifier · attacker-identity ·<br/>correlator · agent-intrusion ·<br/>dashboard-rollups · threat-intel ·<br/>zeek-proxy-attribution"]
+    wded["loop-only services<br/>backend-worker-payload-inventory<br/>backend-worker-importer · -enrichment"]
+    wtop["top-level stacks<br/>auth-events-worker · ml-worker ·<br/>llm-worker · vault-worker"]
+  end
+
+  subgraph z4["B5 · Detonation · entered by hash only"]
+    direction TB
+    spool[("requests/pending<br/>hash-only .request markers")]
+    sand["Root-owned host services<br/>sandbox/ · Linux KVM · Windows KVM<br/>CAPE · GHOSTS · Ghidra"]
+    ollama["Ollama · 127.0.0.1:11434<br/>analysis host only"]
+  end
+
+  subgraph z5["Deployment modes · three independent axes"]
+    direction LR
+    dm1["1 · host role<br/>scripts/install.sh --profile home|vps"]
+    dm2["2 · roster<br/>deploy-profiles/*.txt<br/>scripts/validate-deploy-profile.sh"]
+    dm3["3 · placement<br/>Arcane GitOps sync · 39 entries<br/>arcane/manifests/home-production.json<br/>→ arcane/home/honeypot-*/"]
+  end
+
+  attacker ==>|"B1 · observed traffic"| suri
+  attacker ==>|"B1 · HTTPS :443"| traefik
+  attacker ==>|"B1 · relayed raw ports"| pb
+
+  suri ==>|"B2 · tunnel only way in"| wg
+  traefik ==>|"B2"| wg
+  pb ==>|"B2 · PROXY v1 preserves real IP"| wg
+
+  wg --> sensors
+  wg --> tanner
+  wg --> traefik
+
+  sensors ==>|"B3 · bind-mount handoff · no socket"| logsT
+  tanner ==>|"B3 · bind-mount handoff"| logsT
+  logsT --> fb
+  suri -.->|"PCAP over SSHFS → pcap-sync"| ark
+
+  fb ==>|"B4 · one normalizing ingest path"| es
+  fb -->|"default_pipeline geoip-honeypot · 14 procs"| es
+  ark --> es
+
+  es ==>|"B4 · read-only scan"| wdash
+  es ==>|"B4 · read-only scan"| wded
+  es ==>|"B4 · read-only scan"| wtop
+  wdash ==>|"B4 · durable entities"| es
+  wded ==>|"B4 · durable entities"| es
+  wtop ==>|"B4 · durable entities"| es
+
+  es --> dw
+  dw -->|"B4 · OIDC against home-local issuer"| kc
+  kc -->|"token"| dw
+
+  dw ==>|"B5 · hash-only spool markers"| spool
+  spool --> sand
+  sand ==>|"B5 · bounded JSON + artifacts"| dw
+  wtop -.->|"B5 · scoring loops reach the model"| ollama
+  sand -->|"B5 · Ghidra worker → ai_triage"| ollama
+
+  dm1 -->|"installs the OS layer"| dm2
+  dm2 -->|"declares the roster"| dm3
+  dm3 -.->|"places every stack"| z2
+```
+
+Reading it: zone 2 is the only zone that *expects* to be attacked, so
+nothing in it is trusted downstream — bytes leave by bind mount, never by
+socket. Zone 4 holds the only code that executes captured samples, and the
+only thing crossing into it is a hash. Ollama publishes on
+`127.0.0.1` only, on the analysis host that also holds the captured
+malware, and is reached by the scoring loops — never by a browser.
+
+### Data stores — what writes, what reads
+
+| Store | Written by | Read by |
+|---|---|---|
+| `honeypot-v2-*` (data stream), ILM `honeypot-30d` | Filebeat + `geoip-honeypot` | all workers, dashboard, Kibana |
+| `suricata-*`, ILM `suricata-7d` | Filebeat | dashboard, workers, EveBox |
+| `portbridge-v2-*`, ILM `portbridge-30d` | Filebeat | dashboard, zeek-proxy-attribution |
+| `zeek-v1-*` / `zeek-proxy-v1-*`, ILM `zeek-60d` / `zeek-proxy-60d` | Filebeat | dashboard, attribution loop |
+| `traefik-v1-*`, ILM `traefik-30d` | Filebeat | dashboard |
+| `dead-letter-honeypot*`, ILM `dead-letter-60d` | Elasticsearch itself (rejected docs) | dead-letters page, source-health |
+| `*-analysis-v1` (ghidra/sandbox/cape/revdeck/github), ILM `analysis-results-180d` | `backend-worker-importer` (read-only mirror) | identity worker, workbench |
+| `attackers-v1`, `campaigns-v1`, `attacker-clusters-v1`, `agent-intrusion-campaigns` | the corresponding loops | dashboard pages |
+| `dashboard-alert-state-v1`, `overview/geo/attack-rollup-v1` | alert-notifier, dashboard-rollups | alerts, overview, map, kill-chain |
+| `dashboard-payload-inventory-v1`, `dashboard-payload-bytes-v1` | backend-worker-payload-inventory | payloads page, charts |
+| `ml-anomalies`, `dashboard-ml-anomaly-ack-v1` | ml-worker, llm-worker | ml-anomalies page, composite score |
+| `auth-failure-events`, `auth-events-worker-state` | auth-events-worker | dashboard auth panes |
+| `knowledge-vault-search-v1`, `knowledge-vault-state-v1` | vault-worker | vault search |
+| `reporter-metrics-v1` | `honeypot-utilities` reporter | settings stats pane |
+| Arkime index + `arkime-pcap` volume | `pcap-sync` → arkime-capture | arkime-viewer |
+| host `logs/` + `state/` bind mounts | sensors, tanner, `honeypot-init` | Filebeat, workers, payload path |
+| generated-report store | `reports-scheduler`, reporter | analyst downloads |
+| `requests/pending` spool (hash-only) | backend-service-mounted | root submit service, sandbox workers |
+
+The three ILM names are policy *names*, not durations: `suricata-7d`,
+`honeypot-30d` and `dead-letter-60d` derive their `delete.min_age` from
+`HONEYPOT_RETENTION_DAYS` at setup time, so shrinking the knob shrinks
+retention for all of them
+([STORAGE.md](STORAGE.md#retention-and-lifecycle) has the full set).
+
+### Worker loops — consumes → emits
+
+| Loop | Where it runs | Consumes | Emits |
+|---|---|---|---|
+| alert-notifier | `honeypot-dashboard` `WORKER_LOOPS` | `attackers-v1`, `campaigns-v1`, `agent-intrusion-campaigns` | `dashboard-alert-state-v1` + webhook |
+| attacker-identity | `honeypot-dashboard` `WORKER_LOOPS` | `honeypot-v2-*`, `*-analysis-v1` | `attackers-v1` |
+| correlator | `honeypot-dashboard` `WORKER_LOOPS` | raw events | `campaigns-v1`, `attacker-clusters-v1` |
+| agent-intrusion | `honeypot-dashboard` `WORKER_LOOPS` | raw events | `agent-intrusion-campaigns` |
+| dashboard-rollups | `honeypot-dashboard` `WORKER_LOOPS` | raw event indices | `overview/geo/attack-rollup-v1` |
+| threat-intel | `honeypot-dashboard` `WORKER_LOOPS` | raw events, `threat-cidrs.csv` | `source.as.type` in place |
+| zeek-proxy-attribution | `honeypot-dashboard` `WORKER_LOOPS` | zeek flows + portbridge log | flow documents |
+| payload-inventory | `backend-worker-payload-inventory` | payload dirs on disk | `dashboard-payload-{inventory,bytes}-v1` |
+| es-results-importer | `backend-worker-importer` | root-owned result spools | `*-analysis-v1` |
+| ip-enrichment | `backend-worker-enrichment` (`network_mode: none`) | raw sensor logs | `logs/enriched/*.json` |
+| auth-events-worker | top-level `auth-events-worker/` | Keycloak realm events | `auth-failure-events` |
+| ml-worker | top-level `ml-worker/` | payloads + events | `ml-anomalies` |
+| llm-worker | top-level `llm-worker/` | payloads + sessions | `llm-analysis`, `ml-anomalies` |
+| vault-worker | top-level `vault-worker/` | `*-analysis-v1`, `llm-analysis` | vault markdown + `knowledge-vault-search-v1` |
+
+Two structural facts the diagram encodes deliberately, because both were
+got wrong in an earlier draft:
+
+- Only `auth-events-worker`, `llm-worker`, `ml-worker` and `vault-worker`
+  are top-level directories. `arcane/home/honeypot-attacker-identity-worker/`,
+  `-correlator-worker/`, `-payload-inventory-worker/` and
+  `-agent-intrusion-worker/` still exist as Arcane sync entries, but every
+  service in all four is `profiles: ["legacy"]` — retired under #1649,
+  defined only for rollback. The loops run as `WORKER_LOOPS` roles on the
+  dashboard's backend image, not as those stacks.
+- The property that holds about sensor networking is that **no sensor
+  stack joins the shared `honeynet` network** — each keeps its own
+  (`cowrie_net`, `dionaea_net`, six `conpot_*_net`, `tanner_local`, …). A
+  sensor stack is not single-member: cowrie runs 2 services on
+  `cowrie_net`, tanner 7 on `tanner_local`.
+
+### Deployment modes
+
+Three independent axes, easy to conflate:
+`scripts/install.sh --profile home|vps` picks the **host role**;
+`deploy-profiles/*.txt` plus `scripts/validate-deploy-profile.sh` declare
+the **roster**; the Arcane GitOps sync of the 39 entries in
+[`arcane/manifests/home-production.json`](../arcane/manifests/home-production.json)
+decides **placement**. The manifest is authoritative for *what runs* —
+not `.github/workflows/deploy.yml`. A deployment may run a narrower
+roster than the manifest lists.
+
+Cross-reference: the diagrams below and
+[PIPELINES.md §2](PIPELINES.md#2-derived-intelligence-the-worker-loops)
+carry the per-worker cadences and the full index catalogue this map
+compresses.
+
+## The ten-second version, as drawn
+
+The map above answers where trust changes hands. This one answers what
+talks to what, at a glance, without the boundary labelling in the way.
+Together they cover the same fleet; neither replaces the other.
+
 ```mermaid
 flowchart LR
   attacker["Untrusted internet"]
