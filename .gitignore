@@ -77,3 +77,15 @@ graphify-out/.graph.html.stale
 graphify-out/20??-??-??/*
 !graphify-out/20??-??-??/graph.html
 !graphify-out/20??-??-??/GRAPH_REPORT.md
+
+# Ad-hoc coder worktrees that get created in the repository ROOT during
+# dispatched in the repository root during dispatch (oc-<issue>-wt/). They are
+# untracked scratch, but they sit inside the tree graphify indexes, so every
+# artifact they produce counts them as real files: a published report listed a
+# script under one of them that #3310 had already deleted from the mainline
+# tree, so test_3310_design_lab_dedupe.py failed on a path that no longer
+# exists. graphify honours .gitignore by default, so this one rule fixes the
+# artifact by construction rather than by editing the report or by teaching the
+# test to skip generated output. Remove a directory only when the dispatch it
+# belongs to is finished; these are live worktrees for open issues.
+oc-*-wt/
