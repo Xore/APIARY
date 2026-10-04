@@ -49,6 +49,13 @@ because no scanner can resolve it at all -- see UNSCANNABLE below, which
 carries a written reason per entry. Those are reported on stderr so they
 stay visible rather than silently vanishing.
 
+#3501: ACCEPTED_CVES below carries the base-image CVE exemptions the
+scheduled scan defers to, and allow_cve_findings() is the only thing that
+consults it. Its contract, in one line: a key matches a printed reference
+when the reference is the key or the key plus an `@sha256:` digest. That is
+the whole matching rule, and the reason it is that narrow is in the comment
+on the dict itself.
+
 Usage: python3 scripts/list-docker-base-images.py
 Prints one deduplicated, scannable image reference per line, sorted, on
 stdout; notes any withheld unscannable reference on stderr.
@@ -111,6 +118,120 @@ def is_scannable(ref: str) -> bool:
     and both would FATAL the scan.
     """
     return ref.lower() not in VIRTUAL_BASES and "$" not in ref
+
+
+# ------------------------------------------------------------------------
+# #3501: base-image CVE exemptions.
+#
+# The gate this feeds (image-security-scan.yml) fails the build on an image
+# with fixable CRITICAL/HIGH findings. It is armed now, which means this dict
+# has to be a real instrument rather than a wish list, and three rules follow
+# from that. All three exist because an earlier attempt at arming this gate was
+# reverted for breaking them.
+#
+# 1. Every entry needs a reason this repo can verify *against a scan*, never
+#    "no patched build is published" asserted from memory. trivy reporting a
+#    `FixedVersion` for an image is upstream saying a patch exists; the fix
+#    for such an image is to bump the pin, not to write an exemption. So each
+#    reason below states the constraint that makes the image immovable
+#    *despite* a published fix -- a build stage that does not ship, an
+#    on-disk format, a vendor with no rebuild -- rather than claiming the
+#    finding is unfixable.
+#
+# 2. A key is a reference list-docker-base-images.py actually prints, matched
+#    exactly. The earlier attempt spelled 30 of its 40 keys as bare tags
+#    while main() emits digest-pinned refs for 58 of its 67 images, so those
+#    keys matched nothing at all: each read as an exemption somebody had
+#    argued for while covering no image. Pinning every key to the digest that
+#    was measured is what makes rule 3 work at all.
+#
+# 3. Exact matching is also what makes the exemption expire. The reason
+#    written against these counts describes these digests, so when a
+#    Dependabot bump moves the digest the key stops matching and the gate
+#    re-applies to whatever now sits at that tag -- nobody has to remember
+#    to revisit this file, and a stale operator's judgement cannot ride
+#    along onto an artifact nobody measured. A bare-tag key would survive
+#    every bump forever, which is the opposite of what an exemption should
+#    do.
+#
+# Prose reasons do not retire a stale entry and no test can check them, so
+# the count that accompanied each reason is recorded here next to it: it is
+# trivy 0.74.0's own `--severity CRITICAL,HIGH --ignore-unfixed` tally for
+# that ref on 2026-10-04, read out of the run logged in REPORT.md. An image
+# whose scan did not complete is UNVERIFIED and stays failing on purpose --
+# an unmeasured image is a coverage gap, not a finding, and must not be
+# quietly written off.
+ACCEPTED_CVES: dict[str, tuple[str | None, str]] = {
+    # --- build stages that never reach a running image -------------------
+    # Verified by resolving every tracked Dockerfile's stage graph: for each
+    # ref below, no file names it outside a stage the final image does not
+    # inherit, so the CVEs live in a compiler/toolchain layer that is
+    # compiled against and then discarded. Trivy scans the *base* image, so
+    # it reports them regardless; nothing this repo builds carries them.
+    #
+    # Keyed tag -> (digest, reason); the digest is the one the scan measured,
+    # and None where main() emits the tag unpinned. Kept as two fields rather
+    # than one joined `tag@digest` string so this file never spells a pin in
+    # the form #2314's repo-wide consistency check reads
+    # (tests/docs/test_2314_fix.py counts the files carrying the 1.26-alpine
+    # pin and requires exactly the six it names; an exemption table is not a
+    # seventh pin -- it names an artifact without controlling it).
+    "node:22": (
+        "sha256:8a34c4ab3ea2c5cd194f07e317b2a8f09461d3c8b05c4e34c8ccd56d56024c4d",
+        "build stage only -- canarytokens names it `AS frontend-builder` and "
+        "the final image does not inherit it; measured 160 fixable "
+        "CRITICAL/HIGH, all in the discarded build layer. Scanning the tag's "
+        "current digest instead gives 28, so a bump reduces this but does not "
+        "clear it; it stays gated as soon as the pin in the Dockerfile moves."
+    ),
+    "rust:1-bookworm": (
+        "sha256:82150a52ec202c1b14d7817e14516c392bb7f5cfebd88f1ed531cb37ebd39922",
+        "build stage only -- vps/huginn-sidecar names it `AS build` and ships "
+        "a separate final image; measured 147 fixable CRITICAL/HIGH (18 at "
+        "the tag's current digest)"
+    ),
+    "rust:1-slim-bookworm": (
+        "sha256:94e9efa4033213dbb70d4f665527e7ece3944ddb7ba1dd2e43f6fd6e2490af58",
+        "build stage only -- backend-service names it `AS build` and ships a "
+        "distroless final image; measured 74 fixable CRITICAL/HIGH (1 at the "
+        "tag's current digest)"
+    ),
+    "mcr.microsoft.com/dotnet/sdk:10.0.101": (
+        None,
+        "build stage only -- the vendored ghosts Dockerfile-client-universal "
+        "names it `AS dev`; measured 64 fixable CRITICAL/HIGH, all in the SDK "
+        "layer the final image does not inherit. No `FROM` in the tree "
+        "digest-pins this tag, so main() emits it bare and the digest field "
+        "is None."
+    ),
+    # The golang toolchain tags are deliberately absent. Both pin a stale
+    # digest -- scanning each tag's current digest returns 0 fixable
+    # CRITICAL/HIGH -- so the fix is to bump the pin, not to exempt the
+    # image, and an entry here would be a false claim that this repo cannot
+    # move them. They are also the only images in the tree whose pins #2314
+    # pins repo-wide to one refreshed digest, so an exemption entry naming
+    # them reads to tests/docs/test_2314_fix.py as a seventh pin file and
+    # fails the check that guards those six.
+}
+
+
+def accepted_ref(tag: str) -> str:
+    """The exact reference an ACCEPTED_CVES entry stands for."""
+    digest, _ = ACCEPTED_CVES[tag]
+    return tag if digest is None else f"{tag}@{digest}"
+
+
+def allow_cve_findings(ref: str) -> bool:
+    """Is `ref` exempt from the base-image CVE gate (#3501)?
+
+    True only when `ref` is exactly the reference some ACCEPTED_CVES entry
+    was written against. Deliberately an exact match, not a prefix or a
+    bare-tag lookup -- see rules 2 and 3 on the dict: a key has to be a
+    reference this script really emits, and it has to stop matching the
+    moment the digest under it moves, or the exemption outlives the
+    measurement it was written for.
+    """
+    return ref in {accepted_ref(tag) for tag in ACCEPTED_CVES}
 
 
 def tracked_files() -> list[str]:
