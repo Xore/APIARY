@@ -116,6 +116,141 @@ def test_allowlist_has_no_wildcards(checker):
         )
 
 
+# --- shallow clones: degrade loudly, never guess ------------------------------
+
+
+def _make_shallow_clone(source: Path, dest: Path) -> None:
+    """A real depth-1 clone of `source`.
+
+    Git-history behaviour is exercised against git itself rather than mocked,
+    the same way test_2604's `_init_repo` and test_2055's pre-fix-tree reads
+    do -- the thing under test IS `git rev-parse --is-shallow-repository` and
+    what a truncated object store can answer, and a stub would test the stub.
+    """
+    subprocess.run(
+        ["git", "clone", "--depth", "1", "--no-local", str(source), str(dest)],
+        check=True, capture_output=True, text=True,
+    )
+
+
+def test_is_shallow_reports_true_on_a_depth_1_clone(checker, tmp_path):
+    """The detection itself, against a clone git really made shallow."""
+    source = tmp_path / "origin"
+    source.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=source, check=True)
+    (source / "README").write_text("origin\n", encoding="utf-8")
+    _commit(source, "origin head")
+
+    clone = tmp_path / "clone"
+    _make_shallow_clone(source, clone)
+    assert subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        cwd=clone, capture_output=True, text=True, check=True,
+    ).stdout.strip() == "true"
+    assert checker._is_shallow(clone) is True
+
+    # And the full clone it was made from is not shallow -- so the difference
+    # the branch keys on is the clone, not the environment.
+    assert checker._is_shallow(source) is False
+
+
+def test_shallow_clone_degrades_the_allowlist_check_without_failing(checker, tmp_path, capsys):
+    """A depth-1 clone cannot answer 'does this path exist anywhere in
+    history'. #3516's CI ran exactly that and reported six healthy
+    historical-only entries as bad paths -- a hard failure produced purely by
+    the clone being truncated.
+
+    The contract: no finding, an explicit announcement, and the checks a
+    shallow clone CAN still make (written reason, present in the tree) still
+    enforced."""
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=origin, check=True)
+    (origin / "gone").mkdir()
+    (origin / "gone" / "deleted-long-ago.txt").write_text("fixture\n", encoding="utf-8")
+    _commit(origin, "carry a file we will delete")
+    subprocess.run(["git", "rm", "-q", "gone/deleted-long-ago.txt"], cwd=origin, check=True)
+    _commit(origin, "delete it again")
+
+    clone = tmp_path / "clone"
+    _make_shallow_clone(origin, clone)
+    # Precondition: the file's history is genuinely invisible in the clone, so
+    # this test would fail on the pre-fix code rather than pass vacuously.
+    assert not (clone / "gone" / "deleted-long-ago.txt").is_file()
+    assert subprocess.run(
+        ["git", "log", "--all", "--format=%H", "-1", "--", "gone/deleted-long-ago.txt"],
+        cwd=clone, capture_output=True, text=True, check=True,
+    ).stdout.strip() == ""
+
+    monkeypatch_root = clone
+    original_root, original_allowed = checker.ROOT, checker.ALLOWED_FILES
+    checker.ROOT = monkeypatch_root
+    checker.ALLOWED_FILES = {
+        "gone/deleted-long-ago.txt": "historical-only entry, unreachable in a shallow clone",
+        "kept-in-tree.txt": "an entry the shallow clone CAN still resolve",
+    }
+    (monkeypatch_root / "kept-in-tree.txt").write_text("still here\n", encoding="utf-8")
+    try:
+        problems = checker._verify_allowlist()
+        captured = capsys.readouterr()
+    finally:
+        checker.ROOT, checker.ALLOWED_FILES = original_root, original_allowed
+
+    assert problems == [], (
+        "a shallow clone cannot see truncated history, so a miss there is not "
+        f"evidence the entry is stale -- but it was reported: {problems}\n"
+        f"stdout was {captured.out!r}"
+    )
+    # Degraded, not silently passed.
+    assert "::warning::secret-scan allowlist" in captured.out
+    assert "SHALLOW clone" in captured.out
+    assert "was NOT run" in captured.out
+
+
+def test_shallow_clone_still_fails_on_an_entry_with_no_reason(checker, tmp_path, capsys):
+    """The degradation must not weaken the half a shallow clone CAN decide:
+    an exemption with no written reason is a finding whatever the clone depth."""
+    clone = tmp_path / "clone"
+    clone.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=clone, check=True)
+    (clone / "README").write_text("x\n", encoding="utf-8")
+    _commit(clone, "empty")
+
+    original_root, original_allowed = checker.ROOT, checker.ALLOWED_FILES
+    checker.ROOT = clone
+    checker.ALLOWED_FILES = {"whatever.txt": "   "}
+    try:
+        problems = checker._verify_allowlist()
+    finally:
+        checker.ROOT, checker.ALLOWED_FILES = original_root, original_allowed
+    capsys.readouterr()
+
+    assert len(problems) == 1 and "carries no reason" in problems[0]
+
+
+def test_full_clone_still_fails_closed_on_a_stale_entry(checker, tmp_path, capsys):
+    """The other side of the branch: unshallowed, the history half runs again
+    and a genuinely stale entry is a finding. Without this the shallow test
+    above would also pass on a checker that had simply deleted the check."""
+    root = tmp_path / "full"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    (root / "kept.txt").write_text("x\n", encoding="utf-8")
+    _commit(root, "one commit")
+
+    original_root, original_allowed = checker.ROOT, checker.ALLOWED_FILES
+    checker.ROOT = root
+    checker.ALLOWED_FILES = {"never/existed.txt": "stale entry"}
+    try:
+        problems = checker._verify_allowlist()
+    finally:
+        checker.ROOT, checker.ALLOWED_FILES = original_root, original_allowed
+    capsys.readouterr()
+
+    assert checker._is_shallow(root) is False
+    assert len(problems) == 1 and "never/existed.txt" in problems[0]
+
+
 # --- (b) the allowlist itself harbors no real secret -------------------------
 
 

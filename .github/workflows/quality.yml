@@ -2092,7 +2092,20 @@ jobs:
               # `home: true` is right here: checkout, this workflow's own
               # setup-python, a download into a writable temp dir. No docker,
               # no host state, nothing the metal cannot do.
-              scripts/install-gitleaks.sh
+              # The install has to reach THIS step, not a later one. Each `run:`
+              # is its own process, and GITHUB_PATH is applied by the runner to
+              # *subsequent* steps -- so `scripts/install-gitleaks.sh` writing
+              # it (install-gitleaks.sh:123) left the very next line scanning
+              # with a PATH that never had gitleaks on it, which is the exit 2
+              # #3516's CI run reported. --print-path names the binary the pin
+              # verified; exporting its directory puts it on PATH for the rest
+              # of this block. The GITHUB_PATH write stays in the script for
+              # later steps -- it is right there, it is just not enough here.
+              export PATH="$(dirname "$(scripts/install-gitleaks.sh --print-path)"):$PATH"
+              # Prove the propagation before the scan, so a broken PATH fails
+              # as "gitleaks missing" next to the install, not as an opaque
+              # exit 2 from a scan that never ran.
+              command -v gitleaks
               # check-git-secrets.py exits 2 when gitleaks fails TO RUN and 1
               # when it finds something unallowlisted. Both are failures here
               # and neither is softened: under `set -euo pipefail` an exit 2

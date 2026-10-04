@@ -8,6 +8,7 @@ Four commits. Nothing pushed, no PR opened. Branch `ci/3501-gate-enforcement`.
 | 2 | `1d588877` | `chore(types)` — mypy closure over 17 files |
 | 3 | `294c2c88` | `docs(measurement)` — `CONTAINER-SCAN-MEASUREMENT.md`, docs only |
 | 4 | this one | `ci(wire)` — actually calls the gate; **commit 1 was inert** |
+| 5 | (this commit, see below) | `fix(secret-scan)` — the two defects #3516's CI found |
 
 `scripts/list-docker-base-images.py` and `.github/workflows/image-security-scan.yml`
 were **not** touched. The `ACCEPTED_CVES` block in that script remains uncommitted
@@ -599,3 +600,242 @@ Zero findings at CI severity. `shellcheck --severity=error scripts/install-gitle
   have no changes in this commit's diff.
 - `ACCEPTED_CVES`: still uncommitted, unchanged.
 - Nothing pushed. No PR.
+---
+
+# Commit 5 — fix the two defects CI found on #3516
+
+Nothing pushed. Two real defects, both reproduced below before being fixed.
+
+| defect | symptom in CI | root cause | fix |
+|---|---|---|---|
+| 1 | `check-git-secrets: gitleaks is not on PATH`, exit 2, 17s | the install wrote `$GITHUB_PATH`, which the runner applies to *later* steps only; each `run:` is its own process | `quality.yml:2095` exports the printed binary's directory into `PATH` for the rest of the block |
+| 2 | `1 failed, 641 passed, 25 skipped` — `_verify_allowlist()` called 7 healthy historical-only entries bad paths | `git log --all -- <path>` cannot see deleted paths in a SHALLOW clone, so "absent from this clone" was read as "absent from history" | `scripts/check-git-secrets.py:_verify_allowlist()` detects the shallow clone and *degrades loudly* instead of guessing |
+
+## Defect 1 — reproduction, before the fix
+
+```
+$ env -i PATH=/usr/bin:/bin RUNNER_TEMP=$T GITHUB_PATH=$T/gh/path bash -c \
+    'set -euo pipefail; scripts/install-gitleaks.sh; command -v gitleaks'
+/tmp/.../gitleaks_8.30.0_linux_x64.tar.gz: OK
+install-gitleaks: added /tmp/.../gitleaks-bin to GITHUB_PATH (gitleaks 8.30.0)
+--- next step, PATH as the workflow sees it ---
+gitleaks NOT on PATH (exit 1)
+```
+
+The checksum verification worked (`OK`); only the propagation was broken, exactly
+as the task described.
+
+A second defect in the same script surfaced while fixing the first, and is part
+of the same fix: `--print-path` is meant to be assignable, but
+`sha256sum -c -` prints `<file>: OK` to **stdout**, so
+`$(scripts/install-gitleaks.sh --print-path)` returned two lines and the caller
+put `<tarball>: OK` on `PATH`:
+
+```
++ export 'PATH=/tmp/.../gitleaks_8.30.0_linux_x64.tar.gz: OK
+/home/.../gitleaks-bin:/usr/bin:/bin'
++ command -v gitleaks
+                              <- not found
+```
+
+Fixed at the source rather than filtered in the caller: stdout is now reserved
+for `--print-path`'s one path, and every progress line plus the checksum
+verification's own output goes to stderr (`install-gitleaks.sh:106` and the
+five progress messages).
+
+## Defect 1 — the fix
+
+`quality.yml:2095-2107`, inside the existing row. Additive only: no lane, row or
+aggregator removed.
+
+```yaml
+export PATH="$(dirname "$(scripts/install-gitleaks.sh --print-path)"):$PATH"
+# Prove the propagation before the scan, so a broken PATH fails
+# as "gitleaks missing" next to the install, not as an opaque
+# exit 2 from a scan that never ran.
+command -v gitleaks
+```
+
+The script's `GITHUB_PATH` write stays — it is correct for *later* steps, it just
+was never enough for the step doing the scan.
+
+**The PATH check is not softened.** With no binary on `PATH`, from a clean env:
+
+```
+$ env -i PATH=/usr/bin:/bin /usr/bin/python3.12 scripts/check-git-secrets.py
+check-git-secrets: gitleaks is not on PATH. The workflow installs a pinned, checksum-verified build before calling this; locally, install it yourself or pass --binary.
+rc=2 (expected 2)
+```
+
+## Defect 1 — verification: the full-history scan, clean env
+
+Exactly what the workflow row now runs:
+
+```
+$ tmp=$(mktemp -d); mkdir -p "$tmp/gh"; : > "$tmp/gh/path"
+$ env -i PATH=/usr/bin:/bin HOME=$HOME RUNNER_TEMP=$tmp GITHUB_PATH=$tmp/gh/path bash -c '
+set -euo pipefail
+export PATH="$(dirname "$(scripts/install-gitleaks.sh --print-path)"):$PATH"
+command -v gitleaks
+python3 scripts/check-git-secrets.py
+echo "exit=$?"'
+/tmp/tmp.dt7MG25egd/gitleaks_8.30.0_linux_x64.tar.gz: OK
+/home/xore/.hermes/cache/scratch/tmp.HweS79yiqe/gitleaks-bin/gitleaks
+Secret scan passed: 88 finding(s) over full history, all covered by ALLOWED_FILES (0 cowrie honeyfs) or absent. Report: .../.ci-artifacts/gitleaks.json
+exit=0
+rc=0
+```
+
+2444 commits of real history, 88 findings, all accounted for.
+
+## Defect 2 — the decision, and why
+
+The property we want is: *an allowlist entry that matches nothing must not
+silently exempt a future real secret under that path.* That is about whether
+the path could **ever** match — not about whether **this** clone contains it.
+A shallow clone cannot answer the first question, so it must not answer the
+second one wrongly.
+
+Two options were available:
+
+- **Fetch enough history to answer it.** The docs-regression row shares one
+  checkout with ~65 other matrix rows; unshallowing there costs every row the
+  fetch to answer a question only this check asks. And the fetch is not
+  something a test should do to the machine running it.
+- **Degrade to a check the clone can actually make, loudly, only when shallow.**
+  **Chosen.**
+
+So: **warning, never a finding.** A truncated clone is evidence about the clone,
+not about the entry. But "never silently pass a check that could not run" is the
+other half, so the degradation is announced as a `::warning::` Actions
+annotation naming exactly which half did not run and the command that restores
+it.
+
+What still runs in a shallow clone — the half it *can* decide, unweakened:
+
+- every entry still needs a written reason;
+- every entry still must be present in the working tree if it is there.
+
+And when the clone is full, the stale-entry failure is unchanged and still a
+hard finding (that is the existing `test_gate_fails_closed_on_a_stale_allowlist_entry`,
+plus the new `test_full_clone_still_fails_closed_on_a_stale_entry`).
+
+The gate's own CI step unshallows before scanning (`quality.yml:2079-2081`), so
+in the row that matters the check runs in full. The docs suite is the shallow
+case, and it is where the degradation is observable.
+
+## Defect 2 — reproduction in CI-like conditions, before the fix
+
+A real `git clone --depth 1` of this repo:
+
+```
+$ git clone --depth 1 --no-local file://$PWD /tmp/clone
+$ git rev-parse --is-shallow-repository
+true
+$ git log --all --format=%H -1 -- dashboard/static/xterm.js | wc -c
+0
+$ python3 -c "... _verify_allowlist()"
+problems: ['graphify-out/cache/stat-index.json: ... exists neither in the tree nor anywhere in history',
+           'dash-shots/f2-follow-up/preserved-sha256.json: ...',
+           'dashboard/static/xterm.js: ...',
+           'dashboard/scanner_fingerprints_test.go: ...',
+           'dashboard/problem_reports_test.go: ...',
+           'canarytokens/Dockerfile: ...',
+           'pihole/dnscrypt-proxy.toml: ...']
+```
+
+Seven entries — the exact set the task named (~6, "and ~3 more"). Reproduced
+against unmodified `HEAD`, before the fix landed.
+
+## Defect 2 — same clone, after the fix
+
+```
+$ git rev-parse --is-shallow-repository
+true
+::warning::secret-scan allowlist: this is a SHALLOW clone (`git rev-parse --is-shallow-repository` = true), so the 'exists somewhere in history' half of the allowlist check cannot run and was NOT run. Entries are only checked for a written reason and for presence in the working tree. Run `git fetch --unshallow` to get the full check.
+problems: []
+```
+
+Zero findings, one loud warning. And on this full clone, unchanged and strict:
+
+```
+$ git rev-parse --is-shallow-repository
+false
+$ python3 -c "... _verify_allowlist()"
+problems: []
+```
+
+## Defect 2 — tests
+
+Four new tests in `tests/docs/test_3501_secret_scan_allowlist.py`, against real
+git repositories built with `git init` / `git clone --depth 1` — the precedent
+in this suite (`test_2604_check_public_leaks_fixture_allowlist.py:51`,
+`test_2055_fix.py:625` build and read real repos rather than mocking git, because
+the thing under test *is* git's behaviour).
+
+- `test_is_shallow_reports_true_on_a_depth_1_clone` — detection against a clone
+  git really made shallow, and `False` for the full clone it came from.
+- `test_shallow_clone_degrades_the_allowlist_check_without_failing` — a path
+  deleted upstream, then verified genuinely invisible in the clone
+  (`git log ... -- path` empty), then asserted to produce **no** finding and an
+  explicit `::warning::`/`was NOT run`.
+- `test_shallow_clone_still_fails_on_an_entry_with_no_reason` — the degradation
+  does not weaken the check a shallow clone *can* make.
+- `test_full_clone_still_fails_closed_on_a_stale_entry` — the other side of the
+  branch, so the above cannot pass on a checker that had simply deleted the
+  check.
+
+These fail on the pre-fix script, for the right reason:
+
+```
+$ git show HEAD:scripts/check-git-secrets.py > scripts/check-git-secrets.py  # then run the suite
+E  AssertionError: a shallow clone cannot see truncated history, so a miss there
+   is not evidence the entry is stale -- but it was reported:
+   ['gone/deleted-long-ago.txt: allowlist entry names a file that exists neither
+     in the tree nor anywhere in history -- remove the entry or restore the file']
+```
+
+## Verification
+
+### `tests/docs` — with gitleaks on PATH (the CI shape, fixed)
+
+```
+$ /usr/bin/python3.12 -m pytest tests/docs -q
+670 passed, 1 skipped, 1 xfailed, 17 subtests passed in 200.99s (0:03:20)
+```
+
+### `tests/docs` — without gitleaks on PATH
+
+```
+$ /usr/bin/python3.12 -m pytest tests/docs -q
+667 passed, 4 skipped, 1 xfailed, 17 subtests passed in 176.97s (0:02:56)
+```
+
+The delta is exactly the four `gitleaks`-backed tests skipping, as designed.
+
+### `scripts/check-public-leaks.py`
+
+```
+$ /usr/bin/python3.12 scripts/check-public-leaks.py
+Public-repository safety check passed.
+rc=0
+```
+
+### Lint / parse
+
+```
+$ shellcheck --severity=error scripts/install-gitleaks.sh   -> clean
+$ bash -n scripts/install-gitleaks.sh                       -> clean
+$ python3.12 -m py_compile scripts/check-git-secrets.py tests/docs/test_3501_secret_scan_allowlist.py -> OK
+$ python3.12 -c "import yaml; yaml.safe_load(open('.github/workflows/quality.yml'))" -> parses
+```
+
+## Not done in this commit
+
+- **Nothing pushed.** Commits only, as instructed.
+- **`scripts/list-docker-base-images.py` and
+  `.github/workflows/image-security-scan.yml` untouched** — no diff entries.
+  Container-scan stays on hold.
+- **`ACCEPTED_CVES`** still uncommitted in the working tree, unchanged.
+- **No existing lane, row or aggregator removed.** The `quality.yml` diff is 13
+  added lines inside the existing `Full-history secret scan (gitleaks, #3501)` row.

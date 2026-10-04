@@ -128,19 +128,53 @@ ALLOWED_FILES: dict[str, str] = {
 }
 
 
+def _is_shallow(root: Path | None = None) -> bool:
+    """Is this clone truncated, so `git log <path>` cannot see the whole history?"""
+    result = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        cwd=root or ROOT, capture_output=True, text=True,
+    )
+    return result.returncode != 0 or result.stdout.strip() != "false"
+
+
 def _verify_allowlist() -> list[str]:
     """Every allowlist entry must name a file that exists, now or in history.
 
     A stale entry is worse than no entry: it reads as an exemption someone
     argued for, while in fact covering nothing, and it invites the next real
     secret committed under that name to be waved through by whoever reads it.
+
+    Shallow clones cannot answer the history half at all -- a path deleted
+    years ago is simply not in the fetched commits, and reporting that as a
+    miss would fail a healthy allowlist on every CI run (the #3516 failure).
+    So in a shallow clone this DEGRADES rather than guessing: entries are
+    still required to carry a reason, the history lookup is skipped, and the
+    degradation is announced loudly as a `::warning::` so a reader knows the
+    half of the check did not run. It is a warning, never a finding -- a
+    truncated clone says nothing about whether the path ever existed.
+
+    The gate's own CI step unshallows the clone before scanning
+    (quality.yml, "Full-history secret scan"), which is where this check gets
+    to run in full; the docs suite is the shallow case.
     """
     problems: list[str] = []
+    shallow = _is_shallow()
+    if shallow:
+        print(
+            "::warning::secret-scan allowlist: this is a SHALLOW clone "
+            "(`git rev-parse --is-shallow-repository` = true), so the "
+            "'exists somewhere in history' half of the allowlist check cannot "
+            "run and was NOT run. Entries are only checked for a written "
+            "reason and for presence in the working tree. Run "
+            "`git fetch --unshallow` to get the full check."
+        )
     for relative, reason in ALLOWED_FILES.items():
         if not reason.strip():
             problems.append(f"{relative}: allowlist entry carries no reason")
             continue
         if (ROOT / relative).is_file():
+            continue
+        if shallow:
             continue
         if subprocess.run(
             ["git", "log", "--all", "--format=%H", "-1", "--", relative],

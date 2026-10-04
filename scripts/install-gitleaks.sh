@@ -18,8 +18,11 @@
 # types -- the same constraint install-trivy.sh works under.
 #
 # Usage:
-#   install-gitleaks.sh             install, then prepend the dir to $GITHUB_PATH
-#   install-gitleaks.sh --print-path  install, then print the binary path
+#   install-gitleaks.sh              install, then prepend the dir to $GITHUB_PATH
+#   install-gitleaks.sh --print-path  install, then print ONLY the binary path,
+#                                    on stdout -- progress goes to stderr, so
+#                                    `$(install-gitleaks.sh --print-path)` is
+#                                    safe to assign
 #
 # Overrides (all three must move together; see the guard below):
 #   GITLEAKS_VERSION  release tag, e.g. 8.30.0
@@ -64,7 +67,7 @@ if [ -n "${GITLEAKS_BIN:-}" ]; then
   if [ "$print_path" -eq 1 ]; then
     printf '%s\n' "$GITLEAKS_BIN"
   else
-    echo "install-gitleaks: using GITLEAKS_BIN=$GITLEAKS_BIN (gitleaks ${got:-unknown})"
+    echo "install-gitleaks: using GITLEAKS_BIN=$GITLEAKS_BIN (gitleaks ${got:-unknown})" >&2
   fi
   exit 0
 fi
@@ -90,13 +93,17 @@ bin=$bindir/gitleaks
 # re-downloading ~8 MiB. Version-matched, so a stale RUNNER_TEMP from a
 # previous pin is replaced rather than reused.
 if [ -x "$bin" ] && [ "$("$bin" version 2>/dev/null || true)" = "$version" ]; then
-  echo "install-gitleaks: reusing $bin (gitleaks $version)"
+  echo "install-gitleaks: reusing $bin (gitleaks $version)" >&2
 else
   work=$(mktemp -d)
   trap 'rm -rf "$work"' EXIT
   curl -sfL -o "$work/$asset" \
     "https://github.com/gitleaks/gitleaks/releases/download/v${version}/${asset}"
-  echo "${checksum}  ${work}/${asset}" | sha256sum -c -
+  # `sha256sum -c -` prints "<file>: OK" to stdout. Under --print-path that
+  # would land in the caller's command substitution and corrupt the assigned
+  # path (it became the first PATH element, so gitleaks was not found at all),
+  # so the verification's own output is progress and goes to stderr.
+  echo "${checksum}  ${work}/${asset}" | sha256sum -c - >&2
   rm -rf -- "$bindir"
   mkdir -p -- "$bindir"
   tar -xzf "$work/$asset" -C "$bindir" gitleaks
@@ -121,8 +128,8 @@ fi
 # itself instead of silently losing the tool.
 if [ -n "${GITHUB_PATH:-}" ]; then
   printf '%s\n' "$bindir" >>"$GITHUB_PATH"
-  echo "install-gitleaks: added $bindir to GITHUB_PATH (gitleaks $version)"
+  echo "install-gitleaks: added $bindir to GITHUB_PATH (gitleaks $version)" >&2
 else
-  echo "install-gitleaks: gitleaks $version installed at $bin"
-  echo "install-gitleaks: GITHUB_PATH is unset (not running under Actions) -- add it to PATH yourself."
+  echo "install-gitleaks: gitleaks $version installed at $bin" >&2
+  echo "install-gitleaks: GITHUB_PATH is unset (not running under Actions) -- add it to PATH yourself." >&2
 fi
