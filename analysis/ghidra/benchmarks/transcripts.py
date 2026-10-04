@@ -332,6 +332,20 @@ class Reproducibility:
     rubric_version: str | None = None
     claim_pool_version: str | None = None
     prompt_contract: dict[str, Any] | None = None
+    # Which engine answered, and the two flags that decide what the answer is
+    # worth: whether the KV cache was pushed back to host RAM after an OOM, and
+    # whether Ollama had to take the model over. A transcript line that does not
+    # say this cannot be attributed, and an unattributable line cannot be
+    # compared against one from the other engine -- RAM-offloaded decode runs at
+    # roughly a sixth of the on-card rate, so the recorded tokens/second means two
+    # different things on the two engines.
+    #
+    # None means "not served through the engine seam", which is what every
+    # replayed and rescored record predates it. Absence is honest; a filled-in
+    # guess would not be.
+    engine: str | None = None
+    kv_offload_disabled: bool | None = None
+    fallback_engine: str | None = None
 
     def __post_init__(self) -> None:
         if self.tier not in TIERS:
@@ -345,6 +359,9 @@ class Reproducibility:
             "rubric_version": self.rubric_version,
             "claim_pool_version": self.claim_pool_version,
             "prompt_contract": self.prompt_contract,
+            "engine": self.engine,
+            "kv_offload_disabled": self.kv_offload_disabled,
+            "fallback_engine": self.fallback_engine,
         }
 
 
