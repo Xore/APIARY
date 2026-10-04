@@ -35,10 +35,14 @@ Run: pytest analysis/ghidra/benchmarks/tests/test_serving_engine.py -q
 
 import argparse
 import importlib.util
+import inspect
+import io
 import json
+import re
 import sys
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest import mock
 
@@ -415,9 +419,75 @@ class GgufResolutionTest(unittest.TestCase):
             "/root/.ollama/models/manifests/hf.co/org/repo:Q4_K_M",
         )
 
-    def test_a_tag_with_no_tag_part_is_refused(self):
-        with self.assertRaises(ValueError):
-            serving.manifest_path("gemma2")
+    def test_an_untagged_name_resolves_the_way_ollama_resolves_it(self):
+        """Bug 1: `qwen3-8-27b-q4km` is how Ollama *reports* nothing wrong with.
+
+        Every library tag on this roster is written without one, so the old
+        parser raised `ValueError: model tag has no tag part` on most of the
+        roster -- and `ModelSession.open()` caught it and fell back to Ollama,
+        so the run reported success having never loaded a GGUF.
+
+        Asserted against the exact string Ollama's `/api/tags` returns for the
+        model in the smoke manifest (`/tmp/smoke-manifest.json`,
+        `slots.ghidra.artifact.tag`), not against the parser in isolation: the
+        pair that has to hold is "the name a manifest carries" -> "the manifest
+        path of the tag Ollama reports for it".
+        """
+        reported_by_ollama = "qwen3-8-27b-q4km:latest"
+        from_manifest = "qwen3-8-27b-q4km"
+
+        self.assertEqual(serving.with_default_tag(from_manifest), reported_by_ollama)
+        # Both spellings must land on the same file, not merely both succeed.
+        self.assertEqual(
+            serving.manifest_path(from_manifest),
+            serving.manifest_path(reported_by_ollama),
+        )
+        self.assertEqual(
+            serving.manifest_path(from_manifest),
+            "/root/.ollama/models/manifests/registry.ollama.ai/library/"
+            "qwen3-8-27b-q4km:latest",
+        )
+
+    def test_a_namespaced_untagged_name_also_defaults(self):
+        """Ollama's rule is the same whichever namespace the name is in."""
+        self.assertEqual(
+            serving.manifest_path("hf.co/org/repo"),
+            "/root/.ollama/models/manifests/hf.co/org/repo:latest",
+        )
+
+    def test_only_a_name_that_names_nothing_is_refused(self):
+        """Refused *loudly*: these raise out of open(), not into the fallback.
+
+        The distinction is the whole point. An untagged name is a model Ollama
+        can serve; an empty one is a manifest typo, and answering it by falling
+        back would score whichever model happened to be resident.
+        """
+        for junk in ("", "   ", ":", "/"):
+            with self.subTest(model=junk):
+                with self.assertRaises(serving.UnresolvableModel):
+                    serving.manifest_path(junk)
+
+    def test_an_unresolvable_name_stops_the_run_instead_of_falling_back(self):
+        """The regression that produced a run that "succeeded" on the fallback.
+
+        The bug was not that the parser raised -- it was that `open()` caught
+        every exception and recorded it as `fallback_reason`, so a name that is
+        not a model looked exactly like a server that could not load one.
+        """
+        session = make_session(FakeRemote(), model="")
+        with self.assertRaises(serving.UnresolvableModel):
+            start(session)
+        self.assertIsNone(session.engine)
+        self.assertIsNone(session.fallback_engine)
+        self.assertIsNone(session.fallback_reason)
+        self.assertIsNone(session.transport)
+
+    def test_a_full_tag_survives_untouched(self):
+        """Not over-applied: the default never rewrites a tag that was given."""
+        self.assertEqual(serving.with_default_tag("gemma2:27b"), "gemma2:27b")
+        self.assertEqual(
+            serving.with_default_tag("hf.co/org/repo:Q4_K_M"), "hf.co/org/repo:Q4_K_M"
+        )
 
     def test_the_launch_loads_the_resolved_gguf(self):
         remote = FakeRemote()
@@ -1190,6 +1260,497 @@ class EngineFlagTest(unittest.TestCase):
         # No container, and the slot still ran: on Ollama, as pinned.
         self.assertEqual(remote.launches, [], "--engine ollama must not start a container")
         self.assertEqual(report["slots"]["revdeck"]["serving"]["engine"], "ollama")
+
+
+# --- Bug 1: Ollama's own spelling wins --------------------------------------
+
+# What /api/tags returns for the model in the smoke manifest
+# (/tmp/smoke-manifest.json, slots.ghidra.artifact.tag). The tag is always
+# spelled out by the server; the manifest carried the bare name.
+QWEN3 = {"name": "qwen3-8-27b-q4km:latest", "digest": "bdbd181c",
+         "size": 9276198565,
+         "details": {"family": "qwen3", "parameter_size": "14.8B",
+                     "quantization_level": "Q4_K_M"}}
+# The same weights at a second quantisation, listed side by side. Real on this
+# roster: the sweep scripts pull several quants of one model.
+QWEN3_Q5 = {"name": "qwen3-8-27b-q4km:q5", "digest": "aaaa1111", "size": 1,
+            "details": {"family": "qwen3", "parameter_size": "14.8B",
+                        "quantization_level": "Q5_K_M"}}
+OLLAMA_TAGS = [QWEN3]
+
+
+class CanonicalNameTest(unittest.TestCase):
+    """A name from the server beats a name from a manifest, when both exist.
+
+    Bug 1's third requirement, and the one that removes the class rather than
+    the instance: the mismatch is not that this manifest spelled a model without
+    a tag, it is that two different strings can mean one model. Anything the
+    server lists is authoritative.
+    """
+
+    def test_the_servers_spelling_replaces_a_bare_manifest_name(self):
+        self.assertEqual(
+            serving.canonical_tag(OLLAMA_TAGS, "qwen3-8-27b-q4km"),
+            "qwen3-8-27b-q4km:latest",
+        )
+
+    def test_an_exact_match_is_never_moved_onto_another_model(self):
+        """`:q5` is a different quantisation of the same weights.
+
+        Resolving it to `:latest` would serve the wrong quantisation under the
+        name that asked for this one, which is worse than the parse bug being
+        fixed.
+        """
+        both = [QWEN3, QWEN3_Q5]
+        self.assertEqual(
+            serving.canonical_tag(both, "qwen3-8-27b-q4km:q5"),
+            "qwen3-8-27b-q4km:q5",
+        )
+        self.assertEqual(
+            serving.canonical_tag(both, "qwen3-8-27b-q4km:latest"),
+            "qwen3-8-27b-q4km:latest",
+        )
+
+    def test_a_bare_name_matching_two_tags_is_left_ambiguous(self):
+        """`:latest` and `:q5` are both candidates for a bare name.
+
+        Picking one would load different weights than the roster meant and
+        record it under the name asked for. A miss fails on the real tag; a
+        guess does not fail at all, which is the worse outcome.
+        """
+        self.assertIsNone(serving.canonical_tag([QWEN3, QWEN3_Q5], "qwen3-8-27b-q4km"))
+
+    def test_an_unlisted_name_is_left_exactly_as_the_caller_wrote_it(self):
+        """This only ever improves a name; it never invents or rejects one."""
+        self.assertIsNone(serving.canonical_tag(OLLAMA_TAGS, "not-installed:latest"))
+        self.assertIsNone(serving.canonical_tag([], "qwen3-8-27b-q4km"))
+
+    def test_a_tag_row_with_only_a_model_key_still_counts(self):
+        """Ollama has used both keys across versions; both are read."""
+        self.assertEqual(
+            serving.canonical_tag([{"model": "x:1.5b"}], "x"),
+            "x:1.5b",
+        )
+
+    def test_the_artifact_is_addressed_by_the_servers_spelling(self):
+        """End to end: the stored tag is what Ollama would answer about.
+
+        This is the string every later read uses -- /api/show, /api/ps, and the
+        GGUF manifest path -- so a manifest that spells the model loosely still
+        gets a run that addresses one model throughout.
+        """
+        artifact = evaluate_models._artifact_of(OLLAMA_TAGS[0], "qwen3-8-27b-q4km:latest")
+        self.assertEqual(artifact["tag"], "qwen3-8-27b-q4km:latest")
+        self.assertEqual(artifact["digest"], "bdbd181c")
+
+    def test_the_session_resolves_the_gguf_of_the_name_the_server_reports(self):
+        """The two halves together, which is what the smoke run needed.
+
+        A manifest said `qwen3-8-27b-q4km`; the server says
+        `qwen3-8-27b-q4km:latest`. The container must load the manifest *of the
+        server's name*, or it loads nothing and the run falls back for a reason
+        that names a parser rather than a server.
+        """
+        remote = FakeRemote()
+        session = make_session(remote, model="qwen3-8-27b-q4km")
+        session.model = serving.canonical_tag(OLLAMA_TAGS, session.model)
+        start(session)
+        self.assertEqual(
+            remote.reads,
+            ["/root/.ollama/models/manifests/registry.ollama.ai/library/"
+             "qwen3-8-27b-q4km:latest"],
+        )
+        self.assertEqual(session.engine, "llama.cpp")
+
+    def test_open_session_replaces_the_manifest_spelling_before_serving(self):
+        """The one call site every engine goes through does the swap.
+
+        Asserted on what the container was asked to load, not on the helper:
+        a caller that forgot to call it would leave the parser reading the bare
+        name, and the failure would only show up on a real host.
+        """
+        remote = FakeRemote()
+
+        def request_json(url, body=None, timeout=None):
+            return {"models": OLLAMA_TAGS} if url.endswith("/api/tags") else {}
+
+        args = argparse.Namespace(engine=evaluate_models.ENGINE_LLAMACPP)
+        with mock.patch.object(evaluate_models, "request_json", request_json), \
+             mock.patch.object(serving, "Remote", return_value=remote), \
+             mock.patch.object(serving.LlamaCppServer, "healthy", return_value=True):
+            session = evaluate_models.open_session(
+                args, "http://127.0.0.1:11435", "qwen3-8-27b-q4km", 24576)
+        self.assertEqual(session.model, "qwen3-8-27b-q4km:latest")
+        self.assertEqual(
+            remote.reads,
+            ["/root/.ollama/models/manifests/registry.ollama.ai/library/"
+             "qwen3-8-27b-q4km:latest"],
+        )
+
+
+# --- Bug 2: two engines, two endpoints -------------------------------------
+
+def _http_error(code):
+    return urllib.error.HTTPError(
+        "http://127.0.0.1:11434/api/tags", code, "Not Found", {}, None)
+
+
+# The exact body this workstation's 11434 answers with. Recorded live in
+# CLOSE_SUMMARY.md:35-37 and again as the smoke run's failure. An
+# OpenAI-shaped server's wording, which is the diagnostic: a real Ollama has no
+# "unknown endpoint", it has tags.
+NOT_OLLAMA_BODY = json.dumps({
+    "message": "Unknown endpoint: GET /api/tags",
+    "type": "invalid_request_error",
+    "code": "not_found",
+}).encode()
+
+
+class NotAnOllama:
+    """The server on this box's 11434: OpenAI-shaped, 404s /api/tags."""
+
+    def __call__(self, url, body=None, timeout=None):
+        raise urllib.error.HTTPError(
+            "http://127.0.0.1:11434/api/tags", 404, "Not Found",
+            {"Content-Type": "application/json"}, io.BytesIO(NOT_OLLAMA_BODY))
+
+
+class EndpointProbeTest(unittest.TestCase):
+    """A 404 from /api/tags is a wrong endpoint, not a model that failed."""
+
+    def test_a_404_on_api_tags_is_reported_as_the_wrong_endpoint(self):
+        with self.assertRaises(serving.WrongEndpoint) as raised:
+            serving.probe_ollama_endpoint("http://127.0.0.1:11434", NotAnOllama())
+        message = str(raised.exception)
+        self.assertIn("11434", message)
+        self.assertIn("not Ollama", message)
+        # Must not read like a model failure. This string is what a reader
+        # debugs from, and the whole bug was that it named the model instead.
+        self.assertNotIn("model tag is not installed", message)
+
+    def test_a_200_that_is_not_a_tag_list_is_also_the_wrong_endpoint(self):
+        """An OpenAI server behind a router may answer 200 with /v1/models."""
+        def openai_shaped(url, body=None, timeout=None):
+            return {"object": "list", "data": [{"id": "qwen3-8-27b-q4km"}]}
+
+        with self.assertRaises(serving.WrongEndpoint):
+            serving.probe_ollama_endpoint("http://127.0.0.1:11434", openai_shaped)
+
+    def test_a_real_ollama_returns_its_tags(self):
+        payload = serving.probe_ollama_endpoint(
+            "http://127.0.0.1:11435", lambda *a, **k: {"models": OLLAMA_TAGS})
+        self.assertEqual(payload["models"], OLLAMA_TAGS)
+
+    def test_an_unreachable_server_is_not_mislabelled_as_the_wrong_endpoint(self):
+        """A refused connection is a different problem from a wrong server.
+
+        Collapsing the two would send a reader to fix a URL that is correct.
+        """
+        def refused(url, body=None, timeout=None):
+            raise urllib.error.URLError("connection refused")
+
+        with self.assertRaises(urllib.error.URLError):
+            serving.probe_ollama_endpoint("http://127.0.0.1:11435", refused)
+
+    def test_a_500_is_passed_through_rather_than_reclassified(self):
+        """Only a 404 is evidence about the endpoint's *shape*."""
+        def failing(url, body=None, timeout=None):
+            raise _http_error(500)
+
+        with self.assertRaises(urllib.error.HTTPError) as raised:
+            serving.probe_ollama_endpoint("http://127.0.0.1:11435", failing)
+        self.assertEqual(raised.exception.code, 500)
+
+    def test_the_slot_reports_a_wrong_endpoint_instead_of_a_missing_model(self):
+        """The reported symptom, before and after.
+
+        `model_artifact` raises `model tag is not installed` when /api/tags is
+        readable and simply does not list the model. When /api/tags 404s, the
+        cause is the URL -- and that is now what the slot reports.
+        """
+        def request_json(url, body=None, timeout=None):
+            if url.endswith("/api/tags"):
+                raise urllib.error.HTTPError(
+                    url, 404, "Not Found", {},
+                    io.BytesIO(NOT_OLLAMA_BODY))
+            return {"models": [], "message": {"content": "{}"},
+                    "eval_count": 1, "eval_duration": 1_000_000_000,
+                    "done_reason": "stop"}
+
+        with mock.patch.object(evaluate_models, "request_json", request_json), \
+             mock.patch.object(serving, "Remote", return_value=FakeRemote(
+                 state="exited", log_text="unsupported model architecture")):
+            result = evaluate_models.evaluate_slot(
+                "http://127.0.0.1:11434", "revdeck", "qwen3-8-27b-q4km",
+                evaluate_models.qualification_request("revdeck", 8192))
+        self.assertFalse(result["ok"])
+        self.assertIn("not Ollama", result["error"])
+        self.assertNotIn("model tag is not installed", result["error"])
+
+
+class BaseUrlDefaultTest(unittest.TestCase):
+    """The default has to be where Ollama is, per the repo's own config."""
+
+    def test_the_default_is_the_homeserver_forward_not_the_local_11434(self):
+        """On this workstation 11434 is a llama.cpp-shaped server.
+
+        `ssh -L 11435:127.0.0.1:11434 homeserver` is the forward every other
+        invocation of this harness already uses
+        (docs/analysis/ghidra/benchmarks/README.md:166, CLOSE2_SUMMARY.md:4,
+        .issue-rosterslots.md:107). The old default pointed at the local
+        11434, which is a different server entirely -- that is Bug 2.
+        """
+        self.assertEqual(evaluate_models.DEFAULT_OLLAMA_BASE_URL,
+                         "http://127.0.0.1:11435")
+        # The default argparse would actually use, read off the parser main()
+        # builds, so a later re-inline of the literal cannot pass this.
+        source = inspect.getsource(evaluate_models.main)
+        self.assertIn("DEFAULT_OLLAMA_BASE_URL", source)
+        self.assertNotIn('default="http://127.0.0.1:11434"', source)
+
+    def test_the_default_port_is_a_forward_of_the_port_the_compose_publishes(self):
+        """11435 is a forward to the compose file's 11434, not a second service.
+
+        analysis/ghidra/docker-compose.ghidra.yml:81 publishes ollama on
+        127.0.0.1:11434 on the analysis host; docs/gpu-llm-analysis-worker.md:549
+        names the container `ghidra-ollama-1`. So the harness's 11435 and the
+        compose's 11434 are the same server behind an `ssh -L`, which is what
+        makes the default correct rather than a different port someone liked.
+
+        Read from the compose file rather than restated, so an edit to the
+        published port fails here instead of silently invalidating the comment
+        above the constant.
+        """
+        compose = (BENCHMARKS_DIR.parent / "docker-compose.ghidra.yml").read_text()
+        published = re.search(r"'127\.0\.0\.1:(\d+):11434'", compose).group(1)
+        self.assertEqual(published, "11434")
+        forward = evaluate_models.DEFAULT_OLLAMA_BASE_URL.rsplit(":", 1)[-1]
+        self.assertEqual(int(forward), int(published) + 1)
+
+
+class EndpointSeparationTest(unittest.TestCase):
+    """The two engines' URLs are named separately in the record.
+
+    They were one field, which is how an Ollama fallback ended up pointing at a
+    server with no /api/* surface at all: the llama.cpp path has its own
+    tunneled port, and the record could not say which of the two it had used.
+    """
+
+    def provenance(self, session):
+        return session.provenance()
+
+    def test_the_record_names_the_ollama_endpoint_and_the_llamacpp_one(self):
+        remote = FakeRemote()
+        session = make_session(remote)
+        start(session)
+        record = self.provenance(session)
+        self.assertEqual(record["ollama_base_url"], "http://127.0.0.1:11435")
+        self.assertTrue(record["llamacpp_endpoint"].endswith("/v1/chat/completions"))
+        self.assertIn("11435", record["ollama_base_url"])
+
+    def test_the_llamacpp_endpoint_is_the_tunnelled_port_not_the_ollama_one(self):
+        """The two must not be the same URL. That identity is the bug."""
+        remote = FakeRemote()
+        session = make_session(remote)
+        start(session)
+        record = self.provenance(session)
+        self.assertNotEqual(record["llamacpp_endpoint"].rsplit("/", 1)[0],
+                            record["ollama_base_url"])
+
+    def test_the_record_survives_teardown_with_both_endpoints(self):
+        """read after close() -- the same snapshot rule as `engine`."""
+        remote = FakeRemote()
+        session = make_session(remote)
+        start(session)
+        session.close()
+        record = session.provenance()
+        self.assertEqual(record["engine"], "llama.cpp")
+        self.assertTrue(record["llamacpp_endpoint"].endswith("/v1/chat/completions"))
+        self.assertEqual(record["ollama_base_url"], "http://127.0.0.1:11435")
+
+    def test_a_fallback_run_reports_the_ollama_endpoint_and_no_llamacpp_one(self):
+        """The fallback path is the one that was wrong, so it is the one pinned.
+
+        A run that fell back never published a llama.cpp endpoint, and saying
+        otherwise would put an /api/* URL on the record as though it had served
+        anything.
+        """
+        remote = FakeRemote(state="exited", log_text="unsupported model architecture")
+        session = make_session(remote)
+        start(session)
+        record = session.provenance()
+        self.assertEqual(record["engine"], "ollama")
+        self.assertEqual(record["fallback_engine"], "ollama")
+        self.assertEqual(record["ollama_base_url"], "http://127.0.0.1:11435")
+        self.assertIsNone(record["llamacpp_endpoint"])
+
+    def test_the_ollama_transport_still_posts_to_api_chat(self):
+        """The shape difference itself, kept explicit in the code."""
+        posted = []
+        session = make_session(FakeRemote(), model="gemma2:27b")
+        session.request_json = lambda url, body=None, timeout=None: posted.append(url)
+        session.engine = "ollama"
+        transport = serving.ollama_transport(session.base_url, session.request_json)
+        transport(f"{session.base_url}/api/chat", {"model": "gemma2:27b"})
+        self.assertEqual(posted, ["http://127.0.0.1:11435/api/chat"])
+
+
+# --- the manifest path, end to end -----------------------------------------
+#
+# The smoke run produced 0 transcript records before failing in engine
+# selection, so nothing after that point had ever been exercised against a real
+# model. These drive the whole --manifest loop with a stub host and a stub
+# writer: no GPU, no containers, no network, but every line that runs between
+# "the session opened" and "the record was written".
+
+class ManifestPathTest(unittest.TestCase):
+    def manifest(self, tmpdir, tags, slots):
+        path = Path(tmpdir) / "manifest.json"
+        path.write_text(json.dumps({"slots": {
+            name: {"artifact": {"tag": tag},
+                   "qualification_request": evaluate_models.qualification_request(
+                       name, 8192)}
+            for name, tag in slots.items()
+        }}))
+        return path
+
+    # The installed roster this stub server reports, for every model the
+    # manifest path names below.
+    TAGS = [
+        {"name": f"{tag}", "digest": "bdbd181c", "size": 9276198565,
+         "details": {"family": "qwen3", "parameter_size": "14.8B",
+                     "quantization_level": "Q4_K_M"}}
+        for tag in ("qwen3-8-27b-q4km:latest", "gemma2:27b", "gemma2:latest")
+    ]
+
+    def request_json(self, url, body=None, timeout=None):
+        if url.endswith("/api/tags"):
+            return {"models": self.TAGS}
+        if url.endswith("/api/ps"):
+            return {"models": []}
+        if url.endswith("/api/show"):
+            return {"capabilities": ["tools", "completion"]}
+        if url.endswith("/api/version"):
+            return {"version": "0.34.4"}
+        return {"message": {"content": "{}"}, "eval_count": 10,
+                "eval_duration": 1_000_000_000, "done_reason": "stop"}
+
+    def args_for(self, manifest_path, tmpdir, slots, engine=None):
+        return argparse.Namespace(
+            manifest=str(manifest_path), slots=slots, tier="A",
+            # The default engine, not `--engine ollama`: the case under test is
+            # the *fallback* path, and a pinned Ollama run has no fallback by
+            # definition (fallback_engine is legitimately None there).
+            engine=engine or evaluate_models.ENGINE_LLAMACPP,
+            output=str(Path(tmpdir) / "report.json"),
+            context=8192, models=[],
+        )
+
+    def run_manifest(self, tmpdir, tags, slots):
+        manifest_path = self.manifest(tmpdir, tags, slots)
+        args = self.args_for(manifest_path, tmpdir, list(slots))
+        # A stub host whose llama-server exits on load, so every slot exercises
+        # the *fallback* path -- the one the smoke run never reached.
+        remote = FakeRemote(state="exited", log_text="unsupported model architecture")
+        with mock.patch.object(evaluate_models, "request_json", self.request_json), \
+             mock.patch.object(serving, "Remote", return_value=remote), \
+             mock.patch.object(serving.LlamaCppServer, "healthy", return_value=True):
+            code = evaluate_models.run(args, "http://127.0.0.1:11435", None)
+        report = json.loads((Path(tmpdir) / "report.json").read_text())
+        return code, report
+
+    def test_the_fallback_engine_reaches_a_written_record(self):
+        """The smoke run wrote 0 records, so this had never been observed.
+
+        Every field `Reproducibility` promises -- engine, KV offload, fallback
+        engine -- plus the achieved rate, has to be on the stored line and not
+        only in the report the run assembles afterwards. A transcript read on
+        its own months later is the case that has to be attributable.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = transcripts.TranscriptWriter(
+                Path(tmpdir) / "run", transcripts.RunMetadata(
+                    benchmark="bench", provenance=transcripts.PROVENANCE_SYNTHETIC))
+            manifest_path = self.manifest(tmpdir, OLLAMA_TAGS, {"revdeck": "gemma2:27b"})
+            args = self.args_for(manifest_path, tmpdir, ["revdeck"])
+            remote = FakeRemote(state="exited",
+                                log_text="unsupported model architecture")
+            with mock.patch.object(evaluate_models, "request_json", self.request_json), \
+                 mock.patch.object(serving, "Remote", return_value=remote), \
+                 mock.patch.object(serving.LlamaCppServer, "healthy", return_value=True):
+                evaluate_models.run(args, "http://127.0.0.1:11435", writer)
+            lines = list((Path(tmpdir) / "run").rglob("transcripts.jsonl"))
+            self.assertEqual(len(lines), 1, "the manifest path must write records")
+            record = json.loads(lines[0].read_text().splitlines()[0])
+
+        reproducibility = record["reproducibility"]
+        self.assertEqual(reproducibility["engine"], "ollama")
+        self.assertEqual(reproducibility["fallback_engine"], "ollama")
+        self.assertIs(reproducibility["kv_offload_disabled"], False)
+        # The whole point of the block: a score read next to what produced it.
+        self.assertEqual(reproducibility["tier"], "A")
+        self.assertIsNotNone(reproducibility["prompt_contract"])
+        self.assertIsNotNone(record["timing"]["tokens_per_second"])
+        self.assertIsNotNone(record["timing"]["output_tokens"])
+
+    def test_a_reproducibility_block_is_written_on_every_record(self):
+        """Same key set on every line, so two records can be compared."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = transcripts.TranscriptWriter(
+                Path(tmpdir) / "run", transcripts.RunMetadata(
+                    benchmark="bench", provenance=transcripts.PROVENANCE_SYNTHETIC))
+            manifest_path = self.manifest(tmpdir, OLLAMA_TAGS,
+                                          {"revdeck": "gemma2:27b", "sessions": "gemma2:27b"})
+            args = self.args_for(manifest_path, tmpdir, ["revdeck", "sessions"])
+            remote = FakeRemote(state="exited",
+                                log_text="unsupported model architecture")
+            with mock.patch.object(evaluate_models, "request_json", self.request_json), \
+                 mock.patch.object(serving, "Remote", return_value=remote), \
+                 mock.patch.object(serving.LlamaCppServer, "healthy", return_value=True):
+                evaluate_models.run(args, "http://127.0.0.1:11435", writer)
+            lines = list((Path(tmpdir) / "run").rglob("transcripts.jsonl"))[0]
+            records = [json.loads(line) for line in lines.read_text().splitlines()]
+
+        self.assertGreater(len(records), 1)
+        self.assertEqual({tuple(sorted(r["reproducibility"])) for r in records},
+                         {tuple(sorted(records[0]["reproducibility"]))})
+
+    def test_one_unresolvable_slot_does_not_cost_the_run_the_others(self):
+        """Per-slot isolation, now that a session is opened on this path.
+
+        A model name that names nothing raises out of `open_session()` instead
+        of falling back. That raise has to be caught per slot: if it escaped
+        the loop, one bad manifest entry would end the run before the second
+        slot was ever evaluated, which is the isolation this loop has always
+        provided on the positional-model path.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            code, report = self.run_manifest(
+                tmpdir, OLLAMA_TAGS,
+                {"sessions": "gemma2:27b", "revdeck": "  ", "ghidra": "gemma2:27b"})
+
+        self.assertEqual(sorted(report["slots"]), ["ghidra", "revdeck", "sessions"])
+        # The two sound slots ran to completion; the one naming nothing is the
+        # only failure, and it did not cost the other two their results.
+        self.assertTrue(report["slots"]["sessions"]["ok"], report["slots"]["sessions"])
+        self.assertTrue(report["slots"]["ghidra"]["ok"], report["slots"]["ghidra"])
+        self.assertEqual(report["slots"]["sessions"]["serving"]["engine"], "ollama")
+        self.assertFalse(report["slots"]["revdeck"]["ok"])
+        self.assertIn("not a model name", report["slots"]["revdeck"]["error"])
+        self.assertNotIn("not a model name",
+                         report["slots"]["sessions"].get("error", ""))
+        # The run still exits non-zero: one failed slot is a failed run.
+        self.assertEqual(code, 1)
+
+    def test_a_failing_slot_still_reports_which_engine_failed(self):
+        """The isolation path must not lose the engine attribution."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _, report = self.run_manifest(
+                tmpdir, OLLAMA_TAGS, {"revdeck": "  "})
+        serving_facts = report["slots"]["revdeck"]["serving"]
+        self.assertIn("engine", serving_facts)
+        self.assertIn("flags", serving_facts)
+        self.assertIsNone(serving_facts["engine"])
 
 
 if __name__ == "__main__":

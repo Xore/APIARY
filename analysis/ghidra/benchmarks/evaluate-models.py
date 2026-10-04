@@ -71,7 +71,12 @@ from transcripts import (  # noqa: E402
 # call site. It is imported for ModelSession, not for its constants: the engine
 # names below are the harness's CLI vocabulary and live with the other CLI
 # choices.
-from serving import ModelSession, ollama_transport as serving_ollama_transport  # noqa: E402
+from serving import (
+    ModelSession,
+    canonical_tag as serving_canonical_tag,
+    ollama_transport as serving_ollama_transport,
+    probe_ollama_endpoint,
+)  # noqa: E402
 
 # The engine CLI vocabulary. `llamacpp` is the primary path and the default;
 # `ollama` is the fallback, selectable so a run can be pinned to the engine the
@@ -81,6 +86,34 @@ from serving import ModelSession, ollama_transport as serving_ollama_transport  
 ENGINE_LLAMACPP = "llamacpp"
 ENGINE_OLLAMA = "ollama"
 ENGINES = (ENGINE_LLAMACPP, ENGINE_OLLAMA)
+
+# Where Ollama actually is, from this repo's own configuration rather than from
+# a guess about the workstation:
+#   * analysis/ghidra/docker-compose.ghidra.yml:81 publishes the ollama
+#     service on 127.0.0.1:11434 *on the analysis host*, and docs/gpu-llm-
+#     analysis-worker.md:549 confirms the container `ghidra-ollama-1` is the one
+#     serving it (`docker port ghidra-ollama-1` -> 11434).
+#   * The benchmark does not run on the analysis host. It runs on the
+#     workstation and reaches that container through a forward; every other
+#     invocation of this harness already uses 11435 for exactly that:
+#     docs/analysis/ghidra/benchmarks/README.md:166, CLOSE2_SUMMARY.md:4
+#     ("Ollama on homeserver via tunnel, 127.0.0.1:11435, version 0.32.13"),
+#     .issue-rosterslots.md:107 and .issue-tool-capability-probe.md:64
+#     ("Read-only against http://127.0.0.1:11435"), and serving.py's own
+#     `Remote.open_tunnel` docstring.
+#
+# 11434 is explicitly NOT the default, and the difference is not cosmetic: on
+# this workstation 11434 is a different, llama.cpp/OpenAI-shaped server.
+# CLOSE_SUMMARY.md:35-37 records it answering GET /api/tags with
+# `{"type": "invalid_request_error"}` and /v1/models with `owned_by: "qvac"` --
+# not Ollama. The first live smoke run inherited 11434 from the previous
+# default and its Ollama fallback died on
+# `Unknown endpoint: GET /api/tags`, filed as a model failure.
+#
+# ponytail: a hardcoded loopback port, because the forward is set up outside
+# this process. Make it an env var (GHIDRA_OLLAMA_BASE_URL) if an operator ever
+# needs a second workstation pointing somewhere else.
+DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11435"
 
 
 BENCHMARK_VERSION = "honeypot-stack-issue-158-v2"
@@ -2309,18 +2342,51 @@ def ollama_ps(base_url: str, model: str) -> dict[str, Any]:
 
 
 def model_artifact(base_url: str, model: str) -> dict[str, Any]:
-    for item in request_json(f"{base_url}/api/tags").get("models", []):
+    """Ollama's own record of `model`: digest, size, family, quantisation.
+
+    The one read in the harness that is authoritative about *naming*. Ollama
+    lists every model as `name:tag` and always spells the tag out, while a
+    manifest slot names a model the way a human writes it -- the smoke run
+    carried `qwen3-8-27b-q4km` for a model Ollama reports as
+    `qwen3-8-27b-q4km:latest`. Exact match first, so a caller that already wrote
+    the full tag is never moved onto a different model; only when the bare name
+    finds a single listed model does the server's own spelling take over. Two
+    listed models sharing a bare name is ambiguous and stays a miss.
+
+    The tag stored on the artifact is the server's spelling, not the requested
+    one, so every downstream read of it -- the GGUF manifest path, `/api/show`,
+    `/api/ps` -- addresses the model Ollama will actually answer about.
+
+    This read is also the run's one endpoint check, which is why it is here and
+    not in a separate preflight: every slot calls this before it scores anything,
+    on either engine, and `/api/tags` is the one path Ollama always serves and
+    nothing else does. A 404 here is a wrong endpoint -- a llama.cpp-shaped or
+    OpenAI-shaped server -- and it says so, instead of surfacing as
+    `model tag is not installed` on a model that was never the problem. That is
+    the exact misreading the first live run produced.
+    """
+    models = probe_ollama_endpoint(base_url, request_json)["models"]
+    for item in models:
         if item.get("name") == model or item.get("model") == model:
-            details = item.get("details", {})
-            return {
-                "tag": model,
-                "digest": item.get("digest"),
-                "size_bytes": item.get("size"),
-                "family": details.get("family"),
-                "parameter_size": details.get("parameter_size"),
-                "quantization": details.get("quantization_level"),
-            }
+            return _artifact_of(item, model)
+    canonical = serving_canonical_tag(models, model)
+    if canonical is not None:
+        for item in models:
+            if item.get("name") == canonical or item.get("model") == canonical:
+                return _artifact_of(item, canonical)
     raise ValueError(f"model tag is not installed: {model}")
+
+
+def _artifact_of(item: dict[str, Any], tag: str) -> dict[str, Any]:
+    details = item.get("details") or {}
+    return {
+        "tag": tag,
+        "digest": item.get("digest"),
+        "size_bytes": item.get("size"),
+        "family": details.get("family"),
+        "parameter_size": details.get("parameter_size"),
+        "quantization": details.get("quantization_level"),
+    }
 
 
 # The capability the coder slot is the only one that cannot work without. The
@@ -3947,6 +4013,19 @@ def optional_version(base_url: str) -> str | None:
         return None
 
 
+def require_ollama_endpoint(base_url: str) -> None:
+    """Stop the run if `base_url` is not an Ollama, naming it as the cause.
+
+    Called once per run before any slot opens a session, so the failure names
+    the endpoint instead of surfacing inside a slot as a model error. The check
+    itself is `GET /api/tags`, which `model_artifact()` already performs for
+    every slot -- this exists so the *manifest* path, which can build a whole
+    report before touching a model, still fails on the URL rather than on the
+    first model it happens to try.
+    """
+    probe_ollama_endpoint(base_url, request_json)
+
+
 def unload(base_url: str, model: str) -> None:
     try:
         request_json(f"{base_url}/api/generate", {"model": model, "keep_alive": 0}, timeout=60)
@@ -4414,7 +4493,21 @@ def rescore_from(run_dir: Path) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("models", nargs="*", help="Legacy: exact model tags to run through every suite")
-    parser.add_argument("--base-url", default="http://127.0.0.1:11434")
+    parser.add_argument(
+        "--base-url",
+        default=DEFAULT_OLLAMA_BASE_URL,
+        help="Root URL of the Ollama API for the fallback engine and every "
+             "/api/* read (/api/tags, /api/show, /api/ps). Default "
+             f"{DEFAULT_OLLAMA_BASE_URL}: an `ssh -L` forward to the "
+             "homeserver's `ghidra-ollama-1` container, which publishes Ollama "
+             "on 11434. NOT http://127.0.0.1:11434 -- on the workstation that "
+             "port is a different, llama.cpp-shaped server that 404s "
+             "/api/tags, which is how a fallback once failed as though the "
+             "model had. See serving.probe_ollama_endpoint(). This is the "
+             "Ollama endpoint only; llama-server's own /v1/chat/completions is "
+             "reached through the per-model tunnel serving.py opens, and is "
+             "recorded in the transcript as `llamacpp_endpoint`.",
+    )
     parser.add_argument(
         "--engine", default=ENGINE_LLAMACPP, choices=ENGINES,
         help="Which engine serves the models. llamacpp (default) starts one "
@@ -4544,7 +4637,16 @@ def open_session(
     call site is how --manifest came to ignore the flag while its help text
     promised otherwise -- the manifest branch opened every session unconditionally
     and started a container for a run the operator had pinned to Ollama.
+
+    The name is Ollama's before it is the caller's. A manifest slot names a model
+    the way a human writes it (`qwen3-8-27b-q4km`) and Ollama reports the same
+    model as `qwen3-8-27b-q4km:latest`; the GGUF manifest path is built from
+    that string, so a caller-supplied spelling is a second way to miss a model
+    that is installed. `canonical_model_tag` replaces it with the server's own
+    spelling when the server lists it, which is also what the record and every
+    later /api/* read use, so the run addresses one name throughout.
     """
+    model = canonical_model_tag(base_url, model)
     session = ModelSession(
         model, base_url,
         num_ctx=num_ctx,
@@ -4557,6 +4659,11 @@ def open_session(
         session.transport = serving_ollama_transport(base_url, request_json)
         return session
     print(f"  engine: starting llama.cpp for {model}", flush=True)
+    # `session.open()` raises `UnresolvableModel` for a name that is not a model
+    # under any spelling, rather than falling back -- the fallback would score
+    # whichever model was resident and report success. Nothing catches it here:
+    # `run()` decides what one bad slot costs the run, records it as that slot's
+    # failure, and keeps evaluating the rest.
     session.open()
     print(f"  engine: serving on {session.engine}"
           + (f" (llama.cpp unavailable, fell back: {session.fallback_reason})"
@@ -4564,7 +4671,32 @@ def open_session(
     return session
 
 
+def canonical_model_tag(base_url: str, model: str) -> str:
+    """`model` as Ollama spells it, or unchanged when the server cannot be read.
+
+    A read that fails leaves the name exactly as the caller wrote it, including
+    a wrong endpoint: this runs before the engine decision, and the fallback
+    cannot serve an unresolvable name either, so the real cause has to surface
+    from `require_ollama_endpoint()` -- which `run()` calls first -- and from
+    `model_artifact()`, rather than from here on a path whose whole job is to
+    improve a spelling.
+    """
+    try:
+        tags = request_json(f"{base_url}/api/tags").get("models", [])
+    except Exception:  # noqa: BLE001 -- reported by the call that needs it
+        return model
+    return serving_canonical_tag(tags, model) or model
+
+
 def run(args: argparse.Namespace, base_url: str, writer: TranscriptWriter | None) -> int:
+    # Before any session opens, on both engines: a run that is going to reach
+    # Ollama at all (its fallback, or every /api/* read the harness makes to
+    # resolve a model) is going to fail on a URL that is not an Ollama, and it
+    # should say so once, here, rather than once per slot under a reason that
+    # names the model. Every positional-model run needs Ollama for the tag
+    # lookup, so it is unconditional on that path; the manifest path checks the
+    # same URL once for the same reason.
+    require_ollama_endpoint(base_url)
     if args.manifest:
         with open(args.manifest, encoding="utf-8") as source:
             manifest = json.load(source)
@@ -4579,17 +4711,35 @@ def run(args: argparse.Namespace, base_url: str, writer: TranscriptWriter | None
             slot = manifest["slots"][slot_name]
             model = slot["artifact"]["tag"]
             print(f"evaluating {slot_name}: {model}...", flush=True)
-            session = open_session(
-                args, base_url, model,
-                num_ctx_for(int(slot["qualification_request"]["context_tokens"])),
-            )
+            # The open is inside the try, not beside it. A model name that
+            # names nothing raises rather than falling back (see
+            # open_session), and one bad slot must not cost the run the other
+            # slots -- per-slot isolation is the whole reason this loop
+            # collects results instead of stopping at the first failure.
             try:
-                result = evaluate_slot(
-                    base_url, slot_name, model, slot["qualification_request"], writer,
-                    args.tier, session,
+                session = open_session(
+                    args, base_url, model,
+                    num_ctx_for(int(slot["qualification_request"]["context_tokens"])),
                 )
-            finally:
-                session.close()
+                try:
+                    result = evaluate_slot(
+                        base_url, slot_name, model, slot["qualification_request"], writer,
+                        args.tier, session,
+                    )
+                finally:
+                    session.close()
+            except Exception as exc:  # noqa: BLE001 -- one slot must not end the run
+                result = {
+                    "model": model,
+                    "ok": False,
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "qualification_request": slot["qualification_request"],
+                    "contract": contract_for(slot_name),
+                    "serving": {"engine": None, "fallback_engine": None,
+                                "fallback_reason": None, "flags": None,
+                                "kv_offload_disabled": False,
+                                "vram_oom_on_first_attempt": False},
+                }
             report["slots"][slot_name] = result
             print(f"  {slot_summary(result)}", flush=True)
         digest = write_atomic(args.output, report)
