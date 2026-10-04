@@ -123,7 +123,8 @@ class RescoreCoderProseTest(unittest.TestCase):
         case = evaluate_models.CODER_CASES[0]
         with tempfile.TemporaryDirectory() as tmp:
             live_record = evaluate_models._pending_coder_case(
-                case, evaluate_models._coder_raw(CLEAN, "stop"))
+                case, evaluate_models._rescore_raw({"response": {"raw": CLEAN},
+                                                     "timing": {"done_reason": "stop"}}))
             run_dir = write_coder_run(tmp, CLEAN, CLEAN)
             report = evaluate_models.rescore_from(run_dir)
             rescored = report["models"]["test-model:latest"]["coder"]["cases"][case.name]

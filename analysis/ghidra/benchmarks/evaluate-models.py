@@ -2438,6 +2438,20 @@ SESSIONS_NUM_PREDICT = 16000
 # the old 18400 coder window is 4,776 short of covering it -- which is why this
 # is not the coder's number renamed. The widest real case is revdeck at ~2,512.
 #
+# Sized against a *first* prompt, which was the second way this was wrong. The
+# coder slot is multi-round and round 2 does not send round 1's prompt, so the
+# window has to cover the widest continuation prompt instead -- and that prompt
+# grew with the previous answer, because _continuation_prompt re-sent it whole.
+# Measured: 65,209 chars, ~16,302 tokens, so 16000 + 16302 = 32,302 against this
+# window, and every model that spent its budget was window-truncated from round
+# 2 on -- silently, by the window rather than the cap, reading as a model
+# failure. _continuation_prompt now delegates the prior state to read_file
+# instead of re-sending it, so the widest coder prompt is the continuation at
+# 6,514 chars (~3,073 tokens) and 16000 + 3073 = 19,073 fits with 5,503 spare;
+# the window does not have to move for that. Both numbers are asserted per slot
+# in tests/test_truncation_outcome.py, against the real prompts, so a later
+# change to either text is caught before it silently overflows again.
+#
 # Raising num_ctx costs KV cache, for four slots now instead of one. llama.cpp
 # already spills KV to system RAM off the card on its own (measured 0.97 GB
 # offload at num_ctx 16384), so this is not an "offload to RAM" switch -- that is
@@ -2778,7 +2792,7 @@ def _degenerate_answer(raws: Sequence[dict[str, Any]]) -> str | None:
     are the *answers*, not the cap's fault, and until now the analysis slots
     scored them as real ones -- which is the same defect the coder slot already
     guards against (`_pending_coder_case`'s `degenerate`, that work being the
-    `_coder_raw` gate's).
+    `_rescore_raw` gate's).
 
     Measured with transcripts.is_looped(), not the coder's repetition_ratio:
     at a 16000 budget the ratio also fires on correct long answers (0.42 on 120
@@ -3177,27 +3191,44 @@ def score_revdeck(
     return results
 
 
-def _coder_raw(text: str | None, done_reason: str | None,
-               message: dict[str, Any] | None = None) -> dict[str, Any]:
-    """The coder scorer's `raw`, rebuilt from a stored transcript record.
+def _rescore_raw(rec: dict[str, Any]) -> dict[str, Any]:
+    """Every scorer's `raw`, rebuilt from a stored transcript record.
 
     One place, so the live path and a rescore cannot drift apart on which key
-    the scorer reads. `content` is what chat() recorded as assistant_text(),
-    which falls back to serializing tool_calls when a turn carries no words;
-    `prose` is the model's own words. `_pending_coder_case()` and
-    write_coder_artifact_file() read `prose` precisely so a tool-call
-    serialization is never scored as source code. So a rescore that rebuilt
-    only `content` scored "" and wrote no artifact at all, silently -- a
-    looping model passed the degenerate gate and a clean one yielded zero
-    gradeable artifacts.
+    a scorer reads. This is the third per-slot `raw = {...}` literal the
+    defect recurred in: the coder slot got a shared helper for exactly this
+    reason (`_coder_raw`, now this function), the sessions slot's hand-built
+    literal carried only `parsed` and `done_reason`, and since sessions is
+    scored from `parsed` rather than prose, `_model_prose()` found no `content`
+    key and returned "" -- so `_degenerate_answer()` never fired on a rescore
+    and a looping sessions answer collected a full 8/12. Patching that line
+    would have left the next slot free to make the same omission; building the
+    dict once cannot.
+
+    `content` is what chat() recorded as assistant_text(), which falls back to
+    serializing tool_calls when a turn carries no words; `prose` is the model's
+    own words. Every guard reads `prose` via `_model_prose()` precisely so a
+    tool-call serialization is never scored as an answer -- so a rescore that
+    rebuilt only `content` scored "" and, for the coder slot, wrote no
+    artifact at all: both silent.
+
+    `parsed` is carried for the sessions scorer, which reads it and nothing
+    else, so the two agree on the same record rather than on the same shape.
 
     `message` is the stored assistant turn when the record carries one, which
     lets prose be re-derived exactly as chat() did instead of assumed equal to
     `content`. Records written before `message` was stored have none, and there
-    `raw` is all the evidence there is -- the two coincide for those.
+    `response.raw` is all the evidence there is -- the two coincide for those.
     """
-    prose = ((message or {}).get("content") or "").strip()
-    return {"content": text, "prose": prose or text, "done_reason": done_reason}
+    response = rec.get("response") or {}
+    text = response.get("raw")
+    prose = ((response.get("message") or {}).get("content") or "").strip()
+    return {
+        "content": text,
+        "prose": prose or text,
+        "parsed": response.get("parsed"),
+        "done_reason": (rec.get("timing") or {}).get("done_reason"),
+    }
 
 
 def _pending_coder_case(case: RevCase, raw: dict[str, Any]) -> dict[str, Any]:
@@ -3265,15 +3296,65 @@ def _declares_done(text: str) -> bool:
 
 
 def _continuation_prompt(case: RevCase, previous: str, round_index: int) -> str:
+    """The prompt for round `round_index + 1`, carrying the prior answer's
+    *plan*, not the prior answer itself.
+
+    Why the previous answer is not re-sent whole: `_continuation_prompt` used
+    to re-embed the entire last answer, and at the 16000-token coder budget a
+    full-budget answer is ~64,000 chars, so the continuation prompt measured
+    65,209 chars (~16,302 tokens) and a round-2 request needed 32,302 tokens
+    against a 24,576 window. From round 2 on a model that spent its budget
+    was window-truncated *silently* -- cut by the window rather than the cap,
+    which reads as a model failure (`done_reason: length`) and is exactly the
+    defect NUM_CTX was raised to remove. Truncating the prior answer instead
+    would re-introduce the owner's complaint verbatim ("do not simply resend
+    the whole source code as answer"), so the fix removes the re-send rather
+    than shrinking it.
+
+    The prior answer is not dropped, it is delegated: `read_file` returns the
+    bytes that are actually on disk, which is a truer copy of the work than a
+    chat re-send (it is what will be graded) and one the model did not have to
+    spend tokens emitting. So the model still iterates *through the code* --
+    which is what the owner asked for -- rather than against a transcript of
+    it, and the prompt is a bounded function of the case rather than of the
+    round.
+
+    The text is deliberately an iteration protocol, not a request to review
+    code: read the file, walk the requirements, fix them one at a time, read it
+    back, and declare done only when a re-read shows nothing left to change.
+    `previous` is kept in the signature because the round transcript records
+    it, not because this prompt inlines it.
+    """
     return (
         f"{case.prompt}\n\n"
-        f"[Continuation round {round_index}] Your previous answer was:\n\n"
-        f"---\n{previous}\n---\n\n"
-        "Review it against every requirement above. Fix what is missing, wrong or "
-        "stubbed. Re-read the file you wrote with read_file, then write the improved "
-        "version back with write_file. Do not explain what you would change -- edit the "
-        "file. When nothing further is needed, write the final file once more and end "
-        "with the line IMPLEMENTATION COMPLETE."
+        f"[Continuation round {round_index}] Continue iterating on the "
+        f"implementation. Do not start over and do not re-describe the design.\n\n"
+        "1. Read the file back with read_file (list_files first if you do not "
+        "remember the path) and work from what is actually on disk -- that file "
+        "is the source of truth now, not what you emitted in an earlier round.\n"
+        "2. Take the requirements above one at a time and check each against that "
+        "file. Every one must be present and real in the source: no stubs, no TODO "
+        "bodies, no placeholder returns, no branches that skip the work.\n"
+        "3. Fix what is missing or wrong, one requirement at a time, and write the "
+        "whole file back with write_file after each fix, so the file on disk is "
+        "always the current version.\n"
+        "4. Re-read the file and check your own work -- especially the error paths, "
+        "the boundary values and the cases you did not test.\n\n"
+        "Platform: the code must be explicit about the platform it targets. For "
+        "Linux use the real Linux APIs and the real layout -- /proc, /sys, unix "
+        "domain sockets, real signal numbers, systemd units, case-sensitive paths "
+        "under /etc /var /usr, and Linux process semantics. For Windows use the "
+        "real Windows APIs and the real layout -- Win32 and NT APIs, "
+        "HKEY_LOCAL_MACHINE, %SystemRoot% and %APPDATA%, backslash paths with "
+        "drive letters, case-insensitive paths, and Windows process and threading "
+        "semantics. Never fake it: no invented API, no simulated group lookup, no "
+        "fake directory search or network call the code does not actually make, no "
+        "guessed platform. Where a case does not name one, write the code against "
+        "the platform the APIs you use actually belong to and say in a comment "
+        "which platform that is.\n\n"
+        "Keep working across rounds. When a re-read shows every requirement met "
+        "and nothing left to fix, write the final file once more and end with the "
+        "line IMPLEMENTATION COMPLETE. Anything less is an unfinished answer."
     )
 
 
@@ -4169,29 +4250,20 @@ def rescore_from(run_dir: Path) -> dict[str, Any]:
                 if case is None:
                     unmatched.append(f"sessions/{case_name}")
                     continue
-                raw = {"parsed": recs[0]["response"]["parsed"],
-                       "done_reason": (recs[0]["timing"] or {}).get("done_reason")}
-                case_results.append(_score_session_case(case, raw))
+                case_results.append(_score_session_case(case, _rescore_raw(recs[0])))
             elif slot == "revdeck":
                 case = rev_by_name.get(case_name)
                 if case is None:
                     unmatched.append(f"revdeck/{case_name}")
                     continue
-                raw = {"content": recs[0]["response"]["raw"],
-                       "done_reason": (recs[0]["timing"] or {}).get("done_reason")}
-                case_results.append(_score_revdeck_case(case, raw))
+                case_results.append(_score_revdeck_case(case, _rescore_raw(recs[0])))
             elif slot == "ghidra":
                 case = triage_by_name.get(case_name)
                 if case is None:
                     unmatched.append(f"ghidra/{case_name}")
                     continue
                 workflow_outputs = {
-                    rec["workflow"]: {
-                        "parsed": rec["response"]["parsed"],
-                        "content": rec["response"]["raw"],
-                        "done_reason": (rec["timing"] or {}).get("done_reason"),
-                    }
-                    for rec in recs
+                    rec["workflow"]: _rescore_raw(rec) for rec in recs
                 }
                 if {"program_triage", "suspicious_behavior"} - workflow_outputs.keys():
                     unmatched.append(f"ghidra/{case_name} (incomplete workflow pair)")
@@ -4202,10 +4274,7 @@ def rescore_from(run_dir: Path) -> dict[str, Any]:
                 if case is None:
                     unmatched.append(f"coder/{case_name}")
                     continue
-                raw = _coder_raw(recs[0]["response"]["raw"],
-                                (recs[0]["timing"] or {}).get("done_reason"),
-                                recs[0]["response"].get("message"))
-                case_results.append(_pending_coder_case(case, raw))
+                case_results.append(_pending_coder_case(case, _rescore_raw(recs[0])))
             else:
                 unmatched.append(f"{slot}/{case_name} (unknown slot)")
                 continue
