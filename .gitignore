@@ -57,3 +57,7 @@ round7/
 # phantom diff in unrelated work and was one `git add -A` away from committing
 # a machine-local artifact. Same failure mode as the Python bytecode above.
 arcane/home/honeypot-http/http-honeypot/http-honeypot
+
+# archify's working folder (#3497): the typed candidate, the rendered HTML and
+# its gate receipts. Intermediate -- the shipped artifact is docs/diagrams/.
+.archify/
