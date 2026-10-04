@@ -64,6 +64,23 @@ from transcripts import (  # noqa: E402
     default_operator,
     was_capped,
 )
+# The engine seam. serving.py owns the choice (llama.cpp primary, Ollama
+# fallback), the one --no-kv-offload retry that only a measured OOM authorises,
+# the per-model server lifetime, and the wire translation in both directions --
+# so none of it reaches a scorer, and the harness keeps exactly one transport
+# call site. It is imported for ModelSession, not for its constants: the engine
+# names below are the harness's CLI vocabulary and live with the other CLI
+# choices.
+from serving import ModelSession, ollama_transport as serving_ollama_transport  # noqa: E402
+
+# The engine CLI vocabulary. `llamacpp` is the primary path and the default;
+# `ollama` is the fallback, selectable so a run can be pinned to the engine the
+# committed baseline was measured on. Per-run configuration of anything *below*
+# this -- KV placement in particular -- is deliberately absent: the KV retry is
+# the only thing that moves KV, and it fires on a measured OOM or not at all.
+ENGINE_LLAMACPP = "llamacpp"
+ENGINE_OLLAMA = "ollama"
+ENGINES = (ENGINE_LLAMACPP, ENGINE_OLLAMA)
 
 
 BENCHMARK_VERSION = "honeypot-stack-issue-158-v2"
@@ -2652,6 +2669,7 @@ def chat(
     workflow: str | None = None,
     parser: Callable[[str], Any] | None = None,
     tools: Sequence[Any] | None = None,
+    transport: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Single choke point for every model call, and therefore the only place a
     transcript has to be written. `body` below is the literal request posted to
@@ -2705,11 +2723,17 @@ def chat(
         import bench_tools as _bt
         body["tools"] = list(tools)
     started = time.monotonic()
+    # The engine seam. `transport` is whatever is actually serving this model --
+    # llama.cpp's /v1/chat/completions or Ollama's /api/chat -- and it has the
+    # harness transport's own signature, so this call site and the tool-round
+    # loop below are byte-identical on both engines. None means Ollama, which is
+    # what every existing caller and every test passes.
+    post = transport if transport is not None else request_json
     try:
-        response = request_json(f"{base_url}/api/chat", body)
+        response = post(f"{base_url}/api/chat", body)
         if tools:
             response = _bt.conduct_tool_rounds(
-                request_json, f"{base_url}/api/chat", body, response)
+                post, f"{base_url}/api/chat", body, response)
     except Exception as exc:
         # A timeout or transport failure is a measurement about this model, not
         # a hole in the record. Store it, then let the slot handle it.
@@ -2933,7 +2957,8 @@ def _score_triage_case(case: TriageCase, workflow_outputs: dict[str, Any]) -> di
 
 
 def score_triage(
-    base_url: str, model: str, context: int, recorder: SlotRecorder | None = None
+    base_url: str, model: str, context: int, recorder: SlotRecorder | None = None,
+    transport: Callable[..., dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     results = []
     for case in TRIAGE_CASES:
@@ -2944,6 +2969,7 @@ def score_triage(
                 base_url, model, TRIAGE_SYSTEM, prompt, num_ctx_for(context), True,
                 num_predict=budget_for("ghidra"),
                 recorder=recorder, case=case.name, workflow=workflow, parser=parse_object,
+                transport=transport,
             )
             workflow_outputs[workflow] = raw
         results.append(_score_triage_case(case, workflow_outputs))
@@ -3078,7 +3104,8 @@ def _score_session_case(case: SessionCase, raw: dict[str, Any]) -> dict[str, Any
 
 
 def score_sessions(
-    base_url: str, model: str, context: int, recorder: SlotRecorder | None = None
+    base_url: str, model: str, context: int, recorder: SlotRecorder | None = None,
+    transport: Callable[..., dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     results = []
     schema = session_schema()
@@ -3092,6 +3119,7 @@ def score_sessions(
             base_url, model, SESSION_SYSTEM, prompt, num_ctx_for(context), schema,
             num_predict=budget_for("sessions"),
             recorder=recorder, case=case.name, workflow="session_analysis", parser=parse_object,
+            transport=transport,
         )
         results.append(_score_session_case(case, raw))
     return results
@@ -3177,7 +3205,8 @@ def _score_revdeck_case(case: RevCase, raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def score_revdeck(
-    base_url: str, model: str, context: int, recorder: SlotRecorder | None = None
+    base_url: str, model: str, context: int, recorder: SlotRecorder | None = None,
+    transport: Callable[..., dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     results = []
     for case in REV_CASES:
@@ -3186,6 +3215,7 @@ def score_revdeck(
             base_url, model, REV_SYSTEM, case.prompt, num_ctx_for(context), False,
             num_predict=budget_for("revdeck"),
             recorder=recorder, case=case.name, workflow="rev_analysis",
+            transport=transport,
         )
         results.append(_score_revdeck_case(case, raw))
     return results
@@ -3361,6 +3391,7 @@ def _continuation_prompt(case: RevCase, previous: str, round_index: int) -> str:
 def score_coder(
     base_url: str, model: str, context: int, recorder: SlotRecorder | None = None,
     on_case_done: Callable[[dict[str, Any]], None] | None = None,
+    transport: Callable[..., dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Generate every coder case, looping until the model declares completion.
 
@@ -3391,6 +3422,7 @@ def score_coder(
                     base_url, model, CODER_TOOL_SYSTEM, prompt, num_ctx_for(context), False,
                     num_predict=budget_for("coder"), recorder=recorder, case=case.name,
                     workflow="coder_generation", tools=list(_bt.FILE_TOOLS),
+                    transport=transport,
                 )
                 content = (raw or {}).get("content") or ""
                 message = (raw or {}).get("message") or {}
@@ -3875,7 +3907,8 @@ def write_human_grades_template(writer: TranscriptWriter, artifact: dict[str, An
 
 
 def context_probe(
-    base_url: str, model: str, context: int, recorder: SlotRecorder | None = None
+    base_url: str, model: str, context: int, recorder: SlotRecorder | None = None,
+    transport: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     filler = "\n".join(f"FUN_{index:08x} sym_{index}_probe_padding" for index in range(420))
     sentinel = "ISSUE_144_CONTEXT_SENTINEL_9f3a"
@@ -3884,6 +3917,7 @@ def context_probe(
         base_url, model, TRIAGE_SYSTEM, prompt, num_ctx_for(context), True,
         num_predict=budget_for("ghidra"),
         recorder=recorder, case="context_probe", workflow="context_probe", parser=parse_object,
+        transport=transport,
     )
     parsed = raw["parsed"]
     # A probe that stopped on the output cap never produced the sentinel, and
@@ -3900,6 +3934,19 @@ def context_probe(
     }
 
 
+def optional_version(base_url: str) -> str | None:
+    """Ollama's version, or None when Ollama is not reachable.
+
+    A run served by llama.cpp must not fail on a manifest report's cosmetic
+    version field, and it must not invent one either: None is the honest answer
+    for "this run did not go through Ollama".
+    """
+    try:
+        return request_json(f"{base_url}/api/version").get("version")
+    except Exception:  # noqa: BLE001 -- a metadata read must not end the run
+        return None
+
+
 def unload(base_url: str, model: str) -> None:
     try:
         request_json(f"{base_url}/api/generate", {"model": model, "keep_alive": 0}, timeout=60)
@@ -3914,9 +3961,27 @@ def evaluate_slot(
     request: dict[str, Any],
     writer: TranscriptWriter | None = None,
     tier: str = "A",
+    session: "ModelSession | None" = None,
 ) -> dict[str, Any]:
     started = time.time()
     context = int(request["context_tokens"])
+    # One server per model, shared across that model's slots: a 27B load is
+    # measured in minutes, so a server per slot would reload it once per slot
+    # and spend the run waiting rather than measuring. The caller opens it
+    # (run()) and closes it once the model's last slot finishes; None means the
+    # caller is not managing lifetimes, which is how every existing test and
+    # --manifest caller drives this.
+    session = session or ModelSession(
+        model, base_url,
+        num_ctx=num_ctx_for(context),
+        request_json=request_json,
+        request_timeout=request_timeout,
+        log=lambda message: print(message, file=sys.stderr, flush=True),
+    )
+    owns_session = session.transport is None
+    if owns_session:
+        session.open()
+    transport = session.transport
     # Exact equality, against the request the harness actually sends for this
     # slot. A manifest that declares a different output budget than
     # budget_for(slot) is rejected here rather than quietly producing an
@@ -3935,7 +4000,16 @@ def evaluate_slot(
             writer=writer,
             slot=slot,
             model=artifact,
-            reproducibility=Reproducibility(tier=tier, prompt_contract=contract),
+            # The engine facts go on the *record*, not only the model-level
+            # report. The report is assembled after close(); a transcript line is
+            # read on its own, months later, and a line that does not say which
+            # engine produced its tokens/second is not attributable to one.
+            reproducibility=Reproducibility(
+                tier=tier, prompt_contract=contract,
+                engine=session.engine,
+                kv_offload_disabled=session.provenance().get("kv_offload_disabled"),
+                fallback_engine=session.fallback_engine,
+            ),
         )
         # Before the slot is attempted, and only for the coder slot: it is the
         # only one whose contract needs a capability. Learning the verdict here
@@ -3953,20 +4027,21 @@ def evaluate_slot(
                 "skip_reason": reason,
                 "qualification_request": request,
                 "contract": contract,
+                "serving": session.provenance(nvidia_memory()),
                 "elapsed_seconds": round(time.time() - started, 2),
             }
         if slot == "ghidra":
-            cases = score_triage(base_url, model, context, recorder)
-            probe = context_probe(base_url, model, context, recorder)
+            cases = score_triage(base_url, model, context, recorder, transport)
+            probe = context_probe(base_url, model, context, recorder, transport)
             timings: list[dict[str, Any]] = []
             for item in cases:
                 timings.extend(item["outputs"].values())
         elif slot == "sessions":
-            cases = score_sessions(base_url, model, context, recorder)
+            cases = score_sessions(base_url, model, context, recorder, transport)
             probe = {"passed": None, "not_required": True}
             timings = [item["output"] for item in cases]
         elif slot == "revdeck":
-            cases = score_revdeck(base_url, model, context, recorder)
+            cases = score_revdeck(base_url, model, context, recorder, transport)
             probe = {"passed": None, "not_required": True}
             timings = [item["output"] for item in cases]
         elif slot == "coder":
@@ -3992,9 +4067,10 @@ def evaluate_slot(
                         encoding="utf-8")
                     write_human_grades_template(writer, artifact, record)
 
-                cases = score_coder(base_url, model, context, recorder, _stream_one)
+                cases = score_coder(base_url, model, context, recorder, _stream_one,
+                                    transport)
             else:
-                cases = score_coder(base_url, model, context, recorder)
+                cases = score_coder(base_url, model, context, recorder, None, transport)
             # Write readable source artifacts after the answers are in hand so
             # a human grader can read code instead of escaped JSON. A case with
             # no real source intentionally has no flat artifact.
@@ -4042,6 +4118,10 @@ def evaluate_slot(
         # leaves the slot reporting ok on the strength of the answers that did
         # finish.
         capped_probe = bool(probe.get("capped"))
+        vram_used = nvidia_memory()
+        # Captured while the session is still up. A record that read the card
+        # after its own teardown published the *next* model's load, which is
+        # the wrong number for every model but the last one.
         result = {
             "model": model,
             "artifact": artifact,
@@ -4050,9 +4130,17 @@ def evaluate_slot(
             "contract": contract,
             "context_probe": probe,
             "score": score,
+            # Which engine served this slot, with which flags, whether the KV
+            # retry fired, whether and why Ollama took over, and what the card
+            # held at the time. A score without this is not comparable to a
+            # score produced by the other engine -- RAM-offloaded decode runs at
+            # roughly a sixth of the on-card rate, so a tok/s column read across
+            # engines with no engine column is exactly the table that becomes
+            # meaningless.
+            "serving": session.provenance(vram_used),
             "mean_tokens_per_second": round(sum(rates) / len(rates), 2) if rates else None,
             "loaded_model": ollama_ps(base_url, model),
-            "nvidia_memory_used_mib": nvidia_memory(),
+            "nvidia_memory_used_mib": vram_used,
             "system_memory_used_mib": system_memory_used(),
             "elapsed_seconds": round(time.time() - started, 2),
             "cases": {item["case"]: item for item in cases},
@@ -4094,6 +4182,11 @@ def evaluate_slot(
             "error": error,
             "qualification_request": request,
             "contract": contract,
+            # A slot that failed still has to say which engine failed. An
+            # engine-less failure record is the row a reader cannot act on --
+            # a llama.cpp OOM and an Ollama connection failure are different
+            # problems, and here they were the same shape.
+            "serving": session.provenance(nvidia_memory()),
             "elapsed_seconds": round(time.time() - started, 2),
         }
         if (slot == "coder" and isinstance(exc, urllib.error.HTTPError)
@@ -4102,6 +4195,14 @@ def evaluate_slot(
             result["skip_reason"] = error
         return result
     finally:
+        # Both teardowns, in the order that matters: the llama.cpp container is
+        # removed here so the next model's load starts against a card this model
+        # has actually released, and the Ollama unload only runs on the
+        # fallback path, where it is the only thing holding the model. A model
+        # that failed mid-slot still holds its container, which is what made a
+        # stale model hold 7974 MiB for minutes after a run stopped.
+        if owns_session:
+            session.close()
         unload(base_url, model)
 
 
@@ -4314,6 +4415,15 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("models", nargs="*", help="Legacy: exact model tags to run through every suite")
     parser.add_argument("--base-url", default="http://127.0.0.1:11434")
+    parser.add_argument(
+        "--engine", default=ENGINE_LLAMACPP, choices=ENGINES,
+        help="Which engine serves the models. llamacpp (default) starts one "
+             "/app/llama-server per model against the GGUF its Ollama manifest "
+             "already points at, and falls back to Ollama only if llama.cpp "
+             "cannot load the model. ollama pins the run to the pre-existing "
+             "/api/chat path. Either way the engine that served each model is "
+             "recorded on every transcript record and in the report.",
+    )
     parser.add_argument("--context", type=int, default=16384)
     parser.add_argument("--manifest", help="Approved/candidate manifest; evaluates each model only for its slot")
     parser.add_argument("--output", help="Operator-side path for the verbose report (required with --manifest)")
@@ -4420,6 +4530,40 @@ def slot_summary(result: dict[str, Any]) -> str:
     )
 
 
+def open_session(
+    args: argparse.Namespace,
+    base_url: str,
+    model: str,
+    num_ctx: int,
+) -> ModelSession:
+    """A ModelSession for `model`, honouring --engine on every caller.
+
+    `--engine ollama` pins the run to the pre-existing /api/chat path: no
+    container, no KV retry, exactly what ran before llama.cpp existed. That has
+    to be one decision applied by one place. Reading `args.engine` inline at one
+    call site is how --manifest came to ignore the flag while its help text
+    promised otherwise -- the manifest branch opened every session unconditionally
+    and started a container for a run the operator had pinned to Ollama.
+    """
+    session = ModelSession(
+        model, base_url,
+        num_ctx=num_ctx,
+        request_json=request_json,
+        request_timeout=request_timeout,
+        log=lambda message: print(message, file=sys.stderr, flush=True),
+    )
+    if args.engine == ENGINE_OLLAMA:
+        session.engine, session.fallback_engine = ENGINE_OLLAMA, None
+        session.transport = serving_ollama_transport(base_url, request_json)
+        return session
+    print(f"  engine: starting llama.cpp for {model}", flush=True)
+    session.open()
+    print(f"  engine: serving on {session.engine}"
+          + (f" (llama.cpp unavailable, fell back: {session.fallback_reason})"
+             if session.engine != ENGINE_LLAMACPP else ""), flush=True)
+    return session
+
+
 def run(args: argparse.Namespace, base_url: str, writer: TranscriptWriter | None) -> int:
     if args.manifest:
         with open(args.manifest, encoding="utf-8") as source:
@@ -4428,16 +4572,24 @@ def run(args: argparse.Namespace, base_url: str, writer: TranscriptWriter | None
             "benchmark": BENCHMARK_VERSION,
             "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "retention": {"class": "operator-side-verbose", "recommended_days": 30},
-            "ollama_version": request_json(f"{base_url}/api/version").get("version"),
+            "ollama_version": optional_version(base_url),
             "slots": {},
         }
         for slot_name in args.slots:
             slot = manifest["slots"][slot_name]
             model = slot["artifact"]["tag"]
             print(f"evaluating {slot_name}: {model}...", flush=True)
-            result = evaluate_slot(
-                base_url, slot_name, model, slot["qualification_request"], writer, args.tier
+            session = open_session(
+                args, base_url, model,
+                num_ctx_for(int(slot["qualification_request"]["context_tokens"])),
             )
+            try:
+                result = evaluate_slot(
+                    base_url, slot_name, model, slot["qualification_request"], writer,
+                    args.tier, session,
+                )
+            finally:
+                session.close()
             report["slots"][slot_name] = result
             print(f"  {slot_summary(result)}", flush=True)
         digest = write_atomic(args.output, report)
@@ -4454,22 +4606,34 @@ def run(args: argparse.Namespace, base_url: str, writer: TranscriptWriter | None
     }
     for model in args.models:
         print(f"evaluating {model}...", flush=True)
-        result = {
-            slot: evaluate_slot(
-                base_url,
-                slot,
-                model,
-                qualification_request(
-                    slot, num_ctx_for(args.context)
-                ),
-                writer,
-                args.tier,
-            )
-            for slot in args.slots
-        }
+        # One session for the model, shared by its slots, so the GGUF is loaded
+        # once and torn down once -- after the last slot, not after the first,
+        # so the next model is never blocked by this one's container.
+        session = open_session(args, base_url, model, num_ctx_for(args.context))
+        try:
+            result = {
+                slot: evaluate_slot(
+                    base_url,
+                    slot,
+                    model,
+                    qualification_request(
+                        slot, num_ctx_for(args.context)
+                    ),
+                    writer,
+                    args.tier,
+                    session,
+                )
+                for slot in args.slots
+            }
+        finally:
+            session.close()
         for slot in args.slots:
             print(f"  {slot}: {slot_summary(result[slot])}", flush=True)
-        report["models"].append({"model": model, "slots": result})
+        report["models"].append({
+            "model": model,
+            "serving": session.provenance(),
+            "slots": result,
+        })
     print("=== JSON REPORT ===")
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if all(
