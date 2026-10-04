@@ -118,7 +118,11 @@ def _request(es_host: str, method: str, path: str, body: dict | None = None) -> 
     data = json.dumps(body).encode() if body is not None else None
     status, raw = _raw_request(es_host, method, path, data)
     if status >= 400:
-        raise urllib.error.HTTPError(path, status, raw.decode(errors="replace"), None, None)
+        # hdrs/ fp are None: this exception is raised to be caught and read
+        # for .code/.read() only, never to render a response.
+        raise urllib.error.HTTPError(
+            path, status, raw.decode(errors="replace"), None, None  # type: ignore[arg-type]
+        )
     return json.loads(raw)
 
 
