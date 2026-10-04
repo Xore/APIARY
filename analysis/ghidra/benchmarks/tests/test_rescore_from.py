@@ -355,7 +355,11 @@ class RequestBodyTest(unittest.TestCase):
         The recorded rows this test was written against were captured at
         num_predict 512, the cap that truncated 93% of revdeck answers. Only
         that number moves; the rest of the body is what those 1,005 stored
-        requests prove the harness must keep sending unchanged.
+        requests prove the harness must keep sending unchanged. num_ctx moved
+        with it when every slot's budget went to 16000 and the four
+        per-slot window clamps became one NUM_CTX: it is read from the
+        constant rather than restated as a literal, so this pins the wire
+        *shape* and cannot silently go stale when the window moves again.
         """
         bodies = self._capture_requests(evaluate_models.score_revdeck)
         expected = [
@@ -370,7 +374,7 @@ class RequestBodyTest(unittest.TestCase):
                 "keep_alive": "10m",
                 "options": {
                     "temperature": 0,
-                    "num_ctx": 8192,
+                    "num_ctx": evaluate_models.num_ctx_for(8192),
                     "num_predict": evaluate_models.budget_for("revdeck"),
                     "seed": 144,
                 },

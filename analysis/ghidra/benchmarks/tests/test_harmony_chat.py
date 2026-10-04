@@ -129,15 +129,21 @@ class TestHarmonyFloorCannotExceedTheDeclaredBudget(unittest.TestCase):
     `body["options"]["num_predict"] = max(num_predict, HARMONY_NUM_PREDICT)`
     made a slot that declared less than the floor silently send more. All three
     manifest slots are qwen3:14b today, so it was latent -- but the sessions
-    slot declares 2048, so a gpt-oss tag there would have declared 2048 and
-    sent 4096. That is the same declared-vs-sent lie as the 512 constant in
-    QUALIFICATION_REQUEST this file's module lives beside, one layer down, and
-    a worse one: 4096 is a budget llm-worker clamps to 2048 in production, so
-    the artifact would have described a session budget no deployment can run
-    and said nothing about the floor that decided the answers.
+    slot declared 2048 at the time, so a gpt-oss tag there would have declared
+    2048 and sent 4096. That is the same declared-vs-sent lie as the 512
+    constant in QUALIFICATION_REQUEST this file's module lives beside, one
+    layer down, and a worse one: 4096 is a budget llm-worker clamps to 2048 in
+    production, so the artifact would have described a session budget no
+    deployment can run and said nothing about the floor that decided the
+    answers.
 
     Refused instead: nothing is sent, so the record cannot disagree with the
     request, and the slot reports the reason instead of a clean run.
+
+    No manifest slot sits under the floor any more -- all four declare 16000 --
+    so the refused cases here build their own below-floor request rather than
+    borrowing a slot. A guard that only fires when some slot happens to be
+    configured low is not a guard.
     """
 
     def test_a_floor_above_the_declared_budget_refuses_instead_of_disagreeing(self):
@@ -157,31 +163,49 @@ class TestHarmonyFloorCannotExceedTheDeclaredBudget(unittest.TestCase):
                 evaluate_models.chat(
                     "http://stub:11434", "gpt-oss:20b", "system prompt", "user prompt",
                     8192, SCHEMA,
-                    num_predict=evaluate_models.budget_for("sessions"),
+                    num_predict=evaluate_models.HARMONY_NUM_PREDICT - 512,
                 )
         finally:
             evaluate_models.request_json = original
         # The declared budget is what it refuses to exceed, named in the error
-        # so the operator knows which slot and which number.
+        # so the operator knows which number and which floor.
         self.assertIn(str(evaluate_models.HARMONY_NUM_PREDICT), str(caught.exception))
-        self.assertIn(str(evaluate_models.budget_for("sessions")), str(caught.exception))
+        self.assertIn(str(evaluate_models.HARMONY_NUM_PREDICT - 512),
+                      str(caught.exception))
         # A refused request is not a request: nothing reached the wire, so there
         # is no transcript record to disagree with the qualification_request.
         self.assertEqual(bodies, [])
 
     def test_the_slot_reports_not_ok_rather_than_a_false_clean_run(self):
         """End to end through evaluate_slot(), with the real stubbed transport
-        the rest of this suite uses: the sessions slot at a declared 2048 with a
-        harmony tag is not ok, and says why -- instead of an artifact claiming a
-        budget it did not send."""
+        the rest of this suite uses: a slot configured under the harmony floor
+        is not ok, and says why -- instead of an artifact claiming a budget it
+        did not send.
+
+        The slot is configured low rather than the request being forged, because
+        that is the only way a below-floor budget reaches chat() at all: the
+        manifest guard compares the caller's request against
+        `qualification_request()` by exact equality, so a hand-edited dict is
+        rejected one layer earlier, as "benchmark code must be reviewed". Patching
+        the budget moves both sides together, which is what a real slot sitting
+        under the floor would look like. No slot is under it today (all four are
+        16000), so the guard has no committed manifest to fire on -- and a guard
+        that only fires when some slot happens to be configured low is not one.
+        """
         import test_truncation_outcome as truncation
 
         bodies = truncation.stub_transport(
             self, "{}", "stop", module=evaluate_models, tag="gpt-oss:20b")
-        result = evaluate_models.evaluate_slot(
-            "http://ollama", "sessions", "gpt-oss:20b",
-            evaluate_models.qualification_request("sessions", 8192),
-        )
+        original = evaluate_models.OUTPUT_BUDGETS["sessions"]
+        evaluate_models.OUTPUT_BUDGETS["sessions"] = (
+            evaluate_models.HARMONY_NUM_PREDICT - 512)
+        try:
+            result = evaluate_models.evaluate_slot(
+                "http://ollama", "sessions", "gpt-oss:20b",
+                evaluate_models.qualification_request("sessions", 8192),
+            )
+        finally:
+            evaluate_models.OUTPUT_BUDGETS["sessions"] = original
         self.assertIs(result["ok"], False)
         self.assertIn("harmony floor", result["error"])
         self.assertNotIn("score", result, "a refused slot publishes no score")
@@ -189,9 +213,23 @@ class TestHarmonyFloorCannotExceedTheDeclaredBudget(unittest.TestCase):
         # declared budget the answer did not honour.
         self.assertEqual([body for body in bodies if body and "messages" in body], [])
 
+    def test_every_manifest_slot_clears_the_floor_today(self):
+        """The green side, and the reason the refused case above needs a
+        hand-built request: all four slots declare 16000, so no committed
+        qualification_request can trip the refusal. Asserted so a future
+        budget cut below the floor is noticed here rather than as a slot that
+        quietly starts reporting not-ok."""
+        for slot in evaluate_models.OUTPUT_BUDGETS:
+            self.assertGreaterEqual(
+                evaluate_models.budget_for(slot),
+                evaluate_models.HARMONY_NUM_PREDICT,
+                f"{slot} budget sits under the harmony floor, so its "
+                "qualification_request can no longer run",
+            )
+
     def test_a_slot_whose_budget_covers_the_floor_still_serves_it(self):
-        """The green side: ghidra/revdeck/coder declare 4096, the floor is
-        honoured, and the sent number is the declared one."""
+        """The green side: every slot declares 16000, the floor is honoured,
+        and the sent number is the declared one."""
         body, _result = capture_chat("gpt-oss:20b")
         self.assertEqual(body["options"]["num_predict"],
                          evaluate_models.budget_for("ghidra"))

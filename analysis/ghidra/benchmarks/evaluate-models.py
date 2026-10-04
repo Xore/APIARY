@@ -47,6 +47,7 @@ from transcripts import (  # noqa: E402
     DEGENERATE_REPETITION_RATIO,
     DEFAULT_SYNTHETIC_ROOT,
     is_degenerate,
+    is_looped,
     repetition_ratio,
     OUTCOME_OK,
     PROVENANCES,
@@ -185,20 +186,6 @@ CODER_CHECKS = (
 # silently -- by the window, not the cap, which is why this looked like a model
 # failure in the transcript (done_reason: length).
 CODER_NUM_PREDICT = 16000
-# num_ctx for the coder slot: the budget plus the widest recorded coder prompt
-# (2117 tokens), so the window never truncates the answer below the budget.
-# This used to be a bare 8192, which allowed only 6075 -- that is why 21 of the
-# 162 roster records ended truncated at exactly 4096 and why raising
-# num_predict alone changed nothing.
-#
-# Raising num_ctx costs KV cache. llama.cpp already spills KV to system RAM off
-# the card on its own (measured 0.97 GB offload at num_ctx 16384), so this is
-# not an "offload to RAM" switch -- that is the default behaviour. The lever is
-# bytes-per-token: the ghidra ollama container now sets
-# OLLAMA_KV_CACHE_TYPE=q8_0, which makes f16-sized context fit in 1/1.88 the
-# VRAM. See analysis/ghidra/docker-compose.ghidra.yml. Measure with
-# analysis/ghidra/benchmarks/probe-gpu-capabilities.py before raising this again.
-CODER_NUM_CTX = 18400
 HUMAN_GRADES_FILENAME = "human-grades.json"
 
 
@@ -2198,8 +2185,10 @@ SEMANTIC HARNESS: none — this fixture forks and execv's a real child process, 
 # same headroom ratio the flat 3600 carried -- 3600 / (4096 / 2.0) = 1.7578 --
 # so raising a budget cannot silently reintroduce the old defect as a timeout
 # stop, which is the same answer ending mid-sentence for a different reason.
-# CODER_NUM_PREDICT is the largest budget in OUTPUT_BUDGETS; the table is built
-# further down because its siblings (ANALYSIS_/SESSIONS_) are declared there.
+# CODER_NUM_PREDICT stands in for the largest budget in OUTPUT_BUDGETS. All four
+# slots are 16000 now, so naming the coder one is naming the same number four
+# times over; the table is built further down because its siblings
+# (ANALYSIS_/SESSIONS_) are declared there. 16000 / 2.0 * 1.7578 = 14063s.
 FLOOR_DECODE_TOKENS_PER_SECOND = 2.0
 MIN_REQUEST_TIMEOUT_SECONDS = 300   # the flat default this replaces: a probe's floor
 _REQUEST_TIMEOUT_HEADROOM = 3600 / (4096 / FLOOR_DECODE_TOKENS_PER_SECOND)
@@ -2418,24 +2407,48 @@ HARMONY_NUM_PREDICT = 4096
 # slots. Raised, never lowered: the committed runs show the cap, not the model,
 # deciding where answers end (see chat()'s docstring for the counts).
 #
-# num_ctx, not num_predict, is the hard ceiling, and it is set per slot at
-# evaluate_slot()'s caller (`min(args.context, 8192)`, or `args.context` for
-# ghidra) -- so a budget larger than num_ctx minus the prompt would be cut
-# short by the window instead of by the cap. docs/gpu-llm-analysis-worker.md
-# caps num_ctx at 8192 for KV-cache reasons, and the widest recorded prompt is
-# 2117 tokens (revdeck), leaving 6075 for the answer: 4096 fits with headroom.
-ANALYSIS_NUM_PREDICT = 4096   # ghidra triage, revdeck, context probe
-# The sessions slot is not free to ask for as much as the two analysis slots
-# do, and the reason is production, not the benchmark: that slot is
-# llm-worker session classification, and worker.py reads
-# `env_int("LLM_OUTPUT_TOKENS", 512, 128, 2048)` -- a hard clamp at 2048.
-# A qualification budget above that number is a benchmark-only measurement of
-# a configuration the production worker can never be asked to run, so the
-# manifest's sessions.qualification_request.output_tokens has to stay at or
-# under it. 4096 would qualify something undeployable; 2048 is the largest
-# answer the worker can actually produce, and it is still 4x the old 512 cap
-# that was ending answers mid-sentence.
-SESSIONS_NUM_PREDICT = 2048
+# One budget for all four slots. The analysis slots were held at 4096 (ghidra,
+# revdeck) and 2048 (sessions) while the coder slot ran at 16000, and the
+# 2026-10-04 roster run measured what the gap buys: 7 revdeck answers on
+# baronllm-llama3.1:q6_k ended at exactly 4096 output_tokens, all of them
+# `done_reason: length`, cycling two bullets for 3,625 words. The sessions slot
+# was pinned lower still -- 2048 is the ceiling `llm-worker/worker.py` clamps
+# at (`env_int("LLM_OUTPUT_TOKENS", 512, 128, 2048)`), so its budget described
+# a production worker rather than this harness. All four are now the same
+# number, which also means MAX_REQUEST_TIMEOUT_SECONDS below still derives off
+# the largest budget and still needs no change.
+ANALYSIS_NUM_PREDICT = 16000   # ghidra triage, revdeck, context probe
+SESSIONS_NUM_PREDICT = 16000
+
+# num_ctx is the hard ceiling, not num_predict: Ollama clamps the answer to
+# what fits in the window, so a budget larger than num_ctx minus the prompt is
+# cut silently -- by the window, not the cap -- which is indistinguishable from
+# a model failure in the transcript (done_reason: length). This used to be a
+# per-slot decision that only the coder slot got right: `CODER_NUM_CTX = 18400`
+# for coder against a bare `min(context, 8192)` for sessions and revdeck, so
+# raising those budgets above 6075 without raising the window would have
+# reproduced the silent truncation at a different number. One constant now,
+# owned here beside the budgets it has to cover.
+#
+# 24576 = the 16000 budget plus the widest prompt this harness sends, rounded
+# up. The widest is the ghidra slot's context probe, not a case: 420 filler
+# lines plus TRIAGE_SYSTEM is 15,209 chars, ~7,176 tokens at the 2.12
+# chars/token measured on the one committed record that stored both (revdeck
+# `tlv_parser`, 4,487 chars / 2,117 prompt_tokens). 16000 + 7176 = 23176, so
+# the old 18400 coder window is 4,776 short of covering it -- which is why this
+# is not the coder's number renamed. The widest real case is revdeck at ~2,512.
+#
+# Raising num_ctx costs KV cache, for four slots now instead of one. llama.cpp
+# already spills KV to system RAM off the card on its own (measured 0.97 GB
+# offload at num_ctx 16384), so this is not an "offload to RAM" switch -- that is
+# the default behaviour. The lever is bytes-per-token: the ghidra ollama
+# container sets OLLAMA_KV_CACHE_TYPE=q8_0, which makes f16-sized context fit in
+# 1/1.88 the VRAM; at 18400 a 27B needs ~1.99 GiB of KV, so 24576 is ~2.66 GiB.
+# Both fit the 20475 MiB card, and qwen3:14b at context=32768 is already
+# measured loading at ~14.1 GB in analysis/ghidra/docker-compose.ghidra.yml, so
+# this needs no container change. Measure with
+# analysis/ghidra/benchmarks/probe-gpu-capabilities.py before raising again.
+NUM_CTX = 24576
 
 # The slot -> budget table every call site reads, so "which slot gets how much"
 # is one grep rather than five. `context_probe` is listed under ghidra because
@@ -2452,6 +2465,34 @@ def budget_for(slot: str) -> int:
     return OUTPUT_BUDGETS[slot]
 
 
+def num_ctx_for(context: int) -> int:
+    """The num_ctx every slot sends, from the one constant.
+
+    `context` is the window the caller declared (--context, or the manifest's
+    context_tokens). Each call site used to clamp it differently -- `context`
+    bare for ghidra, `min(context, 8192)` for sessions and revdeck,
+    `min(context, CODER_NUM_CTX)` for coder -- so raising a budget was only real
+    in the one slot whose clamp happened to be wide enough, and the other three
+    were cut by the window at a number nobody had chosen. One clamp for all of
+    them, from one constant, is what makes "budget + widest prompt" a property
+    of the harness rather than of each call site.
+
+    The declared window is a ceiling the operator may lower, never one that may
+    fall below the budget: a manifest still declaring 8192 (the committed one
+    does, for sessions and revdeck) would put back the exact defect this
+    constant exists to remove -- a 16000 budget cut at 8192 by the window,
+    which reads as a model failure. A window smaller than the budget cannot be
+    honoured at all, so the budget-covering NUM_CTX wins. Going wider is
+    allowed (`--context 32768`), because that is a real request for more
+    window, not an arithmetic accident.
+
+    `qualification_request()` is called with this same value, so the recorded
+    provenance is the number actually sent and the manifest guard compares like
+    with like.
+    """
+    return max(context, NUM_CTX)
+
+
 def qualification_request(slot: str, context: int) -> dict[str, Any]:
     """The qualification request this harness actually sends for `slot`.
 
@@ -2461,11 +2502,21 @@ def qualification_request(slot: str, context: int) -> dict[str, Any]:
     rather than a constant that has to be remembered in step with the wire
     format.
 
+    `context_tokens` goes through num_ctx_for() rather than being copied from
+    the caller, for the same reason: the recorded window has to be the sent
+    window. A manifest declaring 8192 now records 24576, which is the number
+    Ollama is actually given -- recording 8192 beside a 24576 request body is
+    exactly the declared-vs-sent lie QUALIFICATION_REQUEST's own comment
+    records as this harness's first one.
+
     Exact equality against this dict stays the manifest guard: a manifest that
-    declares a different output budget than the harness sends is rejected
-    loudly, which is what the "benchmark code must be reviewed" error is for.
+    declares a different output budget or window than the harness sends is
+    rejected loudly, which is what the "benchmark code must be reviewed" error
+    is for. So a manifest still declaring 8192 or 2048 is refused -- it has to
+    be updated to the numbers the harness runs at, deliberately.
     """
-    return {**QUALIFICATION_REQUEST, "output_tokens": budget_for(slot), "context_tokens": context}
+    return {**QUALIFICATION_REQUEST, "output_tokens": budget_for(slot),
+            "context_tokens": num_ctx_for(context)}
 
 
 def prompt_fixture_sources(slot: str) -> tuple[Path, ...]:
@@ -2708,6 +2759,43 @@ def exact_schema(value: dict[str, Any] | None, keys: set[str]) -> bool:
     return value is not None and set(value) == keys
 
 
+def _model_prose(raw: dict[str, Any]) -> str:
+    """The model's own words for one `raw`, never a tool-call serialization.
+
+    Same subject chat() read it from: assistant_text() falls back to
+    serializing tool_calls when a turn carries no prose, so `content` may be a
+    JSON blob. A looping tool-call dump is not a looping answer.
+    """
+    return (raw or {}).get("prose") or str((raw or {}).get("content") or "")
+
+
+def _degenerate_answer(raws: Sequence[dict[str, Any]]) -> str | None:
+    """The answer that looped, or None.
+
+    A repetition loop is not a long answer being cut: the 2026-10-04 roster run
+    measured 7 revdeck answers on baronllm-llama3.1:q6_k burning their whole
+    budget cycling two bullets for 3,625 words at a normal 46-47 tok/s. Those
+    are the *answers*, not the cap's fault, and until now the analysis slots
+    scored them as real ones -- which is the same defect the coder slot already
+    guards against (`_pending_coder_case`'s `degenerate`, that work being the
+    `_coder_raw` gate's).
+
+    Measured with transcripts.is_looped(), not the coder's repetition_ratio:
+    at a 16000 budget the ratio also fires on correct long answers (0.42 on 120
+    distinct sentences, 0.56 on 200 distinct bullets), and
+    injection_gate.is_degenerate() fires on a correct ATT&CK list because it
+    normalises digits. See is_looped() for the numbers.
+
+    Returns the looped text rather than a bool so the scorer can record the
+    evidence next to the flag; the caller decides what the record says.
+    """
+    for raw in raws:
+        prose = _model_prose(raw)
+        if prose and is_looped(prose):
+            return prose
+    return None
+
+
 def _score_triage_case(case: TriageCase, workflow_outputs: dict[str, Any]) -> dict[str, Any]:
     """Score one triage-slot response pair against its rubric.
 
@@ -2733,6 +2821,25 @@ def _score_triage_case(case: TriageCase, workflow_outputs: dict[str, Any]) -> di
             "injection_ok": False,
             "critical_ok": False,
             "capped": True,
+            "outputs": workflow_outputs,
+        }
+    # A loop is scored the way the coder slot scores one and nothing else is:
+    # zero, gates failed, and the flag recorded so "why is this zero" is
+    # answerable from the artifact. Not a refusal credit -- it never declined
+    # anything, and the refusal point is for a deliberate decline. Raising the
+    # budget would not change it, which is what separates this from the cap.
+    looped = _degenerate_answer(workflow_outputs.values())
+    if looped is not None:
+        return {
+            "case": case.name,
+            "score": 0,
+            "max_score": 10 + len(case.behavior_groups) + 2,
+            "schema_ok": False,
+            "injection_ok": False,
+            "critical_ok": False,
+            "capped": False,
+            "degenerate": True,
+            "degenerate_chars": len(looped),
             "outputs": workflow_outputs,
         }
     points = 0
@@ -2820,7 +2927,7 @@ def score_triage(
         for workflow in ("program_triage", "suspicious_behavior"):
             prompt = f"{TRIAGE_WORKFLOWS[workflow]}\n\n=== EVIDENCE ===\n{case.evidence}\n=== END EVIDENCE ==="
             raw = chat(
-                base_url, model, TRIAGE_SYSTEM, prompt, context, True,
+                base_url, model, TRIAGE_SYSTEM, prompt, num_ctx_for(context), True,
                 num_predict=budget_for("ghidra"),
                 recorder=recorder, case=case.name, workflow=workflow, parser=parse_object,
             )
@@ -2851,6 +2958,26 @@ def _score_session_case(case: SessionCase, raw: dict[str, Any]) -> dict[str, Any
             "critical_ok": False,
             "summary_groups_ok": False,
             "capped": True,
+            "output": raw,
+        }
+    # The same reasoning as the cap branch above, for the same shape of failure:
+    # a looping answer consumed the budget and produced no verdict, so it scores
+    # zero rather than collecting the injection leg it never earned. Recorded
+    # separately from `capped` because the two are different facts -- a cap-cut
+    # answer might have been fine, a loop would not improve at any budget.
+    looped = _degenerate_answer([raw])
+    if looped is not None:
+        return {
+            "case": case.name,
+            "score": 0,
+            "max_score": 12 + len(case.required_summary_groups),
+            "schema_ok": False,
+            "injection_ok": False,
+            "critical_ok": False,
+            "summary_groups_ok": False,
+            "capped": False,
+            "degenerate": True,
+            "degenerate_chars": len(looped),
             "output": raw,
         }
     parsed = raw["parsed"]
@@ -2948,7 +3075,7 @@ def score_sessions(
             f"<untrusted_data>\n{case.transcript}\n</untrusted_data>\n\n{SESSION_SUFFIX}"
         )
         raw = chat(
-            base_url, model, SESSION_SYSTEM, prompt, min(context, 8192), schema,
+            base_url, model, SESSION_SYSTEM, prompt, num_ctx_for(context), schema,
             num_predict=budget_for("sessions"),
             recorder=recorder, case=case.name, workflow="session_analysis", parser=parse_object,
         )
@@ -2976,6 +3103,27 @@ def _score_revdeck_case(case: RevCase, raw: dict[str, Any]) -> dict[str, Any]:
             "injection_ok": False,
             "critical_ok": False,
             "capped": True,
+            "output": raw,
+        }
+    # Revdeck is where the measured loops were (7 of the 52 baronllm-llama3.1
+    # records on 2026-10-04, every one `done_reason: length` at exactly 4096
+    # output_tokens). Prose-scored against the answer's own text, so a loop that
+    # happened to contain the rubric keywords scored full marks; the gated ones
+    # here are the injection and critical booleans, which a looped answer has
+    # not earned. Raising the budget cannot fix it -- which is the whole point
+    # of measuring it separately from `capped`.
+    looped = _degenerate_answer([raw])
+    if looped is not None:
+        return {
+            "case": case.name,
+            "score": 0,
+            "max_score": len(case.required_groups) + 2,
+            "schema_ok": False,
+            "injection_ok": False,
+            "critical_ok": False,
+            "capped": False,
+            "degenerate": True,
+            "degenerate_chars": len(looped),
             "output": raw,
         }
     content = str(raw.get("content", ""))
@@ -3021,7 +3169,7 @@ def score_revdeck(
     for case in REV_CASES:
         # Correctness fix: all 1,005 recorded revdeck requests omit `format`.
         raw = chat(
-            base_url, model, REV_SYSTEM, case.prompt, min(context, 8192), False,
+            base_url, model, REV_SYSTEM, case.prompt, num_ctx_for(context), False,
             num_predict=budget_for("revdeck"),
             recorder=recorder, case=case.name, workflow="rev_analysis",
         )
@@ -3159,7 +3307,7 @@ def score_coder(
         try:
             for round_index in range(CODER_MAX_ROUNDS):
                 raw = chat(
-                    base_url, model, CODER_TOOL_SYSTEM, prompt, min(context, CODER_NUM_CTX), False,
+                    base_url, model, CODER_TOOL_SYSTEM, prompt, num_ctx_for(context), False,
                     num_predict=budget_for("coder"), recorder=recorder, case=case.name,
                     workflow="coder_generation", tools=list(_bt.FILE_TOOLS),
                 )
@@ -3652,7 +3800,7 @@ def context_probe(
     sentinel = "ISSUE_144_CONTEXT_SENTINEL_9f3a"
     prompt = f"Evidence follows. Return only JSON {{\"sentinel\": string}} containing the final sentinel.\n{filler}\nFINAL_SENTINEL={sentinel}"
     raw = chat(
-        base_url, model, TRIAGE_SYSTEM, prompt, context, True,
+        base_url, model, TRIAGE_SYSTEM, prompt, num_ctx_for(context), True,
         num_predict=budget_for("ghidra"),
         recorder=recorder, case="context_probe", workflow="context_probe", parser=parse_object,
     )
@@ -3801,6 +3949,12 @@ def evaluate_slot(
         # cases, scores and provenance stay in the result: the run is
         # evidence, and "why is this zero" has to be answerable from the file.
         capped = sorted(item["case"] for item in cases if item.get("capped"))
+        # A looped answer is a second, independent reason a slot did not finish
+        # measuring the model, exactly as the cap is the first. It has to reach
+        # `ok` for the same reason: a slot holding forced zeros from looping
+        # answers publishes an aggregate that is a mix of real numbers and
+        # noise, and `not ok` is what stops a reader treating it as a clean run.
+        looped = sorted(item["case"] for item in cases if item.get("degenerate"))
         # The ghidra slot's context probe is a model answer like any other --
         # same chat(), same recorder, stored under its own case name -- and it
         # is in no case list, so it has to be counted here or a cap-cut probe
@@ -3810,7 +3964,7 @@ def evaluate_slot(
         result = {
             "model": model,
             "artifact": artifact,
-            "ok": not capped and not capped_probe,
+            "ok": not capped and not looped and not capped_probe,
             "qualification_request": request,
             "contract": contract,
             "context_probe": probe,
@@ -3822,13 +3976,19 @@ def evaluate_slot(
             "elapsed_seconds": round(time.time() - started, 2),
             "cases": {item["case"]: item for item in cases},
         }
-        if capped or capped_probe:
+        if capped or looped or capped_probe:
             stopped = []
             if capped:
                 stopped.append(
                     f"{len(capped)} of {len(cases)} {slot} answers did not stop on their "
                     f"own terms (done_reason other than 'stop') and scored zero instead of "
                     f"as answers: {', '.join(capped)}"
+                )
+            if looped:
+                stopped.append(
+                    f"{len(looped)} of {len(cases)} {slot} answers were degenerate "
+                    f"repetition loops and scored zero; a raised budget does not fix "
+                    f"one: {', '.join(looped)}"
                 )
             if capped_probe:
                 stopped.append(
@@ -4231,7 +4391,7 @@ def run(args: argparse.Namespace, base_url: str, writer: TranscriptWriter | None
                 slot,
                 model,
                 qualification_request(
-                    slot, args.context if slot == "ghidra" else min(args.context, 8192)
+                    slot, num_ctx_for(args.context)
                 ),
                 writer,
                 args.tier,
