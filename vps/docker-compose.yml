@@ -983,7 +983,7 @@ services:
   # mounted yaml is ignored entirely and pcap-log never activates.
   # =====================================================================
   suricata-update:
-    image: jasonish/suricata:latest@sha256:51a59543dcb6e5f9d586c06053c6b71d462cea919b45719090443f4af1428780
+    image: jasonish/suricata:latest@sha256:7ca2546f7f2735f621b981b6a5ec84fb962984636f7629a1a2fa6a324d4b6840
     container_name: hp-suricata-update
     restart: "no"
     network_mode: host
@@ -1011,7 +1011,7 @@ services:
           --no-reload
 
   suricata:
-    image: jasonish/suricata:latest@sha256:51a59543dcb6e5f9d586c06053c6b71d462cea919b45719090443f4af1428780
+    image: jasonish/suricata:latest@sha256:7ca2546f7f2735f621b981b6a5ec84fb962984636f7629a1a2fa6a324d4b6840
     container_name: hp-suricata
     restart: unless-stopped
     network_mode: host
@@ -1065,7 +1065,7 @@ services:
   # cold-start guarantee -- it only keeps an already-running Suricata's
   # rules current. See suricata-rules-refresh.sh for the reload mechanism.
   suricata-rules-refresh:
-    image: jasonish/suricata:latest@sha256:51a59543dcb6e5f9d586c06053c6b71d462cea919b45719090443f4af1428780
+    image: jasonish/suricata:latest@sha256:7ca2546f7f2735f621b981b6a5ec84fb962984636f7629a1a2fa6a324d4b6840
     container_name: hp-suricata-rules-refresh
     restart: unless-stopped
     network_mode: host
