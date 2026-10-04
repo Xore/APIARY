@@ -358,17 +358,40 @@ class OutputBudgetTest(unittest.TestCase):
     def test_every_slot_budget_fits_inside_the_context_it_is_sent(self):
         """num_ctx is the real ceiling: a num_predict larger than the window
         minus the prompt is cut short by the window instead of the cap, and
-        does so silently. docs/gpu-llm-analysis-worker.md caps num_ctx at
-        8192 for KV-cache reasons; the widest recorded prompt is 2117
-        tokens, leaving 6075 -- so 4096 fits with headroom."""
+        does so silently -- the answer stops at the window, not at num_predict,
+        which reads as a model failure in the transcript (done_reason: length).
+
+        The window is per slot, not one global 8192. The coder slot sends
+        CODER_NUM_CTX; the analysis slots send min(context, 8192). So the
+        assertion has to be made per slot against the context that slot
+        actually sends, otherwise it either misses a too-small window or
+        reports a false failure for a slot whose window is fine."""
         widest_recorded_prompt = 2117  # docs/benchmarks/runs/, revdeck slot
-        num_ctx = 8192                 # evaluate_slot(): min(args.context, 8192)
+        windows = {
+            # evaluate_slot(): min(args.context, 8192) for the analysis slots
+            "ghidra": 8192,
+            "sessions": 8192,
+            "revdeck": 8192,
+            # score_coder(): min(context, CODER_NUM_CTX)
+            "coder": evaluate_models.CODER_NUM_CTX,
+        }
         for slot, budget in evaluate_models.OUTPUT_BUDGETS.items():
+            num_ctx = windows[slot]
             self.assertLess(
                 budget, num_ctx - widest_recorded_prompt,
-                f"{slot} budget {budget} does not fit in num_ctx {num_ctx} "
+                f"{slot} budget {budget} does not fit in its num_ctx {num_ctx} "
                 f"beside the widest recorded prompt ({widest_recorded_prompt})",
             )
+
+    def test_coder_window_covers_the_coder_budget(self):
+        """The 8192 coder window allowed only 6075 tokens, so a raised
+        num_predict was cut by the window and the fix looked like it had not
+        worked. The window must exceed the budget, not merely the old 4096."""
+        self.assertGreater(
+            evaluate_models.CODER_NUM_CTX, evaluate_models.CODER_NUM_PREDICT,
+            "coder num_ctx must exceed the coder budget or the window truncates "
+            "the answer below num_predict",
+        )
 
     def test_harmony_never_lowers_a_slot_budget(self):
         """A slot asking for more than the harmony floor keeps what it asked for.

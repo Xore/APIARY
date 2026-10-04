@@ -103,25 +103,25 @@ def _chat_body(num_predict):
 class RequestTimeoutFollowsTheOutputBudgetTest(unittest.TestCase):
     def test_a_large_budget_buys_more_time_than_a_small_one_and_both_stay_clamped(self):
         # The coder slot's real budget, and a token-cheap probe for contrast.
-        self.assertEqual(evaluate_models.CODER_NUM_PREDICT, 4096)
         large = _timeout_for(_chat_body(evaluate_models.CODER_NUM_PREDICT))
         small = _timeout_for(_chat_body(8))
 
-        # Proportional: the whole point. A 4096-token answer is ~500x the work
-        # of an 8-token one, so equal wall-clock allowances are the defect.
+        # Proportional: the whole point. A multi-thousand-token answer is
+        # hundreds of times the work of an 8-token one, so equal wall-clock
+        # allowances are the defect.
         self.assertGreater(
             large, small,
-            "a 4096-token request is given no more time than an 8-token one, so "
+            "a full-budget request is given no more time than an 8-token one, so "
             "any model slower than ~7 tok/s is excluded by the transport",
         )
         # Sized from the request's own budget at the measured floor rate, not
-        # hand-picked: 4096 / 2.0 tok/s.
+        # hand-picked: num_predict / 2.0 tok/s.
         self.assertEqual(large, int(evaluate_models.CODER_NUM_PREDICT / evaluate_models.FLOOR_DECODE_TOKENS_PER_SECOND))
         # And enough for the model the defect actually excluded: the slowest
         # rate measured on the homeserver (Trendyol Qwen3-32B Q8_0, 2.45 tok/s)
-        # needs 4096 / 2.45 = 1672s of decode for this budget. An allowance at
-        # or below that is the same timeout, spelled differently.
-        self.assertGreaterEqual(large, 1672)
+        # needs the budget / 2.45 of decode. An allowance at or below that is
+        # the same timeout, spelled differently.
+        self.assertGreaterEqual(large, evaluate_models.CODER_NUM_PREDICT / 2.45)
         # The coder budget is the largest in OUTPUT_BUDGETS, so a max that
         # clamps it would be a ceiling that reproduces the defect at one slot.
         self.assertLess(
