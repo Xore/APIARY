@@ -99,6 +99,8 @@ from `graphify update .`
 ## Records — audit trails
 
 [runtime compatibility record](runtime-compatibility-record.md) ·
+[claims audit (#3504: every broad capability claim in README/docs, and its
+disposition)](claims-audit-3504.md) ·
 [frontend mutation and property testing pilot (#3326)](frontend-mutation-pilot.md) ·
 [security fixes](security-fixes.md) ·
 [approved local-model qualification](analysis/ghidra/models/approval-record.md) ·
