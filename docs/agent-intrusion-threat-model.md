@@ -175,7 +175,7 @@ bounding discipline.
 
 ## 3. Environment and `/proc/*/environ` secret exposure
 
-**Partially mitigated already; inconsistent across services.**
+**Not mitigated. Every secret-shaped env var in this tree is plain-env.**
 
 - There is currently **no live `<NAME>_FILE` secret indirection anywhere in
   this tree.** A `<NAME>_FILE` convention was described once, for
