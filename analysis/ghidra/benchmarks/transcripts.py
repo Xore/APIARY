@@ -374,10 +374,22 @@ class TranscriptWriter:
         if run.provenance == PROVENANCE_CAPTURED:
             os.chmod(self.directory, 0o700)
         self.count = 0
-        self._handle = self.path.open("a", encoding="utf-8")
+        self._lines: list[str] = []
         (self.directory / RUN_FILENAME).write_text(
             json.dumps(run.as_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
+
+    def _flush(self) -> None:
+        """Publish the file atomically: a crash mid-run can lose records, but
+        it can never leave a half-written record on disk.
+
+        # ponytail: rewrites the whole file per record, O(n^2) in the record
+        # count. Append-then-fsync is the upgrade if a run ever gets to
+        # thousands of records.
+        """
+        tmp = self.path.with_name(self.path.name + ".partial")
+        tmp.write_text("".join(self._lines), encoding="utf-8")
+        os.replace(tmp, self.path)
 
     def record(
         self,
@@ -423,8 +435,10 @@ class TranscriptWriter:
             },
             "response": {
                 "raw": raw_content,
+                "message": (response or {}).get("message"),
                 "parsed": parsed,
                 "parse_ok": parsed is not None,
+                "tool_turns": (response or {}).get("tool_turns", []),
             },
             "timing": {
                 "wall_seconds": (response or {}).get("wall_seconds"),
@@ -445,13 +459,13 @@ class TranscriptWriter:
             ),
             "error": error,
         }
-        self._handle.write(json.dumps(record, sort_keys=True) + "\n")
-        self._handle.flush()
+        self._lines.append(json.dumps(record, sort_keys=True) + "\n")
+        self._flush()
         self.count += 1
         return record
 
     def close(self) -> dict[str, Any]:
-        self._handle.close()
+        self._flush()
         summary = {
             **self.run.as_dict(),
             "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -468,8 +482,7 @@ class TranscriptWriter:
         return self
 
     def __exit__(self, *_exc: object) -> None:
-        if not self._handle.closed:
-            self.close()
+        self.close()
 
 
 @dataclass

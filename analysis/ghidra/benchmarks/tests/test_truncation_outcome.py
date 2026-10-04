@@ -473,7 +473,8 @@ class CappedAnswerScoresNothingTest(unittest.TestCase):
         # run() prints result['error'] on the not-ok path, so a capped slot has
         # to carry one -- and it has to name the cases, or the zero is
         # unactionable.
-        self.assertIn("3 of 3 revdeck answers", result["error"])
+        case_count = len(evaluate_models.REV_CASES)
+        self.assertIn(f"{case_count} of {case_count} revdeck answers", result["error"])
         self.assertIn(evaluate_models.REV_CASES[0].name, result["error"])
         # The evidence survives: a capped run is a measurement, and "why is
         # this zero" has to be answerable from the artifact.
