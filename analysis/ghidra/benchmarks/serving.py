@@ -22,11 +22,17 @@ cause. `is_vram_oom()` is that whole rule, in one pure function.
 happens while starting the model or not at all. A failure *after* a successful
 load is a measurement about that model (timeout, transport, a mid-answer 500)
 and is raised as-is: silently re-asking Ollama would produce a second answer for
-the same case and book one run as two.
+the same case and book one run as two. The two things a fallback cannot fix are
+not absorbed either: a name that names no model, and a URL that is not an
+Ollama, both fail on the fallback path for a reason that has nothing to do with
+the model and are raised so the reader is sent to the actual cause.
 
 **Everything that makes a number interpretable is recorded.** Engine, flags, KV
 retry, fallback reason, achieved tokens/second, VRAM at the time. A result that
 does not say which engine produced it cannot be compared against one that does.
+The record names *both* endpoints, never one string standing in for two
+servers: Ollama's `/api/chat` root and llama-server's `/v1/chat/completions`
+have nothing in common but HTTP.
 
 Translation note: the harness body is still built in Ollama's dialect, because
 that is the body the transcript has always stored and every recorded field
@@ -246,17 +252,55 @@ class Remote:
 
 # --- GGUF resolution -------------------------------------------------------
 
+# Ollama's own default when a name carries no `:tag`, and the tag it reports
+# for such a model in `/api/tags`. Every library model on this roster is named
+# without one, so this is the common case rather than an edge case: the first
+# live run raised `ValueError: model tag has no tag part: qwen3-8-27b-q4km` on
+# almost the whole roster.
+DEFAULT_TAG = "latest"
+
+
+class UnresolvableModel(ValueError):
+    """A model name that names no model on this host.
+
+    Not a fallback condition. Every other reason llama.cpp cannot serve a model
+    means "ask Ollama instead"; this one means the *caller* named a model that
+    does not exist, and answering that by silently serving a different engine
+    turns a manifest typo into a run that reports success on a model nobody
+    asked for -- recorded as `fallback_reason`, which reads like a server
+    problem rather than the parsing bug it is.
+    """
+
+
+def with_default_tag(model: str) -> str:
+    """`model` with Ollama's `:latest` filled in when it names no tag at all.
+
+    A `:` inside a digest (`sha256:...`) is not a tag separator; this splits on
+    the last one, exactly as `manifest_path` does below, and only that split can
+    say which side is the tag.
+    """
+    name, sep, tag = model.rpartition(":")
+    if sep and name and tag:
+        return model
+    return f"{model}:{DEFAULT_TAG}"
+
+
 def manifest_path(model: str) -> str:
     """The Ollama manifest for `model`, as a path under /root/.ollama/models.
+
+    An untagged name resolves the way Ollama resolves it -- as `:latest` -- so a
+    manifest may name a model the way a human writes it. What is refused instead
+    is input that names nothing: empty, whitespace, or a bare `:` where a name
+    was expected.
 
     Two namespaces are live on this host: `registry.ollama.ai/library/<name>` for
     tags pulled by name, and `hf.co/<repo>:<quant>` for GGUF repos imported as
     `hf.co/`. Ollama's own rule is whether the name already carries a registry,
     so a tag containing `/` is treated as namespaced.
     """
-    name, _, tag = model.rpartition(":")
-    if not name:
-        raise ValueError(f"model tag has no tag part: {model}")
+    if not (model or "").strip() or model.strip() in {":", "/"}:
+        raise UnresolvableModel(f"not a model name: {model!r}")
+    name, _, tag = with_default_tag(model.strip()).rpartition(":")
     if "/" not in name:
         name = f"registry.ollama.ai/library/{name}"
     return f"/root/.ollama/models/manifests/{name}:{tag}"
@@ -283,6 +327,46 @@ def resolve_gguf(remote: Remote, model: str) -> dict[str, Any]:
     path = manifest_path(model)
     gguf = gguf_from_manifest(json.loads(remote.read_in_container(path)))
     return {"gguf": gguf, "manifest_path": path, "gguf_sha256": gguf.rsplit("sha256-", 1)[-1]}
+
+
+def canonical_tag(tags: list[dict[str, Any]], model: str) -> str | None:
+    """The exact `name:tag` Ollama itself reports for `model`, if it reports one.
+
+    A name Ollama lists is authoritative and always carries its tag; a name in a
+    manifest is a human's shorthand. Reading the server's own spelling closes the
+    class of mismatch rather than this instance of it: `qwen3-8-27b-q4km` and
+    `qwen3-8-27b-q4km:latest` are the same model and different strings, and every
+    place that string is used -- the manifest path, the `/api/show` probe, the
+    `/api/ps` lookup -- wants the second one.
+
+    An exact match wins over a bare-name match, so a caller that already wrote
+    the full tag is never moved onto a different model -- which is what keeps
+    `qwen3-8-27b-q4km:q5` off `:latest`. A bare name matching *two* listed tags
+    is ambiguous and stays a miss, because guessing there would load different
+    weights under a name that asked for a third.
+
+    None means the server does not list it, which is not an error here: this
+    only ever *improves* a name, and a model the server cannot list is one that
+    will fail louder and more specifically later.
+    """
+    only = None
+    # `with_default_tag` first, so a bare `qwen3-8-27b-q4km` and Ollama's
+    # `qwen3-8-27b-q4km:latest` reduce to the same name part instead of to
+    # `""` and itself.
+    wanted = with_default_tag(model).rpartition(":")[0]
+    for item in tags:
+        reported = item.get("name") or item.get("model") or ""
+        if not reported:
+            continue
+        if reported == model:
+            return reported
+        # Compared against the *name part* of every listed tag, which is what
+        # makes `qwen3-8-27b-q4km` find `qwen3-8-27b-q4km:latest`.
+        if reported.rpartition(":")[0] == wanted:
+            if only is not None and only != reported:
+                return None  # ambiguous; a miss beats a coin flip
+            only = reported
+    return only
 
 
 # --- Wire translation ------------------------------------------------------
@@ -416,10 +500,20 @@ class LlamaCppServer:
         )
         self.port = LLAMA_CONTAINER_PORT
         self.local_port = free_port()
+        # The one endpoint this server answers on, reached through the tunnel.
+        # A llama-server has no /api/* surface at all, so nothing here may be
+        # built from the Ollama base URL: an OpenAI-shaped server reached at an
+        # Ollama path is how "Unknown endpoint: GET /api/tags" was produced by
+        # a fallback that had nowhere to fall back to.
+        self.api_root = f"http://127.0.0.1:{self.local_port}"
         self.kv_retry = False
         self.vram_oom_first_attempt = False
         self.gpu_wait: dict[str, Any] = {}
         self.started_at: str | None = None
+        # Published, because the record has to name the URL that answered. The
+        # Ollama endpoint the operator configured is a different server and is
+        # never this one.
+        self.endpoint: str | None = None
 
     # -- lifecycle ---------------------------------------------------------
     def start(self) -> None:
@@ -484,6 +578,12 @@ class LlamaCppServer:
             # An OOM is reported by the server's own log, not by the health poll,
             # so the text that decides the retry has to be assembled from both.
             raise RuntimeError(f"{exc}; server log: {self.server_log()}") from exc
+        # Published only once the model is loaded, not once the tunnel is up. A
+        # load that failed leaves the endpoint unpublished, so a run that fell
+        # back records no llama.cpp URL rather than one nothing ever answered
+        # on -- which is the same claim "the fallback engine served this" makes,
+        # and must not be contradicted by a stale field beside it.
+        self.endpoint = f"{self.api_root}/v1/chat/completions"
 
     def _await_ready(self) -> None:
         """Poll /health until the model is loaded.
@@ -521,7 +621,7 @@ class LlamaCppServer:
     def healthy(self) -> bool:
         try:
             with urllib.request.urlopen(
-                f"http://127.0.0.1:{self.local_port}/health", timeout=5
+                f"{self.api_root}/health", timeout=5
             ) as response:
                 return json.loads(response.read()).get("status") == "ok"
         except (urllib.error.URLError, TimeoutError, ValueError, OSError):
@@ -616,6 +716,10 @@ class LlamaCppServer:
             "vram_oom_on_first_attempt": self.vram_oom_first_attempt,
             "gpu_wait": self.gpu_wait,
             "started_at": self.started_at,
+            # The URL that answered, so the record names the endpoint rather
+            # than only the engine. `ModelSession.provenance()` merges this
+            # with the Ollama endpoint; the two are different servers.
+            "llamacpp_endpoint": self.endpoint,
         }
 
     # -- the transport -----------------------------------------------------
@@ -634,7 +738,7 @@ class LlamaCppServer:
             timeout = self._request_timeout(body)
         data = json.dumps(to_wire(body or {})).encode()
         request = urllib.request.Request(
-            f"http://127.0.0.1:{self.local_port}/v1/chat/completions",
+            self.endpoint or f"{self.api_root}/v1/chat/completions",
             data=data, headers={"Content-Type": "application/json"},
         )
         with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -651,6 +755,63 @@ def ollama_transport(base_url: str, request_json) -> Any:
              timeout: int | None = None) -> dict[str, Any]:
         return request_json(url, body, timeout)
     return post
+
+
+class WrongEndpoint(RuntimeError):
+    """The URL answers, but it is not an Ollama.
+
+    Its own exception type because it is not a fact about any model: nothing is
+    wrong with `qwen3-8-27b-q4km`, and reporting a probe of the wrong server as
+    `model tag is not installed` sends the reader to debug a model that was
+    never the problem. `Unknown endpoint: GET /api/tags` is the OpenAI-shaped
+    server's own wording, and it is how this box's llama.cpp-shaped service on
+    11434 identifies itself.
+    """
+
+
+# A metadata read, not a generation: this has to answer about a server that is
+# not serving anything, so it gets the same short explicit wait
+# evaluate-models.py's own metadata calls use rather than a generation's.
+ENDPOINT_PROBE_TIMEOUT_SECONDS = 10
+
+
+def probe_ollama_endpoint(base_url: str, request_json) -> dict[str, Any]:
+    """Confirm `base_url` is Ollama before a run depends on it, or say why not.
+
+    A 404 from `GET /api/tags` is the load-bearing case and the reason this
+    exists. Ollama always serves that path; a server that 404s it is
+    OpenAI-shaped -- llama.cpp's server, vLLM, an OpenAI-compatible gateway --
+    and every Ollama call this harness makes (`/api/chat`, `/api/tags`,
+    `/api/show`, `/api/ps`, `/api/generate`) will fail on it with a message
+    about the model rather than about the URL. Verified live on this box:
+    `GET /api/tags` on the local 11434 answers
+    `{"message": "Unknown endpoint: GET /api/tags", "type": "invalid_request_error",
+      "code": "not_found"}`.
+
+    Returns the parsed tags payload on success; raises `WrongEndpoint` when the
+    server is reachable and is not Ollama. A transport failure is *not* a wrong
+    endpoint -- it is reported to the caller as the exception it already was, so
+    one rule decides what "unreachable" means everywhere in the harness.
+    """
+    try:
+        payload = request_json(f"{base_url}/api/tags", timeout=ENDPOINT_PROBE_TIMEOUT_SECONDS)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            raise WrongEndpoint(
+                f"{base_url} answered 404 for GET /api/tags, so it is not Ollama. "
+                f"Ollama is the homeserver's `ghidra-ollama-1` reached through an "
+                f"`ssh -L` forward; point --base-url at that, not at a local "
+                f"llama.cpp or OpenAI-compatible server."
+            ) from exc
+        raise
+    if not isinstance(payload, dict) or not isinstance(payload.get("models"), list):
+        raise WrongEndpoint(
+            f"{base_url}/api/tags did not answer with an Ollama tag list "
+            f"(got {type(payload).__name__} with keys "
+            f"{sorted(payload)[:6] if isinstance(payload, dict) else 'n/a'}); "
+            f"it is not an Ollama endpoint."
+        )
+    return payload
 
 
 # --- Selection -------------------------------------------------------------
@@ -699,14 +860,22 @@ class ModelSession:
     def open(self) -> Any:
         """Serve this model, on llama.cpp if at all possible, else Ollama.
 
-        Returns the transport to use. Raises nothing for an unservable model:
-        an unresolvable GGUF or a model llama.cpp cannot load falls back to
-        Ollama, and a model neither can serve fails later on the Ollama call
-        itself -- which is a failure of that model, not of the run, and is
-        reported by the slot that hit it.
+        Returns the transport to use. Raises nothing for a model the *engine*
+        cannot serve: an unresolvable GGUF or a model llama.cpp cannot load
+        falls back to Ollama, and a model neither can serve fails later on the
+        Ollama call itself -- which is a failure of that model, not of the run,
+        and is reported by the slot that hit it.
+
+        `UnresolvableModel` is the one exception that escapes rather than
+        falling back: the caller named something that is not a model at all,
+        and Ollama cannot serve that either -- answering by falling back would
+        score whichever model happened to be resident and report success,
+        which is what the first live run did.
         """
         try:
             self.server = self._start_llama_cpp()
+        except UnresolvableModel:
+            raise
         except Exception as exc:  # noqa: BLE001 -- any start failure may fall back
             # Includes an unresolved GGUF (a tag with no manifest) and any
             # transport failure reaching the host: both are "llama.cpp cannot
@@ -822,7 +991,17 @@ class ModelSession:
         record["engine"] = self.engine
         record["fallback_engine"] = self.fallback_engine
         record["fallback_reason"] = self.fallback_reason
+        # Two servers, two endpoints, never one string reused for both. Ollama
+        # answers /api/chat and /api/tags; llama.cpp answers
+        # /v1/chat/completions and has no /api/* at all. The record named one
+        # field for both, so a run that fell back to Ollama recorded the URL it
+        # was *meant* to use rather than the one that answered -- and a reader
+        # could not tell a llama.cpp-shaped endpoint pointed at by an Ollama
+        # fallback from a working one. `base_url` is kept for the committed
+        # report's own key; `ollama_base_url` is what the fallback actually used.
         record["base_url"] = self.base_url
+        record["ollama_base_url"] = self.base_url
+        record.setdefault("llamacpp_endpoint", None)
         # Present even when unmeasured, because "two rows a reader has to
         # compare must have the same shape" is the rule the rest follows.
         record["vram_used_mib"] = vram_used_mib
