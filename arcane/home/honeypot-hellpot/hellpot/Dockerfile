@@ -33,9 +33,8 @@
 # adjudicates -- portbridge's record on the raw path, the forwarded chain
 # on the proxied one. It must run after router_patch.py, whose output it
 # matches on.
-FROM golang:1.23@sha256:60deed95d3888cc5e4d9ff8a10c54e5edc008c6ae3fba6187be6fb592e19e8c0 AS build
-RUN apt-get update && apt-get install -y --no-install-recommends python3 git \
- && rm -rf /var/lib/apt/lists/*
+FROM golang:1.27-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS build
+RUN apk add --no-cache python3 git
 ARG HELLPOT_REF=0ba62c99ea4599ec32474e4982a8ea4d4105c471
 WORKDIR /build
 RUN git clone https://github.com/yunginnanet/HellPot /build \

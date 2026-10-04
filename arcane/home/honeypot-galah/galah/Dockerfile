@@ -69,7 +69,7 @@
 # the golang:1.23 build stage, zero compatibility risk) plus
 # netcat-openbsd for the same `nc -z` HEALTHCHECK convention alpine gives
 # every other sensor here via busybox-extras.
-FROM golang:1.23@sha256:60deed95d3888cc5e4d9ff8a10c54e5edc008c6ae3fba6187be6fb592e19e8c0 AS build
+FROM golang:1.27-bookworm@sha256:69a7b9788769bec032d238959b61854e9ae87f57be9029ec04e9885fabf99195 AS build
 RUN apt-get update && apt-get install -y --no-install-recommends python3 git \
  && rm -rf /var/lib/apt/lists/*
 ARG GALAH_REF=8f77b85e892731cf1402963d8121c79fef0e59c7

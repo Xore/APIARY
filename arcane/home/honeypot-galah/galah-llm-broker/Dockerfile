@@ -3,7 +3,7 @@
 # See main.go's own doc comment for what it does and doesn't allow.
 # Written from scratch (not vendored): this is this stack's own boundary
 # enforcement, not third-party sensor logic.
-FROM golang:1.23@sha256:60deed95d3888cc5e4d9ff8a10c54e5edc008c6ae3fba6187be6fb592e19e8c0 AS build
+FROM golang:1.27-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS build
 WORKDIR /build
 COPY go.mod .
 COPY *.go .
