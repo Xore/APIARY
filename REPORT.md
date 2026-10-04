@@ -1100,46 +1100,89 @@ no AI/assistant attribution found
 exit=0
 ```
 
-## What is still red, and what I could not measure
+## What is still red, and the two claims I re-verified
 
-**The gate is still red, and further out than the golang work alone
-suggests.** I ran the gate logic over all 66 emitted refs in this session.
-The Docker Hub anonymous pull rate limit was hit partway through, so the
-run does not have a single trustworthy total. Splitting what actually
-happened:
+**The gate is still red, and the backlog is 37 distinct images, not 18.**
+A later pass in the same session got past the Docker Hub rate limit that cut
+the first pass short, so every one of the 66 emitted refs now has a real
+trivy result and the coverage gap is closed — 0 unmeasured, not 30. That
+correction makes this section supersede the tally printed above it, which
+was taken mid-limit and is wrong.
+
+Classifying the 66 exactly as `image-security-scan.yml` does
+(`allow_cve_findings()` from `scripts/list-docker-base-images.py`, fixable
+= has a `FixedVersion`):
 
 | outcome | count | meaning |
 |---|---|---|
-| scanned clean | 13 | trivy exit 0 |
-| matched a written exemption | 5 | incl. the new `golang:1.27-bookworm` |
-| real findings, no exemption | 18 | the actual backlog |
-| unverified — rate limited | 30 | **coverage gap, not a finding** |
+| scanned clean | 23 | trivy exit 0 |
+| matched a written exemption | 5 | incl. `golang:1.27-bookworm` |
+| **real findings, no exemption** | **38** | = 37 distinct images |
+| unverified | 0 | **was 30 above; the limit is gone** |
 | unresolvable reference | 0 | |
 
-The previous report's headline was 54 flagged. That number is not
-comparable to the 18 above and neither is the arithmetic that would connect
-them: the 30 rate-limited images were never measured, and this session's
-Docker Hub budget does not permit measuring them. `golang:1.27-alpine`
-appears under "unverified" here and measured 0 fixable earlier in the same
-session — the re-scan is what hit the limit, which is the clearest evidence
-in this report that the 30 are unmeasured rather than clean.
+The 38 rows are 37 images across 35 distinct tags, and the three ways that
+count differs are worth naming so the number can be re-derived:
 
-The 18 with real findings are untouched by this session and are the next
-work: zeek, elasticsearch, arkime, ollama, keycloak, unsloth, dionaea and
-the rest, each needing a candidate scanned before its pin moves. I did not
-start them, because the rate limit means I could not verify a candidate
-digest for any of them, and an unverified bump is the failure mode the
-brief names.
+- `debian:bookworm-slim` and `docker.io/library/debian:bookworm-slim` are
+  one image under two spellings (36 spellings → 35 after normalising
+  `docker.io/library/` away).
+- `docker.io/unsloth/unsloth` appears under **two different digests** —
+  `c776f36d…` (93 fixable) and `84511bee…` (36). Two genuinely distinct
+  builds, not a spelling.
+- `postgres:16.8` appears **once pinned and once bare** (`postgres:16.8`
+  and `postgres:16.8@sha256:301bcb60…`), 122 each.
+
+So 38 rows − 1 duplicate spelling = 37 images. Five of the pins are not
+digest-pinned at all (`postgres:16.8`, `grafana/grafana`,
+`nvidia/cuda:12.4.1-devel-ubuntu22.04`, `quay.io/keycloak/keycloak:latest`,
+`docker.n8n.io/n8nio/n8n:latest`), which is worth noting on its own: an
+unpinned base silently moves under the gate between runs.
+
+The 37 are untouched by this session's pin work and are the next work: each
+needs a candidate tag *scanned* before its pin moves. The top of the
+backlog by fixable count is `nicolaka/netshoot:latest` (440) and
+`nvidia/cuda:12.4.1-devel-ubuntu22.04` (352) — a `:latest` and a dead
+minor, and both are the reason the next session needs Docker Hub budget
+rather than a patch.
+
+**The two "cannot move" claims, re-verified rather than asserted.** The
+earlier sections exempt `nvidia/cuda:12.4.1-devel-ubuntu22.04` and
+`eclipse-temurin:21-jdk-jammy` on the grounds that no clean version exists
+to move to. Both were checked against the *paginated* tag list this time —
+the first page of the tags endpoint returns 100 tags and silently truncates,
+which is what makes "nothing to move to" a plausible-sounding false claim:
+
+```
+$ ./alltags.sh nvidia/cuda | tr ' ' '\n' | grep '^12\.4\..*devel-ubuntu22\.04$'
+12.4.0-devel-ubuntu22.04
+12.4.1-cudnn-devel-ubuntu22.04
+12.4.1-devel-ubuntu22.04          # current pin; nothing newer in 12.4.x
+
+$ ./alltags.sh library/eclipse-temurin | tr ' ' '\n' | grep -E '^21_.*jdk-(jammy|noble)$'
+21_35-jdk-jammy                   # current pin is 21_35 already
+21_35-jdk-noble
+```
+
+The cuda pin is the newest `12.4.x-devel-ubuntu22.04` that exists; a jump to
+a different minor is a CUDA/driver decision, not a security bump. The
+temurin pin is already the current 21 line (`21_35`) and there is no second
+21 jammy tag behind it. Both exemptions are load-bearing.
 
 **Explicitly not done:**
 
-- **Nothing pushed. No PR.** Two commits on `ci/3501-base-image-gate`.
-- **No lane, row, aggregator or check removed or weakened.** The workflow
-  file is untouched by this session — the diff is 5 Dockerfiles and
-  `scripts/list-docker-base-images.py`.
+- **Nothing pushed. No PR.** 13 commits on `ci/3501-base-image-gate`
+  (`d9b9f5db`..`865a746e`), working tree clean.
+- **No lane, row, aggregator or check removed or weakened.** The gate's own
+  flags, the unresolved-classification branch and the `ACCEPTED_CVES`
+  matching rule are all untouched by this session.
 - **No `--ignore-unfixed` added anywhere by me, no severity threshold
   raised, no blanket ignore rule.** `--ignore-unfixed` appears in every
   command quoted above because it is already in the gate's own invocation
   at `image-security-scan.yml:120`; it is the gate's flag, not mine.
-- **No exemption written for an image whose scan did not run.** The 30
-  rate-limited images are reported as a coverage gap and left failing.
+- **No exemption written for an image this session did not scan.** Every
+  one of the 5 exempt entries traces to a real trivy run quoted above it.
+- **The 36-image backlog is not cleared.** No candidate digest was moved
+  for any of them in this session; an unverified bump is the failure mode
+  the brief names, and verifying 36 candidates needs more Docker Hub budget
+  than this session had.
