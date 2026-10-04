@@ -86,6 +86,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from typing import Any
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -300,7 +301,7 @@ def export_index(es: Es, index: str, dest: Path, page_size: int,
 
     # Unwrap the single `{index: {...}}` envelope and keep only `mappings`;
     # see the module docstring for why settings are dropped.
-    body = next(iter(response.document.values()), {})
+    body: Any = next(iter(response.document.values()), {})
     mappings = body.get("mappings") if isinstance(body, dict) else None
     if not isinstance(mappings, dict):
         raise EsError(f"GET /{index}/_mapping: no mappings block")
