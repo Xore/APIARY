@@ -103,11 +103,12 @@ jobs:
       - name: Install trivy
         run: scripts/install-trivy.sh
 
-      - name: Scan each image for known CRITICAL/HIGH vulnerabilities (report-only)
+      - name: Scan each image for known CRITICAL/HIGH vulnerabilities
         run: |
           set -euo pipefail
           flagged=0
           unresolved=0
+          exempt=0
           while IFS= read -r image; do
             [ -z "$image" ] && continue
             echo "::group::$image"
@@ -125,9 +126,17 @@ jobs:
               if grep -qiE 'MANIFEST_UNKNOWN|manifest unknown|repository .* not found|name unknown|could not (be )?(found|resolved)|failed to (fetch|resolve|find) the image' scan.log; then
                 unresolved=$((unresolved + 1))
                 echo "::warning title=Unscannable image reference::$image could not be resolved -- NOT scanned. This is a coverage gap, not a vulnerability result. Fix the reference, or add it to UNSCANNABLE in scripts/list-docker-base-images.py with a reason."
+              # #3501: an exemption is a claim that this repo cannot move the
+              # image, so it is consulted only for a scan that actually
+              # returned findings. Consulting it before the scan would let an
+              # entry also excuse a reference that has stopped resolving --
+              # the one case the classification above exists to keep visible.
+              elif python3 -c 'import sys;from importlib.util import module_from_spec,spec_from_file_location;spec=spec_from_file_location("base_images","scripts/list-docker-base-images.py");mod=module_from_spec(spec);spec.loader.exec_module(mod);sys.exit(0 if mod.allow_cve_findings(sys.argv[1]) else 1)' "$image"; then
+                exempt=$((exempt + 1))
+                echo "::notice title=Exempted base image::$image has fixable CRITICAL/HIGH findings covered by a written reason in ACCEPTED_CVES (scripts/list-docker-base-images.py). The exemption is keyed to this exact digest and retires itself when the pin moves."
               else
                 flagged=$((flagged + 1))
-                echo "::warning title=Vulnerable base image::$image has fixable CRITICAL/HIGH vulnerabilities"
+                echo "::error title=Vulnerable base image::$image has fixable CRITICAL/HIGH vulnerabilities"
               fi
             fi
             echo "::endgroup::"
@@ -135,14 +144,23 @@ jobs:
           if [ "$unresolved" -gt 0 ]; then
             echo "::warning::$unresolved image reference(s) could not be resolved and were not scanned -- see the grouped logs above."
           fi
-          # Report-only for now: the repo has an existing base-image CVE backlog
-          # (measured 21/31 images on introduction), and this PR's new dependabot
-          # docker coverage will bump these pinned digests over time. Surface
-          # findings as annotations without failing the build. Re-arm the hard
-          # gate -- replace this block with `[ "$flagged" -eq 0 ]` -- once the
-          # backlog is cleared.
-          if [ "$flagged" -gt 0 ]; then
-            echo "::warning::$flagged base image(s) have fixable CRITICAL/HIGH vulnerabilities -- see the grouped logs above. Not failing the build (report-only)."
-          else
-            echo "All scanned base images are clean of fixable CRITICAL/HIGH vulnerabilities."
+          # #3501: the gate is armed. A scan that found fixable CRITICAL/HIGH
+          # findings on an image with no written reason fails the build; the
+          # reasons live in ACCEPTED_CVES, keyed to a digest so a Dependabot
+          # bump retires them on its own. See docs/CI-CD.md, "Base-image CVE
+          # gate (#3501)", for the decision and how to add an entry.
+          #
+          # Unresolved references do NOT fail the build. They are reported
+          # above as a coverage gap, which #2763's classification separates
+          # from a vulnerability result on purpose: an image nobody could
+          # measure is not a finding, and neither exempting it nor failing
+          # on it would be honest. That keeps it a visible gap rather than
+          # either a permanent false alarm or a silent pass.
+          if [ "$exempt" -gt 0 ]; then
+            echo "::notice::$exempt image(s) matched a written exemption in ACCEPTED_CVES."
           fi
+          if [ "$flagged" -gt 0 ]; then
+            echo "::error::$flagged base image(s) have fixable CRITICAL/HIGH vulnerabilities and no written reason -- see the grouped logs above. Fix the finding (bump the pin), or add a reasoned entry to ACCEPTED_CVES in scripts/list-docker-base-images.py."
+            exit 1
+          fi
+          echo "All scanned base images are clean of unexempted fixable CRITICAL/HIGH vulnerabilities."
