@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -170,8 +171,34 @@ CODER_CHECKS = (
     "security_failure_handling",
     "completeness_readability",
 )
-# Complete source files need more output than the calibrated 512-token analysis slots.
-CODER_NUM_PREDICT = 4096
+# Complete source files need more output than the calibrated 512-token analysis
+# slots. 4096 was ending 21 of the 162 committed roster records mid-answer, every
+# one of them at exactly output_tokens: 4096 -- the cap deciding where the answer
+# stopped, not the model.
+#
+# The single definition of this number. It used to also be restated at the
+# OUTPUT_BUDGETS block below, which is the binding one, so an edit here alone
+# changed nothing and the dead copy was a trap for the next reader.
+#
+# num_predict is not the ceiling; num_ctx is. Ollama clamps the answer to what
+# fits in the window, so a budget larger than num_ctx minus the prompt is cut
+# silently -- by the window, not the cap, which is why this looked like a model
+# failure in the transcript (done_reason: length).
+CODER_NUM_PREDICT = 16000
+# num_ctx for the coder slot: the budget plus the widest recorded coder prompt
+# (2117 tokens), so the window never truncates the answer below the budget.
+# This used to be a bare 8192, which allowed only 6075 -- that is why 21 of the
+# 162 roster records ended truncated at exactly 4096 and why raising
+# num_predict alone changed nothing.
+#
+# Raising num_ctx costs KV cache. llama.cpp already spills KV to system RAM off
+# the card on its own (measured 0.97 GB offload at num_ctx 16384), so this is
+# not an "offload to RAM" switch -- that is the default behaviour. The lever is
+# bytes-per-token: the ghidra ollama container now sets
+# OLLAMA_KV_CACHE_TYPE=q8_0, which makes f16-sized context fit in 1/1.88 the
+# VRAM. See analysis/ghidra/docker-compose.ghidra.yml. Measure with
+# analysis/ghidra/benchmarks/probe-gpu-capabilities.py before raising this again.
+CODER_NUM_CTX = 18400
 HUMAN_GRADES_FILENAME = "human-grades.json"
 
 
@@ -2167,12 +2194,17 @@ SEMANTIC HARNESS: none — this fixture forks and execv's a real child process, 
 #
 # The clamps keep both ends honest. A short request still fails fast at the old
 # 300s instead of hanging on a stalled server, and no caller can buy an
-# unbounded wait: 3600s is above 4096 / 2.0 = 2048s, so every budget in
-# OUTPUT_BUDGETS fits unclamped and only an absurd num_predict reaches the
-# ceiling.
+# unbounded wait. The ceiling is derived from the largest declared budget at the
+# same headroom ratio the flat 3600 carried -- 3600 / (4096 / 2.0) = 1.7578 --
+# so raising a budget cannot silently reintroduce the old defect as a timeout
+# stop, which is the same answer ending mid-sentence for a different reason.
+# CODER_NUM_PREDICT is the largest budget in OUTPUT_BUDGETS; the table is built
+# further down because its siblings (ANALYSIS_/SESSIONS_) are declared there.
 FLOOR_DECODE_TOKENS_PER_SECOND = 2.0
 MIN_REQUEST_TIMEOUT_SECONDS = 300   # the flat default this replaces: a probe's floor
-MAX_REQUEST_TIMEOUT_SECONDS = 3600  # above 4096 / 2.0 = 2048s, so no real budget clamps
+_REQUEST_TIMEOUT_HEADROOM = 3600 / (4096 / FLOOR_DECODE_TOKENS_PER_SECOND)
+MAX_REQUEST_TIMEOUT_SECONDS = math.ceil(
+    CODER_NUM_PREDICT / FLOOR_DECODE_TOKENS_PER_SECOND * _REQUEST_TIMEOUT_HEADROOM)
 
 
 def request_timeout(body: dict[str, Any] | None) -> int:
@@ -2324,7 +2356,6 @@ ANALYSIS_NUM_PREDICT = 4096   # ghidra triage, revdeck, context probe
 # answer the worker can actually produce, and it is still 4x the old 512 cap
 # that was ending answers mid-sentence.
 SESSIONS_NUM_PREDICT = 2048
-CODER_NUM_PREDICT = 4096     # already existed at line 146; kept, verified live
 
 # The slot -> budget table every call site reads, so "which slot gets how much"
 # is one grep rather than five. `context_probe` is listed under ghidra because
@@ -3048,7 +3079,7 @@ def score_coder(
         try:
             for round_index in range(CODER_MAX_ROUNDS):
                 raw = chat(
-                    base_url, model, CODER_TOOL_SYSTEM, prompt, min(context, 8192), False,
+                    base_url, model, CODER_TOOL_SYSTEM, prompt, min(context, CODER_NUM_CTX), False,
                     num_predict=budget_for("coder"), recorder=recorder, case=case.name,
                     workflow="coder_generation", tools=list(_bt.FILE_TOOLS),
                 )
