@@ -177,13 +177,19 @@ bounding discipline.
 
 **Partially mitigated already; inconsistent across services.**
 
-- `dashboard/authorization.go`'s `secretFromEnvironment()` (retired with the
-  Go dashboard; the file-based secret delivery pattern it described carried
-  into the Rust cutover) already supported
-  a `<NAME>_FILE` indirection (read the secret from a file path named by
-  `<NAME>_FILE`, falling back to the plain env var) for
-  `AUTH_INTROSPECTION_TOKEN` — the file-based delivery pattern #154's
-  acceptance criteria asks to extend already exists in exactly one place.
+- There is currently **no live `<NAME>_FILE` secret indirection anywhere in
+  this tree.** A `<NAME>_FILE` convention was described once, for
+  `AUTH_INTROSPECTION_TOKEN`, by `dashboard/authorization.go`'s
+  `secretFromEnvironment()` — but that file is gone (the Go dashboard was
+  retired), and `AUTH_INTROSPECTION_TOKEN` survives only as a comment in
+  `docs/KEYCLOAK-CUTOVER.md:125`. Nothing implements that convention now.
+- The nearest **live** precedent for file-path-delivered configuration is
+  `arcane/home/honeypot-dashboard/backend-service/src/threat_intel.rs:135` —
+  `std::env::var("THREAT_CIDRS_FILE")`, which reads a path from the
+  environment and loads its contents from disk. It is the same shape a
+  `<NAME>_FILE` secret indirection would take, but it delivers **CIDR
+  threat-intel data, not a secret**, so nothing in the tree currently
+  reduces a secret's `/proc/*/environ` exposure.
 - Every other secret-shaped environment variable in this tree
   (`ARKIME_ADMIN_PASSWORD`, `ARKIME_PASSWORD_SECRET`, `GH_PAT` per
   `analysis/github/github.env.example`, VPS SSH keys in `deploy.yml`'s
@@ -196,11 +202,12 @@ bounding discipline.
   `env:` on specific steps, GitHub's own masking prevents them appearing in
   logs, but they still exist as process environment for the step's lifetime.
 
-**Verdict:** the file-based pattern exists but is applied to exactly one
-secret. Extending `secretFromEnvironment`'s `<NAME>_FILE` convention to the
-other secret-shaped env vars (or at minimum documenting which ones are
-plain-env by conscious choice vs. oversight) is a concrete, scoped
-follow-up — see [Follow-up scope](#follow-up-scope).
+**Verdict:** no `<NAME>_FILE` secret indirection is live anywhere in this
+tree, so every secret-shaped env var here is plain-env. *Introducing* that
+convention (modelled on `threat_intel.rs`'s `THREAT_CIDRS_FILE` path-from-env
+pattern) for the other secret-shaped env vars — or at minimum documenting
+which ones are plain-env by conscious choice vs. oversight — is a concrete,
+scoped follow-up — see [Follow-up scope](#follow-up-scope).
 
 ---
 
@@ -499,8 +506,8 @@ the session derived from it, as it moves through
   all-or-nothing credential for the entire `/api/v1` surface rather than a
   per-caller identity. It is also carried as a plain environment variable in
   both tiers' compose files, so it is `/proc/<pid>/environ`-readable
-  (§3's shape) rather than file-delivered — the `_FILE` indirection §3 names
-  exists in exactly one place and is not applied here. Anything else joining
+  (§3's shape) rather than file-delivered — the `_FILE` indirection used by
+  Keycloak/OIDC (§14) is not applied here. Anything else joining
   `honeynet` with the token is fully authorized.
 
 - **10.3 — Asset:** per-operator identity for the Workbench's owner-scoped
@@ -980,9 +987,8 @@ stated first.
   nested inside it: anything written "into" that path would land inside the
   git checkout itself, "exactly where a secret must never live." Plain-env
   where it is not: `SERVICE_TOKEN` (§10.2), `ARKIME_PASSWORD_SECRET`, `GH_PAT`
-  (§3). **Mitigation:** the `_FILE` indirection §3 names, now with three
-  live uses in-tree rather than the one that section recorded — the pattern
-  has been extended, which §3's verdict predates. `.env` files are refused
+  (§3). **Mitigation:** the file-delivered-secret pattern (§14 lists the
+  three live uses) does not cover these three. `.env` files are refused
   outright by the gate: any tracked file named `.env` that is not in
   `ALLOWED_DOTENV` fails, and the pattern list separately flags private keys,
   GitHub/AWS/Slack token shapes, literal credential assignments, and
@@ -1033,7 +1039,7 @@ stated first.
 |---|---|---|---|---|
 | 1 | Sandbox escape / reference artifacts | Partial (detonation sandbox, not eval harness) | Read-only result mounts; isolation zone design (docs) | #88 (untested invariants), #510 (capture container lifecycle) |
 | 2 | Untrusted structured-data processing | Yes, broadly | `html/template` auto-escaping; CI YARA corpus gate | No archive/container-format parsing exists yet — must inherit this discipline when added |
-| 3 | Env/`/proc/*/environ` secret exposure | Yes | `secretFromEnvironment`'s `_FILE` pattern (one use) | Pattern not applied to `ARKIME_*`, `GH_PAT`, VPS SSH key |
+| 3 | Env/`/proc/*/environ` secret exposure | Yes | No live `<NAME>_FILE` secret indirection exists anywhere in the tree; the nearest precedent is `backend-service/src/threat_intel.rs`'s `THREAT_CIDRS_FILE` file-path delivery (CIDR data, not a secret) | Every secret-shaped env var is plain-env: `ARKIME_*`, `GH_PAT`, VPS SSH key |
 | 4 | Metadata-service / RFC 1918 reachability | No cloud metadata surface exists | Per-sensor private Docker networks | Outbound-to-internet egress policy (tracked in #538) |
 | 5 | Credential lifetime / workload identity | Yes | dashboard/services-adapter split (strong pattern, since carried into the backend-service/worker split); autoheal moved onto the same narrow-proxy shape by #592 | Proxy's `CONTAINERS=1` is still daemon-wide, not label-filtered |
 | 6 | Encoded/chunked C2 | Yes, as honeypot capture surface | Raw payload capture (tanner/Suricata); narrow fixed-destination outbound HTTP clients | No network-layer egress enforcement (folds into #538) |
@@ -1045,15 +1051,6 @@ stated first.
 | 12 | Model access | Yes — largest genuine gap | Ollama off `honeynet`, loopback-only, `internal: true` network; broker path allowlist + body cap; injection detection (log-only) | A crafted conversation *can* drive the model as an oracle — by design; no rate limit on the shared GPU slot |
 | 13 | Sandbox escape | Yes | Three independent barriers on the Windows route; fail-closed iptables policy + in-guest verification on GHOSTS | GHOSTS's `network-filter.sh` is a documented manual procedure, not an enforced property |
 | 14 | Secrets (real vs. decoy) | Yes | `check-public-leaks.py` `ALLOWED_DOTENV` + `check-cowrie-honeyfs-realism.py`; file-delivered secrets outside the checkout | No credential scanner over git history; `SERVICE_TOKEN` still plain-env |
-| 1 | Sandbox escape / reference artifacts | Partial (detonation sandbox, not eval harness) | Read-only result mounts; isolation zone design (docs) | #88 (untested invariants), #510 (capture container lifecycle) |
-| 2 | Untrusted structured-data processing | Yes, broadly | `html/template` auto-escaping; CI YARA corpus gate | No archive/container-format parsing exists yet — must inherit this discipline when added |
-| 3 | Env/`/proc/*/environ` secret exposure | Yes | `secretFromEnvironment`'s `_FILE` pattern (one use) | Pattern not applied to `ARKIME_*`, `GH_PAT`, VPS SSH key |
-| 4 | Metadata-service / RFC 1918 reachability | No cloud metadata surface exists | Per-sensor private Docker networks | Outbound-to-internet egress policy (tracked in #538) |
-| 5 | Credential lifetime / workload identity | Yes | dashboard/services-adapter split (strong pattern, since carried into the backend-service/worker split); autoheal moved onto the same narrow-proxy shape by #592 | Proxy's `CONTAINERS=1` is still daemon-wide, not label-filtered |
-| 6 | Encoded/chunked C2 | Yes, as honeypot capture surface | Raw payload capture (tanner/Suricata); narrow fixed-destination outbound HTTP clients | No network-layer egress enforcement (folds into #538) |
-| 7 | Repeated recon / low-signal escalation | Yes — core motivating gap | ml-worker anomaly scoring; dashboard campaign clustering | No behavioral-phase correlation or combination-based severity escalation |
-| 8 | Source-control/CI write paths | Yes | `analysis/github/` publish gate (CI-tested); vendored-dep hash pinning | No image digest pinning for this repo's own built images |
-| 9 | Cross-source alert correlation | Yes — core motivating gap | Multiple independent alert sources feed one sink, `llm-analysis` severity included | No trust-boundary-crossing correlation engine |
 
 ---
 
@@ -1080,8 +1077,10 @@ route to:
     then-`dashboard/llm_analysis.go`'s `llmAnalysisAlerts`, retired with the
     Go dashboard; the equivalent alert-refresh wiring lives in the Rust
     cutover's worker loop today.
-  - ~~Extend `secretFromEnvironment`'s file-based delivery pattern to the
-    other plain-env secrets (item 3).~~ **Assessed, closed as acceptable
+  - ~~Introduce a `<NAME>_FILE` secret indirection (the convention #154
+    asks for, modelled on `threat_intel.rs`'s `THREAT_CIDRS_FILE`
+    path-from-env pattern) for the plain-env secrets (item 3).~~
+    **Assessed, closed as acceptable
     residual risk — no code change.** `ARKIME_PASSWORD_SECRET` (the one
     genuinely reachable case; see below) is consumed directly by Arkime's
     own third-party `docker.sh` entrypoint via its `ARKIME__*`
