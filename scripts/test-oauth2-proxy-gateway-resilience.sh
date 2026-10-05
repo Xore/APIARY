@@ -88,13 +88,27 @@ reap_stale_fixtures() {
 reap_stale_fixtures 'gwtest-'
 
 network="gwtest-$$"
-pg="gwtest-pg-$$"
-kc="gwtest-kc-$$"
-proxy="gwtest-proxy-$$"
-upstream="gwtest-upstream-$$"
-proxy_short="gwtest-proxy-short-$$"
-proxy_logout="gwtest-proxy-logout-$$"
-proxy_outage="gwtest-proxy-outage-$$"
+# #3520: every fixture name carries a dotted suffix, and the `$$` is kept as a
+# label rather than being the only distinctive part. The whole OIDC login flow
+# below is driven through a curl cookie jar, and that is version-sensitive in
+# a way the rest of this suite is not: curl 8.22.0 refuses to send a cookie
+# whose Netscape-jar domain is a DOTLESS hostname, with its own trace saying
+# `cookie 'KC_AUTH_SESSION_HASH' dropped, domain '[file]' must not set cookies
+# for 'gwtest-kc-<pid>'`. With a dotless name the jar is populated but never
+# replayed, Keycloak's POST /login-actions/authenticate gets no session cookie
+# and answers 400, and test #3 fails with the empty `callback=` the run log
+# showed -- an auth-path failure that has nothing to do with the assertion.
+# Docker's embedded DNS resolves a dotted container name fine (verified), so
+# the fix is to name the fixtures with a dot rather than to pin curl back or
+# to loosen the assertion.
+suffix=".gwtest.local"
+pg="gwtest-pg-$$${suffix}"
+kc="gwtest-kc-$$${suffix}"
+proxy="gwtest-proxy-$$${suffix}"
+upstream="gwtest-upstream-$$${suffix}"
+proxy_short="gwtest-proxy-short-$$${suffix}"
+proxy_logout="gwtest-proxy-logout-$$${suffix}"
+proxy_outage="gwtest-proxy-outage-$$${suffix}"
 proxy_port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 fail=0
 

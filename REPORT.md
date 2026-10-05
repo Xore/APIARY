@@ -1186,3 +1186,267 @@ temurin pin is already the current 21 line (`21_35`) and there is no second
   for any of them in this session; an unverified bump is the failure mode
   the brief names, and verifying 36 candidates needs more Docker Hub budget
   than this session had.
+
+---
+
+# #3520 — fixing the two CI failures
+
+Neither failure was the pin mismatch the first pass suspected, and both were
+reproduced locally before anything was changed. The oauth2-proxy pin **was**
+the trigger — just not for the reason given.
+
+Both defects are fixed. **Committed, not pushed.**
+
+## Defect 1 — the CVE classifier labels scan failures as vulnerabilities
+
+### Codex's claim, verified
+
+The classifier caught only the resolution family (`MANIFEST_UNKNOWN` and
+friends) and let every other non-zero trivy exit fall through to `flagged`.
+Confirmed in the log of run 37245432216, job 111562329384: all 66 images
+resolved (zero `Unscannable image reference` annotations), yet three
+references aborted mid-scan and were still annotated
+`##[error]... has fixable CRITICAL/HIGH vulnerabilities`.
+
+Splitting the 38 errors by whether the image's log actually contains a report:
+
+```
+$ python3 - <<'PY'   # per-image blocks from the run log, split on the FATAL marker
+flagged-by-classifier breakdown: {'FINDING': 35, 'SCAN-FAILED': 3}
+   docker.io/unsloth/unsloth@sha256:c776f36d...
+   ghcr.io/arkime/arkime/arkime:v6-latest@sha256:754ac8d5...
+   ghcr.io/arkime/arkime/arkime:v6.7.0@sha256:754ac8d5...
+PY
+```
+
+Three references, two distinct images — arkime's `v6-latest` and `v6.7.0` are
+the same digest. Their logs carry no `Report Summary` and no `Total:` line at
+all, which is the discriminator: trivy aborted before producing a result, so
+nothing was measured.
+
+The two causes, verbatim:
+
+```
+FATAL ... failed to analyze file: failed to analyze
+  opt/unsloth-studio/cache/uv/archive-v0/.../libtorch_cuda.so:
+  semaphore acquire: context deadline exceeded
+
+FATAL ... unable to open: failed to initialize the struct from the temporary
+  file: file blobs/sha256/3bd3d50451b4c5e5bfc24a0431db139f74ebbb2... not found in tar
+```
+
+### The fix
+
+A third branch in the chain, between the resolution family and the exemption
+lookup, keyed on `FATAL ... run error: image scan error`. Counted as
+`scan_failed`, reported as `::warning`, and summarised once at the end with the
+distinct reasons — a shared cause (trivy's DB download, a rate limit, a
+saturated runner) hits every image after it, and one callout per image would
+report one cause N times. Digests are normalised before comparison so the two
+arkime refs collapse to a single reason line.
+
+It sits **before** the exemption lookup on purpose: an `ACCEPTED_CVES` entry
+must excuse findings that have no written reason, never a scan that produced
+no findings at all.
+
+Nothing was weakened to make this pass — the scan-failed bucket is new, not a
+hole:
+
+```
+$ git diff --cached | grep -E '^[+-].*(ignore-unfixed|severity|exit-code)'
+  (no change to severity, --ignore-unfixed, or --exit-code)
+$ grep -n 'exit 1' .github/workflows/image-security-scan.yml
+203:            exit 1
+```
+
+### Proof — the real run, replayed
+
+I replayed all 66 recorded per-image logs from the failing run through the
+**new** classifier (stub trivy reproducing trivy's exit contract: 0 clean,
+1 findings-or-fatal), so the numbers below come from the run that actually
+failed, not from a synthetic case:
+
+```
+$ PATH=/tmp/harness/bin:$PATH bash run.sh    # run.sh = the step's run: block, verbatim
+REPLAY_EXIT=1
+groups=66
+
+$ grep -E '^::(error|warning|notice)::' out.txt
+::warning::3 base image(s) could not be scanned -- their vulnerability status is UNKNOWN, not clean and not vulnerable. This is a coverage gap; re-run the job to retry.
+::notice::5 image(s) matched a written exemption in ACCEPTED_CVES.
+::error::35 base image(s) have fixable CRITICAL/HIGH vulnerabilities and no written reason -- ...
+```
+
+35 + 3 + 5 = 43, against 38 + 5 = 43 before: the same images, the three
+aborted ones moved out of the failure bucket.
+
+**The two named images are no longer counted as vulnerabilities:**
+
+```
+$ grep -E '::error.*(c776f36d|754ac8d5)' out.txt | wc -l
+0
+::warning title=Base image scan failed::docker.io/unsloth/unsloth@sha256:c776f36dc13c8692...
+::warning title=Base image scan failed::ghcr.io/arkime/arkime/arkime:v6-latest@sha256:754ac8d5...
+```
+
+**Negative control — a real finding is still a finding.** unsloth's *other*
+digest scans successfully and reports genuine results; it stays flagged:
+
+```
+::error title=Vulnerable base image::docker.io/unsloth/unsloth@sha256:84511bee77058158e...
+$ # from that image's recorded log:
+totals found: ['Total: 17 (HIGH: 17, CRITICAL: 0)', 'Total: 19 (HIGH: 18, CRITICAL: 1)']
+```
+
+**Shared-cause collapse works** — 3 failures, 2 distinct reasons:
+
+```
+$ grep -c 'Base image scan failure reason::' out.txt
+2
+```
+
+## Defect 2 — oauth2-proxy gateway resilience, the protected-page hop
+
+### Not a flake, and not the compose pin
+
+`origin/main` passes this job — 6/6 recent runs green:
+
+```
+$ for r in 37230137385 37220345496 37217018184 37214423720 37208619205 37009033316; do
+    gh api "repos/Xore/APIARY/actions/runs/$r/jobs" -q '.jobs[]|select(.name|test("oauth2-proxy gateway"))|.conclusion'
+  done
+success   (x6)
+```
+
+The dispatcher's pin-mismatch hypothesis was wrong about the mechanism. The
+branch's only change to the script is the curl image (8.21.0 → 8.22.0) —
+nothing else:
+
+```
+$ git diff origin/main...HEAD -- scripts/test-oauth2-proxy-gateway-resilience.sh \
+    | grep -E '^[+-]' | grep -v '^[+-][+-]' | grep -v 'curlimages/curl'
+  (nothing — every changed line is a curl pin)
+```
+
+Reproduced locally, both ways. Main's script passes 14/14; the branch's fails
+at #3 with the exact `callback= protected=` the run log showed:
+
+```
+$ ./scripts/test-oauth2-proxy-gateway-resilience.sh
+  OK    unauthenticated request redirects to the real Keycloak authorize endpoint with PKCE S256
+  OK    forged callback (unknown code+state) rejected with HTTP 500
+curl: option : blank argument where content is expected
+  FAIL  authorized login did not reach the protected page: callback= protected=
+```
+
+The empty `callback=` is a symptom: an earlier line aborted, so the variable
+was empty and the *next* curl call got a blank argument. The failure is
+upstream of the assertion.
+
+### Root cause
+
+Bisecting the login flow with the intermediate values printed showed the
+authorize URL and the form action were both fine (380 and 393 chars). The
+**credential POST** is what fails, and curl's own trace says why:
+
+```
+$ # identical jar, identical request, both curl versions
+8.21.0:  008a: Cookie: AUTH_SESSION_ID=ei11SWpsalJpbk5Mam9WaXlUNkFjdDFHLm16YzlU
+8.22.0:  * cookie 'KC_RESTART' dropped, domain '[file]' must not set cookies for 'gwtest-kc-<pid>'
+         * cookie 'KC_AUTH_SESSION_HASH' dropped, domain '[file]' must not set cookies for 'gwtest-kc-<pid>'
+```
+
+curl 8.22.0 refuses to send a cookie whose Netscape-jar domain is a
+**dotless hostname**. The fixtures were named `gwtest-kc-$$`, which has no
+dots. The jar gets written but never replayed, so Keycloak's
+`POST /login-actions/authenticate` arrives with no session cookie and answers
+400; the script then reports the empty status.
+
+Minimal reproduction, no Keycloak involved — one hand-written jar line:
+
+```
+host in jar                          8.21.0   8.22.0
+gwtest-kc-<pid>   (dotless)            1        0     <-- the fixtures
+.gwtest-kc-<pid>  (leading dot)        1        0
+kc.test.local     (dotted hostname)    1        1     <-- works on both
+```
+
+Deterministic — 3/3 runs each way. It is a curl regression in 8.22.0, not
+something this branch introduced in the assertions.
+
+### The fix
+
+Named the fixtures with a dotted suffix rather than pinning curl back or
+loosening anything:
+
+```bash
+suffix=".gwtest.local"
+pg="gwtest-pg-$$${suffix}"
+kc="gwtest-kc-$$${suffix}"
+proxy="gwtest-proxy-$$${suffix}"
+...
+```
+
+Docker's embedded DNS resolves dotted container names fine (verified against
+a live network), and the `gwtest-` reaper prefix still matches every name, so
+stale-fixture cleanup is unaffected.
+
+The full suite passes with the 8.22.0 pin **kept**:
+
+```
+$ ./scripts/test-oauth2-proxy-gateway-resilience.sh
+  OK    unauthenticated request redirects to the real Keycloak authorize endpoint with PKCE S256
+  OK    forged callback (unknown code+state) rejected with HTTP 500
+  OK    authorized real login: callback 302, protected page 200
+  OK    tampered session cookie rejected (HTTP 403, not 200)
+  OK    login without the required client role denied (403) despite valid credentials
+  OK    protected upstream publishes no host port -- the gateway is the only path to it
+  OK    gateway outage: the public port refuses connections outright (curl exit 7), no fallback to the upstream
+  OK    short-lived-session login succeeded before expiry: callback 302, protected page 200
+  OK    session past its own cookie expiry rejected (HTTP 403, not 200)
+  OK    a saved copy of the pre-logout session cookie no longer grants access after sign_out + one refresh interval (HTTP 403) -- real server-side revocation, not just a client-side cookie clear
+  OK    protected page still served immediately after Keycloak becomes unreachable (within the refresh grace window)
+  OK    confirmed: the gateway pattern still fails OPEN through a Keycloak network outage past its refresh interval, within the cookie's own lifetime (HTTP 200) ...
+  OK    confirmed: once COOKIE_EXPIRE itself lapses, the session is denied (HTTP 403) even mid-outage ...
+
+PASS: all gateway-resilience assertions held
+```
+
+## Remaining verifications
+
+```
+$ python3 scripts/list-docker-base-images.py > /tmp/emitted.txt
+$ diff <(sort /tmp/emitted.txt) <(sort images-scanned-by-CI.txt)
+IDENTICAL to the 66 refs the CI run scanned
+$ git diff --stat scripts/list-docker-base-images.py
+  (unchanged — not touched)
+
+$ /usr/bin/python3.12 -m pytest scripts/tests/test_3501_base_image_cve_exemptions.py -q
+14 passed in 0.61s
+
+$ /usr/bin/python3.12 -m pytest scripts/tests tests/docs -q
+1000 passed, 6 skipped, 1 xfailed, 93 subtests passed in 164.03s (0:02:44)
+
+$ python3 scripts/check-ai-attribution.py --text .github/workflows/image-security-scan.yml scripts/test-oauth2-proxy-gateway-resilience.sh
+ok 2 files changed, 65 insertions(+), 12 deletions(-)
+no AI/assistant attribution found
+```
+
+## Not done
+
+- **The 35-image backlog is still there**, and the gate still fails on it —
+  correctly. This change fixes how scan failures are *counted*; it does not
+  clear real findings, and no threshold, severity, flag or exemption moved to
+  make the number go down.
+- **The scan-failed bucket does not fail the build**, matching the existing
+  treatment of unresolvable references: an image nobody could measure is a
+  visible coverage gap, not a finding and not a pass. It is reported once,
+  with the reason.
+- **The two unsloth/arkime images are still unmeasured.** Classifying a
+  failure correctly does not scan the image. A re-run may well succeed — the
+  semaphore timeout is load-dependent — but nothing here proves that.
+- **curl 8.22.0's dotless-cookie behaviour is worked around, not fixed.** The
+  fixture names are correct for the deployed versions; if a future curl
+  changes this again the same class of failure returns, and it would be
+  worth an upstream note.
+- **Nothing pushed.** Commits are local on `ci/3501-base-image-gate`.
