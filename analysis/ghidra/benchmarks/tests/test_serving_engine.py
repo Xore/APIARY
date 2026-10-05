@@ -34,6 +34,7 @@ Run: pytest analysis/ghidra/benchmarks/tests/test_serving_engine.py -q
 """
 
 import argparse
+import contextlib
 import importlib.util
 import inspect
 import io
@@ -313,16 +314,30 @@ class SelectionTest(unittest.TestCase):
         self.assertEqual(len(remote.launches), 1, "an unsupported architecture must not be retried")
         self.assertIn("unsupported model architecture", session.fallback_reason)
 
-    def test_a_genuine_oom_retries_once_with_kv_in_host_ram(self):
+    def test_a_genuine_oom_retries_once_and_the_retry_still_reaches_the_model(self):
+        """The retry survives; only the flag it used to carry is gone.
+
+        A fit-managed load no longer OOMs the way a hand-placed one did, but
+        `start()` still retries a genuine VRAM OOM once, and the retry is worth
+        keeping tested for the reason that matters most: `server_flags()` now
+        ignores `kv_offload`, so the second launch is byte-identical to the
+        first. Whatever the retry now buys is re-asking the same question.
+        Asserted here rather than left implicit -- a silent second identical
+        30-minute load is exactly what the retry rule was written to prevent.
+        """
         remote = FakeRemote(state="exited", log_text="ggml_cuda: cudaMalloc failed: out of memory")
         with mock.patch.object(serving.LlamaCppServer, "_await_ready",
                                side_effect=[RuntimeError("exited"), None]):
             session = make_session(remote)
             start(session)
         self.assertEqual(session.engine, "llama.cpp")
-        self.assertEqual(len(remote.launches), 2)
+        self.assertEqual(len(remote.launches), 2, "one genuine OOM is still retried once")
         self.assertNotIn("--no-kv-offload", remote.flags_of(0))
-        self.assertIn("--no-kv-offload", remote.flags_of(1))
+        self.assertNotIn("--no-kv-offload", remote.flags_of(1))
+        self.assertEqual(
+            remote.flags_of(1), remote.flags_of(0),
+            "kv_offload is ignored, so the retry launches the same command; "
+            "it can only help if the OOM was transient")
         self.assertTrue(session.provenance()["kv_offload_disabled"])
         self.assertIsNone(session.fallback_reason,
                           "a model the retry saved is not a fallback")
@@ -337,7 +352,7 @@ class SelectionTest(unittest.TestCase):
             start(session)
         self.assertEqual(session.engine, "ollama")
         self.assertEqual(len(remote.launches), 2)
-        self.assertIn("--no-kv-offload", remote.flags_of(1))
+        self.assertNotIn("--no-kv-offload", remote.flags_of(1))
         self.assertIn("cudaMalloc failed", session.fallback_reason)
 
     def test_the_retry_happens_after_waiting_for_the_gpu_to_be_free(self):
@@ -784,14 +799,36 @@ class GgufResolutionTest(unittest.TestCase):
 # --- flags -----------------------------------------------------------------
 
 class FlagsTest(unittest.TestCase):
-    def test_the_default_window_and_full_offload_are_on_the_command_line(self):
-        flags = serving.server_flags(24576, kv_offload=False)
-        self.assertEqual(flags[flags.index("-c") + 1], "24576")
-        self.assertEqual(flags[flags.index("-ngl") + 1], "99")
+    def test_fit_ctx_carries_the_window_and_placement_is_left_to_fit(self):
+        """The whole memory policy is `--fit-ctx <num_ctx>`, and nothing else.
 
-    def test_no_kv_offload_is_absent_unless_the_retry_asked_for_it(self):
-        self.assertNotIn("--no-kv-offload", serving.server_flags(24576, kv_offload=False))
-        self.assertIn("--no-kv-offload", serving.server_flags(24576, kv_offload=True))
+        This build defaults to `-ngl auto` and `--fit on`, which let
+        llama-server compute the layer split at startup. Setting `-c` or `-ngl`
+        by hand switches that calculation off -- measured on a 21.7 GB model
+        against a 20475 MiB card, `-c 24576 -ngl 30` crashed the allocator
+        while `--fit-ctx 24576` offloaded 41/42 layers at 74.18 tok/s.
+        """
+        flags = serving.server_flags(24576)
+        self.assertEqual(flags[flags.index("--fit-ctx") + 1], "24576")
+        self.assertNotIn("-c", flags, "-c switches fit's own calculation off")
+        self.assertNotIn("-ngl", flags, "-ngl switches fit's own calculation off")
+
+    def test_no_kv_offload_is_never_emitted(self):
+        """The old retry flag is gone from both branches.
+
+        `--no-kv-offload` moves the KV cache, not model layers, so it cannot
+        help a model larger than the card, and it decoded at 7.4 tok/s. The
+        kwarg is kept only so old call sites keep working, so the pair
+        asserted here is the contract: `kv_offload` changes nothing.
+        """
+        for kv_offload in (False, True):
+            with self.subTest(kv_offload=kv_offload):
+                self.assertNotIn(
+                    "--no-kv-offload", serving.server_flags(24576, kv_offload=kv_offload))
+        self.assertEqual(
+            serving.server_flags(24576, kv_offload=False),
+            serving.server_flags(24576, kv_offload=True),
+            "kv_offload is accepted and ignored, so both call sites get the same argv")
 
     def test_the_configured_window_is_the_one_on_the_wire(self):
         """NUM_CTX must reach llama-server, not just Ollama's options."""
@@ -799,7 +836,8 @@ class FlagsTest(unittest.TestCase):
         session = make_session(remote, num_ctx=evaluate_models.NUM_CTX)
         start(session)
         flags = remote.flags_of(0)
-        self.assertEqual(flags[flags.index("-c") + 1], str(evaluate_models.NUM_CTX))
+        self.assertEqual(flags[flags.index("--fit-ctx") + 1],
+                         str(evaluate_models.NUM_CTX))
 
     def test_the_entrypoint_is_overridden_with_the_absolute_binary(self):
         """The image's ENTRYPOINT is `/app/tools.sh`, a subcommand dispatcher.
@@ -842,6 +880,162 @@ class FlagsTest(unittest.TestCase):
         for index in range(2):
             argv = remote.launches[index]
             self.assertEqual(argv[argv.index("--entrypoint") + 1], serving.LLAMA_BINARY)
+
+
+# --- residency: measured placement, not the flags that asked for it --------
+
+# The real load log of the measured 41/42 run, verbatim. `CPU_Mapped model
+# buffer size` is in it on purpose: that line reports the mmap'd file, appears in
+# a healthy run, and must not be mistaken for a measurement of the card.
+FIT_LOG = (
+    "llama_context: n_ctx                 = 24576\n"
+    "load_tensors: offloaded 41/42 layers to GPU\n"
+    "load_tensors:        CUDA0 model buffer size = 17880.66 MiB\n"
+    "load_tensors:        CPU_Mapped model buffer size = 4231.19 MiB\n"
+    "llama_kv_cache:      CUDA0 KV buffer size =    480.00 MiB\n"
+    "llama_model_load: loaded meta data\n"
+    "main: model loaded\n"
+)
+
+
+def server_for(log_text):
+    return serving.LlamaCppServer(
+        FakeRemote(log_text=log_text), "gemma2:27b",
+        {"gguf": "/g", "gguf_sha256": "abc123"},
+        num_ctx=24576, request_timeout=evaluate_models.request_timeout,
+    )
+
+
+class ResidencyTest(unittest.TestCase):
+    """`residency()` is the record's only source of where the model lives.
+
+    "model loaded" is printed for a CPU-only run exactly as for a GPU one, so
+    the layer line is the only thing that distinguishes them. A flag is a
+    request; a count read out of the log is a measurement.
+    """
+
+    def test_a_partial_fit_log_is_parsed_into_every_field(self):
+        place = server_for(FIT_LOG).residency()
+        self.assertEqual(place["gpu_layers"], 41)
+        self.assertEqual(place["layers_total"], 42)
+        self.assertEqual(place["vram_mib"], 17880.66)
+        self.assertEqual(place["kv_cache_mib"], 480.00)
+        self.assertEqual(place["n_ctx"], 24576)
+        # The intended behaviour for a model larger than the card: 41 in VRAM,
+        # one shed to host RAM. Not a failure state.
+        self.assertIs(place["ram_offloaded"], True)
+
+    def test_a_missing_line_is_none_and_never_a_number(self):
+        """`None` and `0` are different claims.
+
+        An absent line means the measurement is unavailable, not that the card
+        held nothing; a fabricated zero fails a healthy model for the wrong
+        reason, which is the whole reason `_require_gpu_residency()` only acts
+        when the log states a layer count.
+        """
+        place = server_for("llama_model_load: loaded meta data\nmain: model loaded\n").residency()
+        for field in ("gpu_layers", "layers_total", "vram_mib", "kv_cache_mib",
+                      "n_ctx", "ram_offloaded"):
+            with self.subTest(field=field):
+                self.assertIsNone(place[field])
+
+    def test_a_full_offload_is_not_ram_offloaded(self):
+        place = server_for(FIT_LOG.replace("offloaded 41/42", "offloaded 42/42")).residency()
+        self.assertEqual(place["gpu_layers"], 42)
+        self.assertIs(place["ram_offloaded"], False)
+
+    def test_a_cpu_only_load_is_ram_offloaded(self):
+        place = server_for(FIT_LOG.replace("offloaded 41/42", "offloaded 0/42")).residency()
+        self.assertEqual(place["gpu_layers"], 0)
+        self.assertEqual(place["layers_total"], 42)
+        self.assertIs(place["ram_offloaded"], True)
+
+    def test_the_cpu_mapped_line_is_not_the_vram_measurement(self):
+        """It reports the mmap'd file and is present in a healthy 41/42 run."""
+        place = server_for(FIT_LOG).residency()
+        self.assertNotEqual(place["vram_mib"], 4231.19)
+
+
+class GpuResidencyGuardTest(unittest.TestCase):
+    """A grade decoded on the CPU is worthless here, so this is a failure.
+
+    llama-server prints "model loaded" for a CPU-only run exactly as it does
+    for a GPU one, and fit can reach that state by shedding every layer.
+    Partial (41/42) is intended and must not trip the guard.
+    """
+
+    def test_a_cpu_only_load_is_refused(self):
+        server = server_for(FIT_LOG.replace("offloaded 41/42", "offloaded 0/42"))
+        with self.assertRaises(serving.EngineUnavailable) as caught:
+            server._require_gpu_residency()
+        self.assertIn("0/42", str(caught.exception))
+
+    def test_a_partial_offload_is_allowed(self):
+        server_for(FIT_LOG)._require_gpu_residency()  # must not raise
+
+    def test_a_full_offload_is_allowed(self):
+        server_for(FIT_LOG.replace("offloaded 41/42", "offloaded 42/42")
+                   )._require_gpu_residency()  # must not raise
+
+    def test_an_absent_layer_line_passes(self):
+        """Unavailable measurement is not a zero-layer load.
+
+        The guard is on the guard: refusing a model because its server did not
+        print the line would fail healthy models for a formatting reason, on a
+        llama.cpp build that spells it differently.
+        """
+        server_for("main: model loaded\n")._require_gpu_residency()  # must not raise
+
+    def test_a_cpu_only_load_ends_the_session_in_a_fallback(self):
+        """End to end: 0/42 must not reach Ollama, or it silently succeeds.
+
+        `EngineUnavailable` is what `ModelSession.open()` catches to route the
+        model to the fallback, so without the guard a CPU-decoded run would be
+        recorded as an llama.cpp one.
+        """
+        remote = FakeRemote(log_text=FIT_LOG.replace("offloaded 41/42", "offloaded 0/42"))
+        session = make_session(remote)
+        start(session)
+        self.assertEqual(session.engine, "ollama")
+        self.assertIn("0/42 layers in VRAM", session.fallback_reason)
+
+
+class EnginePrintTest(unittest.TestCase):
+    """The fallback clause is gated on `fallback_engine`, not on the name.
+
+    `ENGINE_LLAMACPP` is "llamacpp" while the engine reports "llama.cpp", so a
+    name comparison never matched and every healthy run printed
+    `serving on llama.cpp (llama.cpp unavailable, fell back: None)`. That line
+    is how a whole roster gets judged, so a contradiction in the success path
+    is not cosmetic.
+    """
+
+    def _open(self, remote):
+        def request_json(url, body=None, timeout=None):
+            return {"models": [{"name": "gemma2:27b"}]} if url.endswith("/api/tags") else {}
+
+        args = argparse.Namespace(engine=evaluate_models.ENGINE_LLAMACPP)
+        out = io.StringIO()
+        with mock.patch.object(evaluate_models, "request_json", request_json), \
+             mock.patch.object(serving, "Remote", return_value=remote), \
+             mock.patch.object(serving.LlamaCppServer, "healthy", return_value=True), \
+             contextlib.redirect_stdout(out):
+            evaluate_models.open_session(
+                args, "http://127.0.0.1:11435", "gemma2:27b", 24576)
+        return out.getvalue()
+
+    def test_a_healthy_run_prints_no_fallback_clause(self):
+        printed = self._open(FakeRemote())
+        self.assertIn("engine: serving on llama.cpp", printed)
+        self.assertNotIn("fell back", printed)
+        self.assertNotIn("unavailable", printed)
+
+    def test_a_real_fallback_prints_the_reason(self):
+        remote = FakeRemote(state="exited", log_text="unsupported model architecture")
+        printed = self._open(remote)
+        self.assertIn("engine: serving on ollama", printed)
+        self.assertIn("fell back", printed)
+        self.assertIn("unsupported model architecture", printed)
 
 
 # --- wire translation ------------------------------------------------------
@@ -1220,11 +1414,13 @@ class RecordingTest(unittest.TestCase):
     def test_every_required_fact_is_present(self):
         provenance = self.provenance_for(kv=True)
         for field in ("engine", "flags", "kv_offload_disabled", "fallback_engine",
-                      "fallback_reason", "vram_used_mib", "gguf", "gguf_sha256"):
+                      "fallback_reason", "vram_used_mib", "gguf", "gguf_sha256",
+                      "gpu_layers", "layers_total", "vram_mib", "kv_cache_mib",
+                      "n_ctx", "ram_offloaded"):
             self.assertIn(field, provenance)
         self.assertEqual(provenance["engine"], "llama.cpp")
         self.assertTrue(provenance["kv_offload_disabled"])
-        self.assertIn("--no-kv-offload", provenance["flags"])
+        self.assertNotIn("--no-kv-offload", provenance["flags"])
 
     def test_the_recorded_flags_are_the_flags_that_ran(self):
         """The flags in the record must be the ones on the command line, or a
@@ -1235,7 +1431,7 @@ class RecordingTest(unittest.TestCase):
         provenance = session.provenance()
         self.assertEqual(provenance["flags"], remote.flags_of(0))
         self.assertEqual(
-            provenance["flags"][provenance["flags"].index("-c") + 1], "24576")
+            provenance["flags"][provenance["flags"].index("--fit-ctx") + 1], "24576")
 
     def test_a_no_retry_run_records_that_no_retry_happened(self):
         self.assertIs(self.provenance_for(kv=False)["kv_offload_disabled"], False)
