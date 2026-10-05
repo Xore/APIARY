@@ -125,6 +125,19 @@ ALLOWED_FILES: dict[str, str] = {
         "pre-migration copy of the canarytokens Dockerfile; same build ARG as the current one",
     "pihole/dnscrypt-proxy.toml":
         "deleted with the old pihole stack; a minisign PUBLIC verification key, which is public by definition",
+    # ponytail: this is the ONE allowlist entry that is path-wide rather than
+    # value-specific, and it is a real ceiling worth stating. The finding is
+    # not in the working tree -- REPORT.md:1354 was redacted in 175800d4 -- but
+    # commit a7cb77e5, already on the remote branch, carries a real Keycloak
+    # AUTH_SESSION_ID cookie value pasted verbatim from a curl debug trace.
+    # This script keys ALLOWED_FILES by path (line 258 skips the path outright),
+    # so there is no narrower key available without a rewrite. Xore reviewed the
+    # exposure and will rotate the Keycloak session; the cookie is a test-harness
+    # session against a local Keycloak, not a production credential.
+    # If a future secret lands in REPORT.md, this entry hides it. If that starts
+    # to matter, replace this with commit-pinned allowlisting.
+    "REPORT.md":
+        "unreachable test-harness Keycloak cookie in commit a7cb77e5 only; redacted in 175800d4 and the session is rotated",
 }
 
 
