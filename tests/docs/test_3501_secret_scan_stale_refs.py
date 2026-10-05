@@ -63,9 +63,54 @@ def test_purge_excludes_origin_head_symref():
     """update-ref refuses to delete through a symref, so `origin/HEAD` must be
     excluded or the purge aborts mid-stream on a real runner."""
     step = _secret_scan_step()
-    assert re.search(r"grep -v 'origin/HEAD\$'", step), (
+    assert re.search(r"grep -v -e 'origin/HEAD\$'", step) or \
+        re.search(r"grep -v 'origin/HEAD\$'", step), (
         "the purge must exclude origin/HEAD: update-ref rejects deletes through "
         "a symref, and an aborting purge would leave the gate reading ambient refs"
+    )
+
+
+def test_purge_survives_a_clean_runner_under_pipefail(tmp_path):
+    """A runner with no stale refs must not fail the purge.
+
+    This bit the first cut of the fix: the refs were filtered through
+    `git for-each-ref | grep -v ...`, and under `set -o pipefail` a `grep -v`
+    that selects nothing exits 1. The job then died 17ms into the scan on a
+    perfectly clean runner, printing no error at all -- the exact situation
+    the fix exists to make work. Empty is a valid ref set, so the filter must
+    not be able to fail the step.
+
+    Runs the purge snippet verbatim under the same `set -euo pipefail` the
+    workflow uses, against a clone holding nothing but origin/HEAD and the
+    PR's own merge ref."""
+    step = _secret_scan_step()
+    snippet = re.search(r"(pr_merge_ref=.*?update-ref -d \"\$ref\".*?\n\s*done)",
+                        step, re.S)
+    assert snippet, "purge loop not found verbatim"
+    # The workflow interpolates the PR number; pin it so the excerpt is
+    # runnable bash.
+    script = snippet.group(1).replace("${{ github.event.number }}", "3528")
+
+    repo = tmp_path / "clean"
+    repo.mkdir()
+    run = lambda *a: subprocess.run(a, cwd=repo, check=True, capture_output=True, text=True)
+    run("git", "init", "-q", "-b", "main")
+    (repo / "f.txt").write_text("x\n", encoding="utf-8")
+    run("git", "add", "-A")
+    run("git", "-c", "user.email=t@e", "-c", "user.name=t", "commit", "-qm", "one")
+    sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,
+                         capture_output=True, text=True, check=True).stdout.strip()
+    run("git", "update-ref", "refs/remotes/origin/HEAD", sha)
+    run("git", "update-ref", "refs/remotes/pull/3528/merge", sha)
+
+    result = subprocess.run(
+        ["bash", "-c", "set -euo pipefail\n" + script],
+        cwd=repo, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, (
+        "the purge must exit 0 on a clean runner with nothing to delete; under "
+        f"`set -o pipefail` an unguarded `grep -v` that matches nothing exits 1 "
+        f"and kills the scan:\n{result.stdout}\n{result.stderr}"
     )
 
 
@@ -107,9 +152,10 @@ def test_purge_is_idempotent_and_safe_on_a_clean_clone(tmp_path):
     pull ref, must leave a clean clone's `origin/main` intact, and must be
     safe to run twice."""
     step = _secret_scan_step()
-    snippet = re.search(r"(git for-each-ref --format=.*?update-ref --stdin.*?)(?:\n|$)", step, re.S)
+    snippet = re.search(r"(pr_merge_ref=.*?update-ref -d \"\$ref\".*?\n\s*done)",
+                        step, re.S)
     assert snippet, "purge snippet not found verbatim"
-    script = snippet.group(1)
+    script = snippet.group(1).replace("${{ github.event.number }}", "3528")
 
     repo = tmp_path / "repo"
     repo.mkdir()
