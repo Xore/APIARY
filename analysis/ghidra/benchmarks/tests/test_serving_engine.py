@@ -1265,19 +1265,72 @@ class TranslationTest(unittest.TestCase):
         self.assertEqual(wire["repeat_last_n"], 256)
         self.assertFalse(wire["stream"])
 
-    def test_the_harmony_sampling_reaches_llama_cpp_too(self):
-        """gpt-oss is served by llama.cpp first, so the #2233 adaptation has to
-        travel. Dropping it would reproduce the loop it exists to break."""
-        wire = serving.to_wire({
-            "options": dict(evaluate_models.HARMONY_SAMPLING, num_predict=4096),
-            "messages": [],
-        })
-        self.assertEqual(wire["repeat_penalty"], 1.3)
-        self.assertEqual(wire["repeat_last_n"], 256)
+    def test_the_harmony_path_adds_its_sampling_to_the_request(self):
+        """Dropping the harmony update must not leave a green translation test."""
+        requests = []
+
+        def transport(_url, body):
+            requests.append(body)
+            return {"message": {"content": "complete"}, "done_reason": "stop"}
+
+        evaluate_models.chat(
+            "http://ignored", "gpt-oss:20b", "system", "prompt", 8192,
+            False, evaluate_models.HARMONY_NUM_PREDICT, transport=transport,
+        )
+
+        for key, value in evaluate_models.HARMONY_SAMPLING.items():
+            self.assertEqual(requests[0]["options"][key], value)
 
     def test_json_mode_becomes_a_response_format(self):
         self.assertEqual(serving.to_wire({"format": "json", "messages": []})["response_format"],
                          {"type": "json_object"})
+
+    def test_declared_response_formats_pass_through_untouched(self):
+        for declared in ("json_object", "json_schema", "text"):
+            with self.subTest(declared=declared):
+                spec = {"type": declared, "marker": {"untouched": True}}
+                wire = serving.to_wire({"format": spec, "messages": []})
+                self.assertEqual(wire["response_format"], spec)
+
+    def test_a_keyword_named_property_is_not_treated_as_a_schema_keyword(self):
+        schema = {
+            "type": "object",
+            "properties": {"not": {"type": "string"}},
+        }
+        self.assertEqual(
+            serving.to_wire({"format": schema, "messages": []})["response_format"],
+            {"type": "json_object", "schema": schema},
+        )
+
+    def test_local_refs_resolve_against_the_schema_root(self):
+        for definitions in ("$defs", "definitions"):
+            with self.subTest(definitions=definitions):
+                schema = {
+                    "type": "object",
+                    definitions: {"entry": {"type": "string"}},
+                    "properties": {
+                        "value": {"$ref": f"#/{definitions}/entry"},
+                    },
+                }
+                self.assertEqual(
+                    serving.to_wire({"format": schema, "messages": []})[
+                        "response_format"
+                    ],
+                    {"type": "json_object", "schema": schema},
+                )
+
+    def test_an_unknown_schema_keyword_is_rejected_with_its_reason(self):
+        schema = {"type": "object", "unevaluatedProperties": False}
+        with self.assertRaises(serving.UnsupportedFormat) as caught:
+            serving.to_wire({"format": schema, "messages": []})
+        self.assertIn("keyword", str(caught.exception))
+        self.assertIn("json_schema_to_grammar", str(caught.exception))
+
+    def test_a_non_dict_format_is_rejected_with_its_reason(self):
+        with self.assertRaises(serving.UnsupportedFormat) as caught:
+            serving.to_wire({"format": "peg-native", "messages": []})
+        self.assertIn("str", str(caught.exception))
+        self.assertIn("PEG grammar", str(caught.exception))
 
     def test_the_captured_session_schema_uses_the_accepted_llama_cpp_shape(self):
         captured = LLAMACPP_CAPTURES["sessions-schema-asis"]
