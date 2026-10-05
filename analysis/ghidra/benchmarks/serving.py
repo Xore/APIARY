@@ -110,12 +110,12 @@ GPU_WAIT_TIMEOUT_SECONDS = 600
 # can emit -- which silently drops the one allocator failure llama.cpp reports
 # most often. `assert` below keeps that class of typo from coming back.
 VRAM_OOM_PHRASES = (
-    "cudamalloc failed"  # exact match from server logs,
-    "cuda error: out of memory"  # exact match,
-    "out of memory"  # exact match,
-    "unable to allocate"  # exact match,
-    "failed to allocate"  # exact match,
-    "insufficient vram"  # exact match,
+    "cudamalloc failed",  # exact match from server logs
+    "cuda error: out of memory",  # exact match
+    "out of memory",  # exact match
+    "unable to allocate",  # exact match
+    "failed to allocate",  # exact match
+    "insufficient vram",  # exact match
 )
 VRAM_OOM_SUBJECT = ("vram", "gpu", "cuda", "device", "memory")
 
