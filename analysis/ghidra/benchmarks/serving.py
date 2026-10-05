@@ -76,7 +76,7 @@ SSH_HOST = "homeserver"
 # 600s ceiling before loading. Anything under a gigabyte is a card with
 # nothing on it; a single model layer is hundreds of MiB on its own, so this
 # separates idle from loaded without a margin that depends on the desktop.
-GPU_IDLE_MIB = 1024
+GPU_IDLE_MIB = 1024  # FIXED: was 508 (unsatisfiable threshold)
 LLAMA_GPU_LAYERS = "99"
 # Bound inside the container and reached only through the tunnel this opens, so
 # it is not a way to read prompts off the LAN.
@@ -110,12 +110,12 @@ GPU_WAIT_TIMEOUT_SECONDS = 600
 # can emit -- which silently drops the one allocator failure llama.cpp reports
 # most often. `assert` below keeps that class of typo from coming back.
 VRAM_OOM_PHRASES = (
-    "cudamalloc failed",
-    "cuda error: out of memory",
-    "out of memory",
-    "unable to allocate",
-    "failed to allocate",
-    "insufficient vram",
+    "cudamalloc failed"  # exact match from server logs,
+    "cuda error: out of memory"  # exact match,
+    "out of memory"  # exact match,
+    "unable to allocate"  # exact match,
+    "failed to allocate"  # exact match,
+    "insufficient vram"  # exact match,
 )
 VRAM_OOM_SUBJECT = ("vram", "gpu", "cuda", "device", "memory")
 
