@@ -377,6 +377,11 @@ class RequestBodyTest(unittest.TestCase):
                     "num_ctx": evaluate_models.num_ctx_for(8192),
                     "num_predict": evaluate_models.budget_for("revdeck"),
                     "seed": 144,
+                    # Read the constant rather than repeating it: revdeck is
+                    # scored under its own sampling because at 1.0 the models
+                    # loop instead of terminating. Duplicating the values here
+                    # made this test fail for the right reason and the wrong fix.
+                    **evaluate_models.REVDECK_SAMPLING,
                 },
             }
             for case in evaluate_models.REV_CASES

@@ -2483,6 +2483,10 @@ def missing_capability_reason(
 #     wider anti-repetition window breaks without touching the prompt.
 HARMONY_FAMILY_MARKERS = ("gpt-oss",)
 HARMONY_SAMPLING = {"repeat_last_n": 256, "repeat_penalty": 1.3}
+# The seven revdeck failures on baronllm-llama3.1:q6_k were repetition loops,
+# not missing stop tokens. A 256-token window still let one loop consume all
+# 16,000 tokens; the same seven prompts stopped with this measured window.
+REVDECK_SAMPLING = {"repeat_last_n": 4096, "repeat_penalty": 1.3}
 HARMONY_NUM_PREDICT = 4096
 
 # --- Output budgets, one named constant per slot ---------------------------
@@ -2736,6 +2740,7 @@ def chat(
     parser: Callable[[str], Any] | None = None,
     tools: Sequence[Any] | None = None,
     transport: Callable[..., dict[str, Any]] | None = None,
+    sampling: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Single choke point for every model call, and therefore the only place a
     transcript has to be written. `body` below is the literal request posted to
@@ -2764,6 +2769,7 @@ def chat(
         "keep_alive": "10m",
         "options": {"temperature": 0, "num_ctx": context, "num_predict": num_predict, "seed": 144},
     }
+    body["options"].update(sampling or {})
     # Harmony-served checkpoints (gpt-oss family) break three of the defaults
     # above when reached through Ollama 0.32.x's /api/chat (#2233), so they get
     # a serving adaptation instead of silent null-field scores. Prompts stay
@@ -3281,7 +3287,7 @@ def score_revdeck(
             base_url, model, REV_SYSTEM, case.prompt, num_ctx_for(context), False,
             num_predict=budget_for("revdeck"),
             recorder=recorder, case=case.name, workflow="rev_analysis",
-            transport=transport,
+            transport=transport, sampling=REVDECK_SAMPLING,
         )
         results.append(_score_revdeck_case(case, raw))
     return results
