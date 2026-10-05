@@ -346,10 +346,58 @@ class Reproducibility:
     engine: str | None = None
     kv_offload_disabled: bool | None = None
     fallback_engine: str | None = None
+    # Where the weights physically sat when the tokens were produced, as
+    # measured off llama.cpp's own load log. These are the placement the run
+    # cannot be read without: a 33/33 on-card decode and an 8/33 decode that
+    # spilled to host RAM differ by an order of magnitude in latency at the
+    # same nominal size, so a tokens/second with no placement beside it is not
+    # comparable to one that has it.
+    #
+    # Taken as a group dict so serving.py stays the only place that knows how
+    # they are measured, and named fields here so the key set is still decided
+    # in one place. Every default is None: a record that predates this, and a
+    # run whose log stated nothing, both keep null. A plausible-looking number
+    # invented for a missing measurement is worse than an admitted blank --
+    # a benchmark record that guesses is not a benchmark record.
+    residency: dict[str, Any] | None = None
+
+    _RESIDENCY_FIELDS = (
+        ("gpu_layers", int),
+        ("layers_total", int),
+        ("vram_mib", float),
+        ("kv_cache_mib", float),
+        ("n_ctx", int),
+        ("ram_offloaded", bool),
+    )
 
     def __post_init__(self) -> None:
         if self.tier not in TIERS:
             raise ValueError(f"unknown tier: {self.tier}")
+
+    @classmethod
+    def placement_from(cls, provenance: dict[str, Any] | None) -> dict[str, Any] | None:
+        """The placement keys lifted out of a serving record, or None.
+
+        serving.py merges the measured placement into the provenance dict
+        alongside the other engine facts, so the caller does not have to know
+        that layout -- and does not get to pick the keys, which is what keeps
+        `as_dict()` the one place the shape is decided.
+        """
+        if not provenance:
+            return None
+        measured = {key: provenance.get(key) for key, _type in cls._RESIDENCY_FIELDS}
+        # All-None is the same claim as None, and returning None keeps an
+        # unmeasured run indistinguishable from one that predates the fields.
+        return measured if any(value is not None for value in measured.values()) else None
+
+    def residency_fields(self) -> dict[str, Any]:
+        """The placement keys, flattened, absent ones as None.
+
+        One rule for every caller: a key the measurement did not produce is
+        still emitted, so two rows compared side by side have the same shape.
+        """
+        measured = self.residency or {}
+        return {key: measured.get(key) for key, _type in self._RESIDENCY_FIELDS}
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -362,6 +410,7 @@ class Reproducibility:
             "engine": self.engine,
             "kv_offload_disabled": self.kv_offload_disabled,
             "fallback_engine": self.fallback_engine,
+            **self.residency_fields(),
         }
 
 

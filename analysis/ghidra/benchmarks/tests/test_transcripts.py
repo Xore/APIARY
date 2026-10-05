@@ -216,6 +216,38 @@ class TranscriptWriterTest(unittest.TestCase):
         run = RunMetadata(benchmark="test", started_at="2026-08-25T12:00:00Z", run_id="abcd")
         self.assertEqual(run.directory_name, "2026-08-25-abcd")
 
+    def test_the_placement_keys_are_emitted_and_default_to_none(self):
+        """Six keys, always present, all null unless something measured them.
+
+        Every replayed and rescored record predates the measurement, and a run
+        whose server log said nothing is in the same position. Those stay null:
+        the shape is fixed so two rows compare, and the values are not invented
+        to fill it.
+        """
+        for field in ("gpu_layers", "layers_total", "vram_mib", "kv_cache_mib",
+                      "n_ctx", "ram_offloaded"):
+            with self.subTest(field=field):
+                self.assertIn(field, Reproducibility().as_dict())
+                self.assertIsNone(Reproducibility().as_dict()[field])
+
+    def test_a_measured_placement_is_carried_through_verbatim(self):
+        measured = {"gpu_layers": 41, "layers_total": 42, "vram_mib": 17880.66,
+                    "kv_cache_mib": 480.00, "n_ctx": 24576, "ram_offloaded": True}
+        stored = Reproducibility(residency=measured).as_dict()
+        for field, value in measured.items():
+            with self.subTest(field=field):
+                self.assertEqual(stored[field], value)
+
+    def test_a_partial_measurement_leaves_the_rest_null(self):
+        """A server that printed only the layer line is a real run state, and
+        the fields it did not print are absent rather than zero."""
+        stored = Reproducibility(
+            residency={"gpu_layers": 33, "layers_total": 33, "ram_offloaded": False}
+        ).as_dict()
+        self.assertEqual(stored["gpu_layers"], 33)
+        self.assertIsNone(stored["vram_mib"])
+        self.assertIsNone(stored["n_ctx"])
+
 
 class SlotRecorderTest(unittest.TestCase):
     def test_no_writer_is_a_silent_no_op(self):
