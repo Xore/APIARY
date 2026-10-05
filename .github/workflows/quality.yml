@@ -2068,6 +2068,9 @@ jobs:
           # still a credential, and this is the gate that sees it.
           - name: "Full-history secret scan (gitleaks, #3501)"
             home: true
+            env:
+              # #3314 zizmor: never expand a ${{ }} into a run: body.
+              PR_MERGE_REF: ${{ github.event.number }}
             run: |
               set -euo pipefail
               # The scan's entire claim is FULL history, and actions/checkout
@@ -2101,7 +2104,12 @@ jobs:
               # error. origin/HEAD stays because update-ref refuses deletes
               # through a symref, and this PR's own merge ref stays because it
               # is the ref the job just checked out.
-              pr_merge_ref="refs/remotes/pull/${{ github.event.number }}/merge"
+              #
+              # PR_MERGE_REF comes in via env, not inline: zizmor blocks
+              # template-injection (a ${{ }} expanding into a run: body), and
+              # #3314 gates on it. An env: value is a string, not a shell
+              # fragment, so nothing is expanded into the script.
+              pr_merge_ref="refs/remotes/pull/${PR_MERGE_REF}/merge"
               stale_refs="$(git for-each-ref --format='%(refname)' refs/remotes \
                 | grep -v -e 'origin/HEAD$' -e "^${pr_merge_ref}$" || true)"
               for ref in $stale_refs; do

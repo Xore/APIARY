@@ -89,7 +89,7 @@ def test_purge_survives_a_clean_runner_under_pipefail(tmp_path):
     assert snippet, "purge loop not found verbatim"
     # The workflow interpolates the PR number; pin it so the excerpt is
     # runnable bash.
-    script = snippet.group(1).replace("${{ github.event.number }}", "3528")
+    script = "PR_MERGE_REF=3528\nexport PR_MERGE_REF\n" + snippet.group(1)
 
     repo = tmp_path / "clean"
     repo.mkdir()
@@ -155,7 +155,7 @@ def test_purge_is_idempotent_and_safe_on_a_clean_clone(tmp_path):
     snippet = re.search(r"(pr_merge_ref=.*?update-ref -d \"\$ref\".*?\n\s*done)",
                         step, re.S)
     assert snippet, "purge snippet not found verbatim"
-    script = snippet.group(1).replace("${{ github.event.number }}", "3528")
+    script = "PR_MERGE_REF=3528\nexport PR_MERGE_REF\n" + snippet.group(1)
 
     repo = tmp_path / "repo"
     repo.mkdir()
