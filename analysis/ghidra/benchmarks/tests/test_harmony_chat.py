@@ -191,11 +191,31 @@ class TestHarmonyFloorCannotExceedTheDeclaredBudget(unittest.TestCase):
         under the floor would look like. No slot is under it today (all four are
         16000), so the guard has no committed manifest to fire on -- and a guard
         that only fires when some slot happens to be configured low is not one.
+
+        The session is passed in, already on the Ollama transport. Left to build
+        its own, evaluate_slot() opens a ModelSession, and `gpt-oss:20b` is a tag
+        the real GPU host does have a manifest for, so it resolves a GGUF over
+        ssh and starts a llama.cpp server -- a 600s `wait_for_gpu` poll against
+        a card this test never asked about. The stub transport only covers the
+        four /api/* endpoints; the engine talks to docker and ssh, which nothing
+        here intercepts. `session=` is the documented way to drive a slot with no
+        model, GPU and no network, and pinning `transport` makes `owns_session`
+        false, so no `open()` runs. Sibling tests get away without it only
+        because their tags resolve to nothing.
         """
         import test_truncation_outcome as truncation
 
         bodies = truncation.stub_transport(
             self, "{}", "stop", module=evaluate_models, tag="gpt-oss:20b")
+        session = evaluate_models.ModelSession(
+            "gpt-oss:20b", "http://ollama",
+            num_ctx=8192,
+            request_json=evaluate_models.request_json,
+            request_timeout=300,
+        )
+        session.engine, session.fallback_engine = "ollama", None
+        session.transport = evaluate_models.serving_ollama_transport(
+            "http://ollama", evaluate_models.request_json)
         original = evaluate_models.OUTPUT_BUDGETS["sessions"]
         evaluate_models.OUTPUT_BUDGETS["sessions"] = (
             evaluate_models.HARMONY_NUM_PREDICT - 512)
@@ -203,6 +223,7 @@ class TestHarmonyFloorCannotExceedTheDeclaredBudget(unittest.TestCase):
             result = evaluate_models.evaluate_slot(
                 "http://ollama", "sessions", "gpt-oss:20b",
                 evaluate_models.qualification_request("sessions", 8192),
+                session=session,
             )
         finally:
             evaluate_models.OUTPUT_BUDGETS["sessions"] = original

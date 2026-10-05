@@ -173,7 +173,11 @@ def start(session, healthy=True):
 
 def make_session(remote, model="gemma2:27b", **kwargs):
     kwargs.setdefault("num_ctx", 24576)
-    kwargs.setdefault("request_json", lambda *a, **k: {})
+    # `/api/tags` is read on the llama.cpp path, to resolve the tag the manifest
+    # filename is made of, so the stub answers it the way the real server does
+    # for a model that is installed: listing that model by its own `name:tag`.
+    kwargs.setdefault("request_json",
+                      lambda *a, **k: {"models": [{"name": model}]})
     kwargs.setdefault("request_timeout", lambda body: 300)
     return serving.ModelSession(model, "http://127.0.0.1:11435", remote=remote, **kwargs)
 
@@ -374,8 +378,14 @@ class SelectionTest(unittest.TestCase):
         session = make_session(remote, request_json=request_json)
         start(session)
         session.transport(f"{session.base_url}/api/chat", {"model": "gemma2:27b"})
-        self.assertEqual(posted[0][0], "http://127.0.0.1:11435/api/chat")
-        self.assertEqual(posted[0][1], {"model": "gemma2:27b"})
+        # The llama.cpp start reads `/api/tags` to resolve the tag the manifest
+        # filename is made of, so the chat call is picked out rather than assumed
+        # to be the first thing posted: what is under test is that the *chat*
+        # body is the one Ollama always got, unchanged.
+        chat = [call for call in posted if call[0].endswith("/api/chat")]
+        self.assertEqual(len(chat), 1)
+        self.assertEqual(chat[0][0], "http://127.0.0.1:11435/api/chat")
+        self.assertEqual(chat[0][1], {"model": "gemma2:27b"})
 
     def test_a_failed_load_is_the_only_thing_that_ever_routes_to_ollama(self):
         """Recorded, not inferred. The fallback reason must name what happened."""
@@ -411,21 +421,221 @@ class GgufResolutionTest(unittest.TestCase):
     def test_both_manifest_namespaces_resolve(self):
         """`registry.ollama.ai/library/...` and `hf.co/...` are both in use here."""
         self.assertEqual(
-            serving.manifest_path("gemma2:27b"),
-            "/root/.ollama/models/manifests/registry.ollama.ai/library/gemma2:27b",
+            serving.manifest_path("gemma2:27b", OLLAMA_TAGS),
+            "/root/.ollama/models/manifests/registry.ollama.ai/library/gemma2/27b",
         )
         self.assertEqual(
-            serving.manifest_path("hf.co/org/repo:Q4_K_M"),
-            "/root/.ollama/models/manifests/hf.co/org/repo:Q4_K_M",
+            serving.manifest_path("hf.co/org/repo:Q4_K_M", OLLAMA_TAGS),
+            "/root/.ollama/models/manifests/hf.co/org/repo/Q4_K_M",
         )
 
-    def test_an_untagged_name_resolves_the_way_ollama_resolves_it(self):
+    # --- the on-disk layout, asserted against the box and not against us ---
+    # Every expected string below is a path read off the host, not a path this
+    # module produced and then agreed with itself about. The previous suite
+    # asserted `registry.ollama.ai/library/gemma2:27b` -- a `:` inside a filename,
+    # which is not a shape Ollama has ever stored -- and passed 651 tests while
+    # llama.cpp had never once loaded a model.
+
+    ON_DISK_PATHS = (
+        # (name as written, manifest read by /api/tags for it, exact path)
+        ("gemma2", "gemma2:27b",
+         "/root/.ollama/models/manifests/registry.ollama.ai/library/gemma2/27b"),
+        ("qwen3-8-27b-q4km", "qwen3-8-27b-q4km:latest",
+         "/root/.ollama/models/manifests/registry.ollama.ai/library/"
+         "qwen3-8-27b-q4km/latest"),
+        ("qwen3", "qwen3:14b",
+         "/root/.ollama/models/manifests/registry.ollama.ai/library/qwen3/14b"),
+        ("deephat-v1-7b-heretic-abliterated-fixed",
+         "deephat-v1-7b-heretic-abliterated-fixed:q4_k_s",
+         "/root/.ollama/models/manifests/registry.ollama.ai/library/"
+         "deephat-v1-7b-heretic-abliterated-fixed/q4_k_s"),
+        ("ravenx-cyberagent-35b", "ravenx-cyberagent-35b:Q4_K_M",
+         "/root/.ollama/models/manifests/registry.ollama.ai/library/"
+         "ravenx-cyberagent-35b/Q4_K_M"),
+        ("hf.co/mradermacher/DeepHat-V1-7B-GGUF", "hf.co/mradermacher/DeepHat-V1-7B-GGUF:Q4_K_M",
+         "/root/.ollama/models/manifests/hf.co/mradermacher/DeepHat-V1-7B-GGUF/Q4_K_M"),
+        ("hf.co/mradermacher/DeepHat-V1-7B-Heretic-Abliterated-i1-GGUF",
+         "hf.co/mradermacher/DeepHat-V1-7B-Heretic-Abliterated-i1-GGUF:i1-Q4_K_S",
+         "/root/.ollama/models/manifests/hf.co/mradermacher/"
+         "DeepHat-V1-7B-Heretic-Abliterated-i1-GGUF/i1-Q4_K_S"),
+    )
+
+    def test_the_paths_match_the_layout_found_on_the_box(self):
+        """Character for character, mixed case and quant separators intact.
+
+        `Q4_K_M`, `q4_k_s` and `i1-Q4_K_S` are copied as the model was created.
+        Case-folding them produces a filename that does not exist, which is the
+        same class of failure as the `:` -- so the assertion pins the case, not
+        just the shape.
+        """
+        for written, reported, expected in self.ON_DISK_PATHS:
+            tags = [{"name": reported}]
+            with self.subTest(model=written):
+                self.assertEqual(
+                    serving.manifest_path(written, tags), expected,
+                    "the server's spelling must win")
+                # The caller's own fully-written tag reaches the same file.
+                self.assertEqual(serving.manifest_path(reported, tags), expected)
+
+    def test_a_fully_qualified_name_round_trips_through_its_own_output(self):
+        """The tag-list spelling fed back in, unchanged.
+
+        The seven paths above are asserted as literal strings, so nothing in
+        them exercises `manifest_path`'s own parsing -- they are a table the
+        function is checked against, not a round trip. This closes that: each
+        name the live `/api/tags` reports (185 tags, checked live on this box,
+        `curl http://127.0.0.1:11435/api/tags`) goes in and comes out as the
+        same file, split on the `:` that sits after the last `/`.
+
+        Both spellings of every entry are covered, because they are the two
+        callers there are. `resolve_gguf()` is handed whatever the manifest
+        wrote -- often short -- while `ModelSession._start_llama_cpp()` reads the
+        tag list and hands it the fully qualified form. A parser that fixed one
+        and not the other would be caught here and nowhere else.
+
+        These are the shapes that break it, taken from what this host reports:
+
+        - `hf.co/org/repo:Q4_K_M` -- a `:` after the last `/`, so a split on the
+          first `/`, or on the last `:`, lands on the wrong place;
+        - `qwen3-8-27b-q4km:latest` -- a bare library tag that needs the
+          `registry.ollama.ai/library/` namespace;
+        - `keep/<built-name>:src` -- a namespace of its own, added as-is;
+        - quantisations with a dash (`i1-Q4_K_S`), a dot (`f16`), and mixed
+          case (`Q4_K_M` vs `q4_k_s`), none of which may be case-folded.
+        """
+        live = [
+            # (as /api/tags reports it, as a manifest may write it, exact path)
+            ("qwen3-8-27b-q4km:latest", "qwen3-8-27b-q4km",
+             "/root/.ollama/models/manifests/registry.ollama.ai/library/"
+             "qwen3-8-27b-q4km/latest"),
+            ("hf.co/huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF:"
+             "Huihui-Qwen3.8-27B-abliterated-UD-DW-Q4_K_M",
+             "hf.co/huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF",
+             "/root/.ollama/models/manifests/hf.co/huihui-ai/"
+             "Huihui-Qwen3.8-27B-abliterated-GGUF/"
+             "Huihui-Qwen3.8-27B-abliterated-UD-DW-Q4_K_M"),
+            ("hf.co/mradermacher/DeepHat-V1-7B-Heretic-Abliterated-GGUF:"
+             "i1-Q4_K_S",
+             "hf.co/mradermacher/DeepHat-V1-7B-Heretic-Abliterated-GGUF",
+             "/root/.ollama/models/manifests/hf.co/mradermacher/"
+             "DeepHat-V1-7B-Heretic-Abliterated-GGUF/i1-Q4_K_S"),
+            ("hf.co/mradermacher/Colibri_8b_v0.1-GGUF:f16",
+             "hf.co/mradermacher/Colibri_8b_v0.1-GGUF",
+             "/root/.ollama/models/manifests/hf.co/mradermacher/"
+             "Colibri_8b_v0.1-GGUF/f16"),
+            ("keep/rex86-merged_q8_0:src", "keep/rex86-merged_q8_0",
+             "/root/.ollama/models/manifests/keep/rex86-merged_q8_0/src"),
+            ("gemma2:27b", "gemma2",
+             "/root/.ollama/models/manifests/registry.ollama.ai/library/"
+             "gemma2/27b"),
+            ("qwen2.5-coder-7b-base:q4_k_m", "qwen2.5-coder-7b-base",
+             "/root/.ollama/models/manifests/registry.ollama.ai/library/"
+             "qwen2.5-coder-7b-base/q4_k_m"),
+        ]
+        for reported, written, expected in live:
+            tags = [{"name": reported}]
+            with self.subTest(reported=reported):
+                # What /api/tags said, fed straight back in.
+                self.assertEqual(serving.manifest_path(reported, tags), expected)
+                # What a manifest wrote, resolved out of that tag list.
+                self.assertEqual(serving.manifest_path(written, tags), expected)
+                # And the output is itself a valid input: the split it performs
+                # has to be reproducible on the string it produced, or the
+                # function is not idempotent and a caller that passes a
+                # resolved path back gets a different file.
+                self.assertEqual(
+                    serving.manifest_path(reported, tags),
+                    serving.manifest_path(reported, [{"name": reported}]),
+                )
+                # The tag really is a segment of its own, so no caller can read
+                # the `:` as part of a filename.
+                self.assertNotIn(":", expected.rsplit("/", 1)[-1])
+
+    def test_a_fully_qualified_name_is_used_as_it_stands(self):
+        """`registry.ollama.ai/library/...` in, `registry.ollama.ai/library/...`
+        out -- no prefix added, nothing stripped, case intact.
+
+        Whether this host's `/api/tags` answers short (`gemma2:27b`) or fully
+        qualified (`registry.ollama.ai/library/gemma2:27b`) is a property of the
+        Ollama build, not of this code, and this box cannot be read from here to
+        settle it. Both are therefore answered rather than assumed: a bare name
+        that the tag list misses is refused (below), and a qualified one is used
+        verbatim.
+        """
+        self.assertEqual(
+            serving.manifest_path(
+                "registry.ollama.ai/library/gemma2:27b",
+                [{"name": "registry.ollama.ai/library/gemma2:27b"}]),
+            "/root/.ollama/models/manifests/registry.ollama.ai/library/gemma2/27b",
+        )
+
+    def test_a_bare_name_the_tag_list_does_not_carry_is_refused(self):
+        """Not quietly turned into `.../library/<name>/latest`.
+
+        If the tag list carries only the qualified spelling, a bare name does not
+        resolve, and the only way to produce a path from it would be to assume
+        both the `library/` namespace and the `latest` filename. The first is a
+        default this function is allowed to apply; the second is a guess, and a
+        guess here becomes an `OSError` filed as `fallback_reason`. Refusing
+        sends the reader to the roster spelling instead.
+        """
+        qualified = [{"name": "registry.ollama.ai/library/gemma2:27b"}]
+        with self.assertRaises(serving.UnresolvableModel):
+            serving.manifest_path("gemma2", qualified)
+
+    def test_no_returned_path_is_a_filename_containing_a_colon(self):
+        """The failure signal for the whole class: a `:` after the last `/`.
+
+        Ollama's manifests are 115 files with zero directory-style entries, so
+        any returned path whose final component carries a `:` is not a shape this
+        host has ever stored. Checked across every name and tag shape this
+        function accepts, so the invariant does not have to be re-argued each
+        time a namespace is added.
+        """
+        # Every name shape that reaches here: both namespaces, the qualified
+        # form /api/tags reports, tags with mixed case, dashes and underscores,
+        # and the bare names that have to be resolved out of the tag list.
+        names = ["gemma2:27b", "qwen3-8-27b-q4km:latest", "qwen3:14b",
+                 "hf.co/mradermacher/DeepHat-V1-7B-GGUF:Q4_K_M",
+                 "hf.co/mradermacher/DeepHat-V1-7B-Heretic-Abliterated-i1-GGUF:i1-Q4_K_S",
+                 "ravenx-cyberagent-35b:Q4_K_M",
+                 "deephat-v1-7b-heretic-abliterated-fixed:q4_k_s",
+                 "registry.ollama.ai/library/qwen3:14b",
+                 "gemma2", "qwen3-8-27b-q4km"]
+        tags = [{"name": reported} for _w, reported, _p in self.ON_DISK_PATHS]
+        root = "/root/.ollama/models/manifests/"
+        for name in names:
+            with self.subTest(model=name):
+                path = serving.manifest_path(name, tags)
+                self.assertNotIn(":", path.rsplit("/", 1)[-1],
+                                 f"{path!r} names a file that cannot exist")
+                self.assertTrue(path.startswith(root), path)
+                # The tag is a segment of its own: the whole path is the
+                # manifests root, the repo the server reported, and the tag --
+                # one segment each, no `:` gluing the last two together.
+                resolved = path[len(root):].split("/")
+                repo = path[len(root):].rsplit("/", 1)[0]
+                self.assertEqual(
+                    len(path.split("/")) - len(root.rstrip("/").split("/")),
+                    len(repo.split("/")) + 1, path)
+                self.assertEqual(resolved[-1], path.rsplit("/", 1)[-1])
+                # And it is a file, not a directory-shaped manifest: on this
+                # host there are 115 of them and zero directories.
+                self.assertNotEqual(resolved[-1], resolved[-2], path)
+
+    def test_an_untagged_name_resolves_from_the_server_not_from_a_default(self):
         """Bug 1: `qwen3-8-27b-q4km` is how Ollama *reports* nothing wrong with.
 
         Every library tag on this roster is written without one, so the old
         parser raised `ValueError: model tag has no tag part` on most of the
         roster -- and `ModelSession.open()` caught it and fell back to Ollama,
         so the run reported success having never loaded a GGUF.
+
+        The tag is now read from `/api/tags` rather than assumed, because
+        `:latest` is a coincidence of this roster, not a rule: the manifests on
+        disk are `<repo>/<tag>` where the tag is a quantisation
+        (`ravenx-cyberagent-35b/Q4_K_M`), so a default that happened to be
+        right here would be wrong the first time an `hf.co/` repo is served.
 
         Asserted against the exact string Ollama's `/api/tags` returns for the
         model in the smoke manifest (`/tmp/smoke-manifest.json`,
@@ -435,24 +645,55 @@ class GgufResolutionTest(unittest.TestCase):
         """
         reported_by_ollama = "qwen3-8-27b-q4km:latest"
         from_manifest = "qwen3-8-27b-q4km"
+        tags = [{"name": reported_by_ollama}]
 
-        self.assertEqual(serving.with_default_tag(from_manifest), reported_by_ollama)
         # Both spellings must land on the same file, not merely both succeed.
         self.assertEqual(
-            serving.manifest_path(from_manifest),
-            serving.manifest_path(reported_by_ollama),
+            serving.manifest_path(from_manifest, tags),
+            serving.manifest_path(reported_by_ollama, tags),
         )
         self.assertEqual(
-            serving.manifest_path(from_manifest),
+            serving.manifest_path(from_manifest, tags),
             "/root/.ollama/models/manifests/registry.ollama.ai/library/"
-            "qwen3-8-27b-q4km:latest",
+            "qwen3-8-27b-q4km/latest",
         )
 
-    def test_a_namespaced_untagged_name_also_defaults(self):
-        """Ollama's rule is the same whichever namespace the name is in."""
+    def test_an_untagged_name_with_nothing_to_resolve_it_from_is_refused(self):
+        """`hf.co/org/repo` is not `hf.co/org/repo:latest`.
+
+        There is no such manifest: the files under `hf.co/<org>/<repo>` are named
+        after the quantisation. Inventing `:latest` here produces a path that
+        cannot exist, and the resulting `OSError` is caught by `open()` and filed
+        as `fallback_reason` -- a server problem on the record for what is a
+        missing tag in a manifest. Raised as `UnresolvableModel` instead, which
+        `open()` deliberately lets escape rather than fall back.
+        """
+        with self.assertRaises(serving.UnresolvableModel):
+            serving.manifest_path("hf.co/org/repo")
+        with self.assertRaises(serving.UnresolvableModel):
+            serving.manifest_path("gemma2", [])
+
+    def test_an_ambiguous_bare_name_is_refused_rather_than_guessed(self):
+        """`:latest` and `:q5` both match a bare name; neither is the answer."""
+        both = [{"name": "qwen3-8-27b-q4km:latest"}, {"name": "qwen3-8-27b-q4km:q5"}]
+        with self.assertRaises(serving.UnresolvableModel):
+            serving.manifest_path("qwen3-8-27b-q4km", both)
+
+    def test_a_full_tag_survives_when_the_server_does_not_list_the_model(self):
+        """The server is authoritative, not mandatory.
+
+        `/api/tags` can be unreadable or simply not list a model that is
+        installed; the caller's own `:tag` is then the only tag there is, and
+        refusing it would trade a working run for a loud one. This is the same
+        rule `canonical_tag` already documents for `/api/show` and `/api/ps`.
+        """
         self.assertEqual(
-            serving.manifest_path("hf.co/org/repo"),
-            "/root/.ollama/models/manifests/hf.co/org/repo:latest",
+            serving.manifest_path("gemma2:27b", []),
+            "/root/.ollama/models/manifests/registry.ollama.ai/library/gemma2/27b",
+        )
+        self.assertEqual(
+            serving.manifest_path("hf.co/org/repo:Q4_K_M", []),
+            "/root/.ollama/models/manifests/hf.co/org/repo/Q4_K_M",
         )
 
     def test_only_a_name_that_names_nothing_is_refused(self):
@@ -466,6 +707,47 @@ class GgufResolutionTest(unittest.TestCase):
             with self.subTest(model=junk):
                 with self.assertRaises(serving.UnresolvableModel):
                     serving.manifest_path(junk)
+
+    def test_an_untagged_name_never_produces_a_path_and_a_fallback_reason(self):
+        """The failure mode being eliminated, at the level it is observable.
+
+        A bare name with nothing to resolve it from used to become
+        `.../qwen3-8-27b-q4km:latest`, an `OSError` reading it, and a
+        `fallback_reason` naming a path -- which reads like llama.cpp declining a
+        model it could have served. Now the read never happens: the name raises
+        `UnresolvableModel` out of `open()` and the container is never asked.
+        """
+        remote = FakeRemote()
+        session = make_session(remote, model="qwen3-8-27b-q4km",
+                               request_json=lambda *a, **k: {"models": []})
+        with self.assertRaises(serving.UnresolvableModel):
+            start(session)
+        self.assertEqual(remote.reads, [])
+        self.assertEqual(remote.launches, [])
+        self.assertIsNone(session.fallback_reason)
+        self.assertIsNone(session.transport)
+
+    def test_the_tags_are_read_once_per_session_and_before_the_container(self):
+        """One `/api/tags` per session, and no container before it has answered.
+
+        The read is what turns a human's model name into a filename, so a
+        container started before it would be launched against a guess. Ordering
+        is the whole assertion; the count only guards against a second read per
+        start attempt, which would show up as a double read on the KV retry.
+        """
+        urls = []
+
+        def request_json(url, body=None, timeout=None):
+            urls.append(url)
+            return {"models": [{"name": "gemma2:27b"}]}
+
+        remote = FakeRemote()
+        session = make_session(remote, model="gemma2", request_json=request_json)
+        start(session)
+        self.assertEqual(urls, ["http://127.0.0.1:11435/api/tags"])
+        self.assertEqual(
+            remote.reads,
+            ["/root/.ollama/models/manifests/registry.ollama.ai/library/gemma2/27b"])
 
     def test_an_unresolvable_name_stops_the_run_instead_of_falling_back(self):
         """The regression that produced a run that "succeeded" on the fallback.
@@ -1358,7 +1640,7 @@ class CanonicalNameTest(unittest.TestCase):
         self.assertEqual(
             remote.reads,
             ["/root/.ollama/models/manifests/registry.ollama.ai/library/"
-             "qwen3-8-27b-q4km:latest"],
+             "qwen3-8-27b-q4km/latest"],
         )
         self.assertEqual(session.engine, "llama.cpp")
 
@@ -1384,7 +1666,7 @@ class CanonicalNameTest(unittest.TestCase):
         self.assertEqual(
             remote.reads,
             ["/root/.ollama/models/manifests/registry.ollama.ai/library/"
-             "qwen3-8-27b-q4km:latest"],
+             "qwen3-8-27b-q4km/latest"],
         )
 
 
