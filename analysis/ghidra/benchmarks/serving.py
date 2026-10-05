@@ -580,6 +580,9 @@ class LlamaCppServer:
         self.vram_oom_first_attempt = False
         self.gpu_wait: dict[str, Any] = {}
         self.started_at: str | None = None
+        # Measured placement, taken the one time the container can still be read.
+        # See residency().
+        self._residency: dict[str, Any] | None = None
         # Published, because the record has to name the URL that answered. The
         # Ollama endpoint the operator configured is a different server and is
         # never this one.
@@ -815,25 +818,71 @@ class LlamaCppServer:
         a request, and copying the requested `-ngl` into a field named
         "layers in VRAM" would be a guess dressed as a fact.
 
+        There are several of those lines in one log, not one. Fit loads a
+        throwaway probe model to measure device memory before the real weights,
+        and the probe prints its own placement:
+
+            common_params_fit_impl: getting device memory data for initial parameters:
+            load_tensors: offloaded 42/42 layers to GPU
+            load_tensors:        CUDA0 model buffer size =     0.00 MiB
+            ...
+            load_tensors: offloaded  1/42 layers to GPU
+            ...
+            load_tensors: offloaded 0/42 layers to GPU      <- the real placement
+
+        Only the last one describes the model that serves, so that is the one
+        read, along with the buffer sizes printed after it. The count alone is
+        not enough either: it is emitted before allocation, so the probe reads
+        `42/42` next to `0.00 MiB`. A count that a zero-sized buffer contradicts
+        is reported as zero layers -- nothing reached the card.
+
         Ignore `CPU_Mapped model buffer size`: it reports the mmap'd file and
         appears in a healthy 41/42 run too, so its presence means nothing.
+
+        The measurement is cached on first read, because the log only exists
+        while the container does. `provenance()` is called from `close()` and
+        read again by the report after `teardown()` has removed the container,
+        and a re-read there returns an empty log -- which is how 28 records came
+        to carry `gpu_layers: null` next to an engine that had plainly
+        offloaded to the card. So the first read wins, and only a caller with no
+        snapshot yet gets a live one.
         """
+        if self._residency is not None:
+            return self._residency
         text = self.server_log(lines=400)
-        layers = re.search(r"offloaded (\d+)/(\d+) layers", text)
-        vram = re.search(r"CUDA0 model buffer size = ([\d.]+) MiB", text)
-        kv = re.search(r"CUDA0 KV buffer size =\s*([\d.]+) MiB", text)
+        # One process prints several `offloaded N/M` lines. Before the real
+        # weights, fit loads a throwaway probe model to measure device memory
+        # and logs ITS placement -- `42/42` beside `CUDA0 model buffer size =
+        # 0.00 MiB`, because the count is printed before allocation. Only the
+        # last placement is the model that serves, so everything is read from
+        # the tail that starts there: the last placement, and the buffer sizes
+        # printed after it. Taking the first match reads the probe, and a
+        # CPU-only run is then recorded as a full GPU offload.
+        placements = list(re.finditer(r"offloaded (\d+)/(\d+) layers", text))
+        layers = placements[-1] if placements else None
+        final = text[layers.start():] if layers else text
+        vram = re.search(r"CUDA0 model buffer size = ([\d.]+) MiB", final)
+        kv = re.search(r"CUDA0 KV buffer size =\s*([\d.]+) MiB", final)
         ctx = re.search(r"n_ctx\s*=\s*(\d+)", text)
         in_vram, total = (int(layers.group(1)), int(layers.group(2))) if layers else (None, None)
-        return {
+        vram_mib = float(vram.group(1)) if vram else None
+        # A non-zero count next to a zero-sized buffer is the probe's number,
+        # not a placement: nothing was allocated on the card, so the honest
+        # reading of the final load is zero layers. Only an absent line stays
+        # `None` -- unavailable is not the same claim as empty.
+        if in_vram and vram_mib == 0.0:
+            in_vram = 0
+        self._residency = {
             "gpu_layers": in_vram,
             "layers_total": total,
-            "vram_mib": float(vram.group(1)) if vram else None,
+            "vram_mib": vram_mib,
             "kv_cache_mib": float(kv.group(1)) if kv else None,
             "n_ctx": int(ctx.group(1)) if ctx else None,
             # True when fit had to leave model layers in RAM, which is the
             # intended behaviour for a model larger than the card.
             "ram_offloaded": None if in_vram is None or not total else in_vram < total,
         }
+        return self._residency
 
     def teardown(self) -> None:
         self.remote.close()
@@ -1138,6 +1187,11 @@ class ModelSession:
                 "image": None, "binary": None, "gguf": None, "gguf_sha256": None,
                 "flags": None, "kv_offload_disabled": False,
                 "vram_oom_on_first_attempt": False, "gpu_wait": {}, "started_at": None,
+                # Unmeasured, and stated as such rather than left absent: the
+                # shape of a serving record cannot depend on which branch filled
+                # it in.
+                "gpu_layers": None, "layers_total": None, "vram_mib": None,
+                "kv_cache_mib": None, "n_ctx": None, "ram_offloaded": None,
             })
         record["engine"] = self.engine
         record["fallback_engine"] = self.fallback_engine
