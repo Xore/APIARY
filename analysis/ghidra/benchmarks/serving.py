@@ -48,6 +48,7 @@ would be exactly the un-stubable global this suite avoids.
 from __future__ import annotations
 
 import json
+import re
 import socket
 import subprocess
 import time
@@ -139,22 +140,33 @@ def is_vram_oom(text: str | None) -> bool:
     )
 
 
-def server_flags(num_ctx: int, *, kv_offload: bool) -> list[str]:
-    """The llama-server argv tail, KV placement included.
+def server_flags(num_ctx: int, *, kv_offload: bool = False) -> list[str]:
+    """The llama-server argv tail, placement decided by fit.
 
-    `--no-kv-offload` appears for exactly one reason: the load OOMed. There is no
-    per-run configuration for it, because a flag an operator sets by hand is a
-    flag that quietly diverges from what the record says ran.
+    One argument carries the memory policy: `--fit-ctx`. This build defaults to
+    `-ngl auto` and `--fit on`, which together let llama-server compute at
+    startup how many model layers fit in VRAM, offload exactly those and leave
+    the rest in system RAM. Setting `-ngl` or `-c` explicitly switches that
+    calculation OFF, which is why this function passes neither.
+
+    `--fit-ctx` rather than `-c`: the default context is 262144, and with only
+    `-c` absent fit shrinks it to 4096 to make room. `--fit-ctx` is the floor it
+    may not go below, so the slot keeps the context it was budgeted.
+
+    Measured on a 21.7 GB model against a 20475 MiB card: `--fit-ctx 24576`
+    offloaded 41/42 layers (CUDA0 17880.66 MiB) and decoded at 74.18 tok/s. The
+    hand-tuned `-c 24576 -ngl 28` managed 33.62 tok/s, and `-ngl 30` OOMed.
+
+    `kv_offload` is retained only so the old call sites keep working; it no
+    longer emits a flag. `--no-kv-offload` moves the KV cache, not model layers,
+    so it cannot help a model larger than the card, and it decoded at 7.4 tok/s.
     """
-    flags = [
-        "-ngl", LLAMA_GPU_LAYERS,
-        "-c", str(num_ctx),
+    del kv_offload  # the KV axis is not the one we need; fit owns placement
+    return [
+        "--fit-ctx", str(num_ctx),
         "--host", "0.0.0.0",
         "--port", str(LLAMA_CONTAINER_PORT),
     ]
-    if kv_offload:
-        flags.append("--no-kv-offload")
-    return flags
 
 
 # --- Remote plumbing -------------------------------------------------------
@@ -645,6 +657,33 @@ class LlamaCppServer:
         # on -- which is the same claim "the fallback engine served this" makes,
         # and must not be contradicted by a stale field beside it.
         self.endpoint = f"{self.api_root}/v1/chat/completions"
+        self._require_gpu_residency()
+
+    def _require_gpu_residency(self) -> None:
+        """Refuse a model that came up with nothing in VRAM.
+
+        llama-server prints "model loaded" for a CPU-only run exactly as it does
+        for a GPU one, and fit can reach that state by shedding every layer:
+
+            load_tensors: offloaded 0/42 layers to GPU
+
+        A grade produced by CPU decode is worthless here, so this is a failure
+        rather than a slow path. Partial offload -- some layers in RAM -- is the
+        intended behaviour for a model larger than the card and is allowed.
+
+        Only acts when the log states a layer count. A missing line means the
+        measurement is unavailable, which is not the same as zero layers, and
+        inventing a verdict from an absent line would fail models for the wrong
+        reason.
+        """
+        place = self.residency()
+        in_vram, total = place.get("gpu_layers"), place.get("layers_total")
+        if in_vram is None or not total or in_vram > 0:
+            return
+        raise EngineUnavailable(
+            f"{self.model}: llama.cpp loaded with 0/{total} layers in VRAM "
+            f"(CPU-only); refusing to record a CPU-decoded grade"
+        )
 
     def _await_ready(self) -> None:
         """Poll /health until the model is loaded.
@@ -751,6 +790,45 @@ class LlamaCppServer:
         completed = self.remote.docker("logs", "--tail", str(lines), self.name, timeout=30)
         return " ".join((completed.stdout + completed.stderr).split())[-2000:]
 
+    def residency(self) -> dict[str, Any]:
+        """Where the model actually lives, measured from the server's own log.
+
+        "model loaded" is printed whether the run is on the GPU or on the CPU,
+        so it proves nothing on its own. llama-server states the placement in
+        one line at load:
+
+            load_tensors: offloaded 41/42 layers to GPU
+
+        and sizes the buffers per device:
+
+            load_tensors:        CUDA0 model buffer size = 17880.66 MiB
+            llama_context: n_ctx                 = 24576
+            llama_kv_cache:      CUDA0 KV buffer size =    480.00 MiB
+
+        These are measurements, so they are what the record carries. A flag is
+        a request, and copying the requested `-ngl` into a field named
+        "layers in VRAM" would be a guess dressed as a fact.
+
+        Ignore `CPU_Mapped model buffer size`: it reports the mmap'd file and
+        appears in a healthy 41/42 run too, so its presence means nothing.
+        """
+        text = self.server_log(lines=400)
+        layers = re.search(r"offloaded (\d+)/(\d+) layers", text)
+        vram = re.search(r"CUDA0 model buffer size = ([\d.]+) MiB", text)
+        kv = re.search(r"CUDA0 KV buffer size =\s*([\d.]+) MiB", text)
+        ctx = re.search(r"n_ctx\s*=\s*(\d+)", text)
+        in_vram, total = (int(layers.group(1)), int(layers.group(2))) if layers else (None, None)
+        return {
+            "gpu_layers": in_vram,
+            "layers_total": total,
+            "vram_mib": float(vram.group(1)) if vram else None,
+            "kv_cache_mib": float(kv.group(1)) if kv else None,
+            "n_ctx": int(ctx.group(1)) if ctx else None,
+            # True when fit had to leave model layers in RAM, which is the
+            # intended behaviour for a model larger than the card.
+            "ram_offloaded": None if in_vram is None or not total else in_vram < total,
+        }
+
     def teardown(self) -> None:
         self.remote.close()
         self.remote.docker("rm", "-f", self.name, timeout=180)
@@ -777,6 +855,8 @@ class LlamaCppServer:
             "vram_oom_on_first_attempt": self.vram_oom_first_attempt,
             "gpu_wait": self.gpu_wait,
             "started_at": self.started_at,
+            # Measured placement, not the flags we asked for. See residency().
+            **self.residency(),
             # The URL that answered, so the record names the endpoint rather
             # than only the engine. `ModelSession.provenance()` merges this
             # with the Ollama endpoint; the two are different servers.

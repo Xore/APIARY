@@ -4665,9 +4665,15 @@ def open_session(
     # `run()` decides what one bad slot costs the run, records it as that slot's
     # failure, and keeps evaluating the rest.
     session.open()
+    # The reason is printed only when a fallback actually happened. Comparing
+    # the engine name against a constant that says "llamacpp" while the engine
+    # reports "llama.cpp" never matched, so this printed the fallback clause on
+    # every healthy llama.cpp run -- `serving on llama.cpp (llama.cpp
+    # unavailable, fell back: None)`. That line is how a whole roster gets
+    # judged, so a contradiction baked into the success path is not cosmetic.
     print(f"  engine: serving on {session.engine}"
           + (f" (llama.cpp unavailable, fell back: {session.fallback_reason})"
-             if session.engine != ENGINE_LLAMACPP else ""), flush=True)
+             if session.fallback_engine else ""), flush=True)
     return session
 
 
