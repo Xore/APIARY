@@ -823,6 +823,18 @@ class FlagsTest(unittest.TestCase):
         self.assertNotIn("-c", flags, "-c switches fit's own calculation off")
         self.assertNotIn("-ngl", flags, "-ngl switches fit's own calculation off")
 
+    def test_tool_calling_always_renders_through_jinja(self):
+        """`--jinja` is pinned, not inherited from the image's default.
+
+        Tool calls are rendered through the model's chat template. This build
+        happens to default `--jinja` on, which is exactly why it needs pinning:
+        a default belongs to the image, not to our contract, and a llama.cpp
+        upgrade that flips it would turn every tool call into plain prose
+        without a single failing test. That is the same failure as `-lv 4` --
+        a setting whose absence is invisible until a score quietly changes.
+        """
+        self.assertIn("--jinja", serving.server_flags(24576))
+
     def test_no_kv_offload_is_never_emitted(self):
         """The old retry flag is gone from both branches.
 
