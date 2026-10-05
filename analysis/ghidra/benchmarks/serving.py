@@ -70,7 +70,13 @@ SSH_HOST = "homeserver"
 # minutes after a run stopped, so starting the next server while the old one
 # still holds VRAM OOMs for the wrong reason and the OOM gets blamed on the new
 # model.
-GPU_IDLE_MIB = 508
+# An idle card on this host reads 556 MiB (CUDA context + desktop overhead),
+# and it drifts -- 508, 512, 546, 556 have all been observed. A threshold of
+# 508 could therefore NEVER be satisfied, so every model burned the full
+# 600s ceiling before loading. Anything under a gigabyte is a card with
+# nothing on it; a single model layer is hundreds of MiB on its own, so this
+# separates idle from loaded without a margin that depends on the desktop.
+GPU_IDLE_MIB = 1024
 LLAMA_GPU_LAYERS = "99"
 # Bound inside the container and reached only through the tunnel this opens, so
 # it is not a way to read prompts off the LAN.

@@ -1565,16 +1565,28 @@ class LifecycleTest(unittest.TestCase):
         self.assertIn("exited", str(caught.exception))
 
     def test_the_gpu_wait_stops_at_the_base_overhead(self):
-        """Base overhead is ~508 MiB; waiting for a literal zero would hang on a
-        card that is never literally idle."""
-        remote = FakeRemote(vram=508)
-        server = serving.LlamaCppServer(
-            remote, "gemma2:27b", {"gguf": "/g", "gguf_sha256": "s"},
-            num_ctx=24576, request_timeout=evaluate_models.request_timeout,
-        )
-        with mock.patch.object(serving.time, "sleep", lambda _s: None):
-            waited = server.wait_for_gpu()
-        self.assertTrue(waited["reached_idle"])
+        """A card holding nothing but desktop overhead counts as idle.
+
+        The threshold is deliberately loose. It only has to separate a card
+        with nothing on it from a card with a model on it -- a single layer is
+        hundreds of MiB -- and must sit ABOVE whatever the host's baseline
+        happens to read. Pinning it to one observation of that baseline is what
+        made the wait unsatisfiable: it read 508 idle once, the threshold was
+        set to 508, and the card later read 556, so nothing ever loaded.
+        """
+        for idle_reading in (508, 512, 546, 556):
+            remote = FakeRemote(vram=idle_reading)
+            server = serving.LlamaCppServer(
+                remote, "gemma2:27b", {"gguf": "/g", "gguf_sha256": "s"},
+                num_ctx=24576, request_timeout=evaluate_models.request_timeout,
+            )
+            with mock.patch.object(serving.time, "sleep", lambda _s: None):
+                waited = server.wait_for_gpu()
+            self.assertTrue(waited["reached_idle"], idle_reading)
+
+        # And the threshold must still be below a single loaded model, or the
+        # wait would pass while a server is still holding VRAM.
+        self.assertLess(serving.GPU_IDLE_MIB, 4000)
 
     def test_a_held_card_is_waited_out_before_the_next_start(self):
         remote = FakeRemote(vram=7974)
