@@ -2085,6 +2085,35 @@ jobs:
                 exit 1
               fi
               echo "secret-scan: scanning $commits commits of full history"
+              # `git log --all` (in check-git-secrets.py's allowlist probe)
+              # and gitleaks' own object walk BOTH read every ref in the
+              # repository, and actions/checkout's `git clean -ffdx` removes
+              # leftover FILES but never stale REFS. On the reused
+              # self-hosted honeypot-ci workspace that left refs from earlier
+              # PRs behind, so the scan answered from a history the runner
+              # was not supposed to be scanning: two clones of one identical
+              # tree, differing only in stale refs/remotes/pull/*, measured
+              # 120 findings and 62 (all in the two allowlisted historical
+              # paths) against 23 findings and 0 for the same tree without
+              # them. That is what made the gate report entries as rot that
+              # were covering real findings -- and why main failed on one
+              # entry while the PR failed on two, same tree.
+              # Purge the remote-tracking refs so the scan's view of history
+              # is the commit it was told to scan. origin/HEAD is excluded
+              # because update-ref refuses to delete through a symref.
+              git for-each-ref --format='%(refname)' refs/remotes \
+                | grep -v 'origin/HEAD$' \
+                | sed 's|^|delete |' \
+                | git update-ref --stdin || true
+              # Prove the purge did what it claims: a scan that still sees
+              # refs would be measuring whatever the workspace was reused
+              # from, silently, and the assertion below would be worthless.
+              leftover="$(git for-each-ref --format='%(refname)' refs/remotes \
+                | grep -v 'origin/HEAD$' | wc -l)"
+              if [ "$leftover" -ne 0 ]; then
+                echo "::error::secret-scan: $leftover stale remote-tracking ref(s) survived the purge -- the scan would measure a history this job was not asked to check"
+                exit 1
+              fi
               # Pinned version + sha256 verified before extraction, unpacked
               # into $RUNNER_TEMP because the self-hosted honeypot-ci runner
               # cannot write /usr/local/bin -- the constraint
