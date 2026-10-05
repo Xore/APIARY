@@ -4069,6 +4069,9 @@ def evaluate_slot(
     if request != expected_request:
         raise ValueError(f"unsupported qualification request for {slot}; benchmark code must be reviewed")
     contract = contract_for(slot)
+    # Read once. provenance() merges the server's live engine facts with the
+    # close() snapshot, and this is the only place in the slot that needs it.
+    serving_record = session.provenance()
     try:
         # Resolved before the first call, not after the last, so every stored
         # answer carries the exact tag *and* digest it came from -- #158's rule
@@ -4086,8 +4089,12 @@ def evaluate_slot(
             reproducibility=Reproducibility(
                 tier=tier, prompt_contract=contract,
                 engine=session.engine,
-                kv_offload_disabled=session.provenance().get("kv_offload_disabled"),
+                kv_offload_disabled=serving_record.get("kv_offload_disabled"),
                 fallback_engine=session.fallback_engine,
+                # The measured placement, handed over whole. Unpacking six names
+                # here would make this call site a second place that decides
+                # which keys exist; Reproducibility owns that.
+                residency=Reproducibility.placement_from(serving_record),
             ),
         )
         # Before the slot is attempted, and only for the coder slot: it is the
