@@ -74,6 +74,7 @@ from transcripts import (  # noqa: E402
 from serving import (
     ModelSession,
     canonical_tag as serving_canonical_tag,
+    is_malformed_tool_call as serving_is_malformed_tool_call,
     ollama_transport as serving_ollama_transport,
     probe_ollama_endpoint,
 )  # noqa: E402
@@ -2726,6 +2727,37 @@ def require_no_harmony_serving(model: str, *, producer: str, num_predict: int) -
         )
 
 
+def _http_error_detail(exc: urllib.error.HTTPError) -> str | None:
+    """The cause an HTTPError carries in its body, or None if it has none.
+
+    The status line is the same for every failure of a kind -- `500 Internal
+    Server Error` names nothing about what went wrong -- and the reason is in
+    the body. Both engines nest it differently: llama.cpp answers
+    `{"error": {"code": 500, "message": ...}}` and Ollama answers
+    `{"error": "..."}` or a top-level `{"message": ...}`. Reading only the
+    top-level `message` therefore found nothing on every llama.cpp failure,
+    which is how a `peg-native` rejection reached the record as a bare
+    `HTTP Error 500` and could not be told apart from any other 500.
+
+    `exc.read()` consumes a single-use stream, so the body is read here once and
+    the caller keeps the returned string rather than re-reading.
+    """
+    try:
+        payload = json.loads(exc.read())
+    except (OSError, ValueError):
+        return None
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        # A nested object is llama.cpp's shape; a bare string is Ollama's.
+        if isinstance(error, dict) and error.get("message"):
+            return str(error["message"])
+        if isinstance(error, str) and error:
+            return error
+        if payload.get("message"):
+            return str(payload["message"])
+    return None
+
+
 def chat(
     base_url: str,
     model: str,
@@ -2809,13 +2841,44 @@ def chat(
     except Exception as exc:
         # A timeout or transport failure is a measurement about this model, not
         # a hole in the record. Store it, then let the slot handle it.
+        detail = f"{type(exc).__name__}: {exc}"
+        if isinstance(exc, urllib.error.HTTPError):
+            cause = _http_error_detail(exc)
+            if cause:
+                detail = f"{type(exc).__name__} {exc.code}: {cause}"
+        malformed = bool(tools) and serving_is_malformed_tool_call(detail)
         if recorder is not None:
             recorder.record(
                 case=case,
                 workflow=workflow,
                 request_body=body,
-                error=f"{type(exc).__name__}: {exc}",
+                error=detail,
+                # A capability verdict, stored beside the error it replaced. A
+                # transcript that only carries the error reads as a slot that
+                # crashed, which is the ambiguity this removes.
+                response={"malformed_tool_call": detail} if malformed else None,
             )
+        if malformed:
+            # Not a raise. The model emitted a tool call llama.cpp's PEG parser
+            # rejected -- an unoffered name, or arguments under the wrong key --
+            # and that is a capability result for this model, the same class of
+            # fact as `does not support tools`. Raising it here aborted the
+            # entire coder slot on case 1 of 44 and left the model with no coder
+            # record at all, which is strictly worse than one recorded wrong
+            # answer. `done_reason` names it so every scorer that reads the
+            # reason sees a value it already has a rule for, and the case still
+            # streams out to the grader with the cause attached.
+            return {
+                "content": "",
+                "message": {},
+                "prose": "",
+                "wall_seconds": round(time.monotonic() - started, 3),
+                "prompt_tokens": None,
+                "output_tokens": None,
+                "tokens_per_second": None,
+                "done_reason": "malformed_tool_call",
+                "malformed_tool_call": detail,
+            }
         raise
     wall_seconds = time.monotonic() - started
     # The one capture of the model's text, for every path that has one:
@@ -3498,6 +3561,36 @@ def score_coder(
                 )
                 content = (raw or {}).get("content") or ""
                 message = (raw or {}).get("message") or {}
+                # chat() absorbs a malformed tool call instead of raising it
+                # (see MALFORMED_TOOL_CALL_PHRASES in serving.py), so the round
+                # loop has to stop on it here. Continuing would re-send the same
+                # prompt to a model that answers with a rejected call every
+                # time: eight identical 500s, no answer, and no record of why.
+                # One is evidence; eight is a retry loop.
+                if (raw or {}).get("malformed_tool_call"):
+                    stopped_because = "malformed_tool_call"
+                    rounds.append({
+                        "round": round_index,
+                        "output_tokens": None,
+                        "capped": False,
+                        "declared_done": False,
+                        "chars": 0,
+                        "tools_called": [],
+                        "tool_turns": [],
+                        "files_written": [],
+                        "writes_accepted": 0,
+                        "writes_rejected": 0,
+                        "file_mechanism": "none",
+                        "text_blocks_seen": 0,
+                        "text_blocks_written": 0,
+                        "text_blocks_refused": 0,
+                        "text_blocks_malformed": 0,
+                        "text_block_paths": [],
+                        # The cause, in the round itself, so the transcript of a
+                        # slot that stopped here says what the server rejected.
+                        "malformed_tool_call": raw["malformed_tool_call"],
+                    })
+                    break
                 tool_calls = message.get("tool_calls") or []
                 output = (
                     (message.get("content") or "", [
@@ -3556,6 +3649,14 @@ def score_coder(
         record["rounds"] = rounds
         record["round_count"] = len(rounds)
         record["stopped_because"] = stopped_because
+        # The capability verdict, on the case a human grader reads. Absent on
+        # every other case, so its presence is the signal: llama.cpp's PEG
+        # parser rejected this model's tool call. It is not a pass and not a
+        # crash -- a recorded wrong answer, the same shape as
+        # `does not support tools` and read as one.
+        if (raw or {}).get("malformed_tool_call"):
+            record["malformed_tool_call"] = raw["malformed_tool_call"]
+            record["capability"] = "emits_tool_calls_the_server_rejects"
         # Per-case totals for the grader: how many distinct files the model
         # actually wrote, and how many of its write attempts were refused.
         accepted_paths = sorted({
@@ -4265,13 +4366,14 @@ def evaluate_slot(
     except Exception as exc:  # Preserve evidence for other independent slots.
         error = f"{type(exc).__name__}: {exc}"
         if isinstance(exc, urllib.error.HTTPError):
-            try:
-                body = json.loads(exc.read())
-                detail = body.get("error") if isinstance(body, dict) else None
-            except (OSError, ValueError):
-                detail = None
-            if detail:
-                error = f"{type(exc).__name__}: {detail}"
+            # The same reader chat() uses, so a slot failure and a chat failure
+            # of the same kind are described the same way. This one read
+            # `body["error"]` directly, which is Ollama's shape: on llama.cpp
+            # `error` is an object, so a dict was interpolated into the message
+            # and the real cause was never in the record.
+            cause = _http_error_detail(exc)
+            if cause:
+                error = f"{type(exc).__name__} {exc.code}: {cause}"
         result = {
             "model": model,
             "ok": False,

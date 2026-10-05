@@ -74,6 +74,12 @@ LLAMACPP_CAPTURE = json.loads(
 LLAMACPP_CAPTURES = {
     capture["label"]: capture for capture in LLAMACPP_CAPTURE["captures"]
 }
+# A COMPLETE exchange recorded off the socket: tools offered, a tool call
+# returned, the result sent back, the final answer. llamacpp_structured_capture
+# stops at the first tool call, so nothing pinned the second turn before this.
+LLAMACPP_ROUNDTRIP = json.loads(
+    (BENCHMARKS_DIR / "tests/fixtures/llamacpp_tool_roundtrip.json").read_text()
+)
 
 
 # --- a stub host that records everything it was asked to do ----------------
@@ -1273,6 +1279,59 @@ class EnginePrintTest(unittest.TestCase):
 
 # --- wire translation ------------------------------------------------------
 
+class RecordedRoundTripTest(unittest.TestCase):
+    """The second turn, against wire bodies recorded off a live llama-server.
+
+    Every assertion here reads a body the server actually received, not one to_wire
+    produced in this process -- so a change to the translation that the server
+    would have accepted, and rejected, differently is caught rather than argued.
+    """
+
+    def setUp(self):
+        self.turns = {t["turn"]: t for t in LLAMACPP_ROUNDTRIP["turns"]}
+        self.assertIn(2, self.turns, "the capture must reach a second turn")
+
+    def test_the_exchange_completed_with_a_prose_answer(self):
+        first = self.turns[1]["response_raw"]["choices"][0]
+        second = self.turns[2]["response_raw"]["choices"][0]
+        self.assertEqual(first["finish_reason"], "tool_calls")
+        self.assertEqual(second["finish_reason"], "stop")
+        self.assertTrue(second["message"]["content"].strip(),
+                        "the follow-up must answer in prose, not in silence")
+
+    def test_the_second_turn_carried_the_assistant_tool_calls_message(self):
+        roles = [m["role"] for m in self.turns[2]["request_wire"]["messages"]]
+        self.assertIn("assistant", roles)
+        self.assertIn("tool", roles)
+
+    def test_the_tool_result_is_keyed_to_the_call_it_answers(self):
+        messages = self.turns[2]["request_wire"]["messages"]
+        assistant = next(m for m in messages if m.get("tool_calls"))
+        result = next(m for m in messages if m["role"] == "tool")
+        self.assertTrue(result["tool_call_id"])
+        self.assertEqual(result["tool_call_id"], assistant["tool_calls"][0]["id"])
+
+    def test_the_captured_wire_is_what_to_wire_produces_today(self):
+        """The recorded body is the contract. If translation drifts, the
+        recorded wire stops matching and this fails, rather than the drift going
+        unnoticed because both sides moved together in some future run."""
+        messages = self.turns[2]["request_wire"]["messages"]
+        # Re-translate turn 1's assistant message plus the tool result and
+        # compare the id pairing the server actually received.
+        from_wire_message = serving.from_wire(self.turns[1]["response_raw"])["message"]
+        rebuilt = serving.to_wire({"messages": [
+            {"role": "system", "content": "s"},
+            {"role": "user", "content": "u"},
+            from_wire_message,
+            {"role": "tool", "content": "wrote src/main.rs (36 chars)",
+             "tool_name": "write_file"},
+        ]})
+        self.assertEqual(
+            rebuilt["messages"][3]["tool_call_id"],
+            messages[2]["tool_calls"][0]["id"],
+        )
+
+
 class TranslationTest(unittest.TestCase):
     def test_a_capped_llama_cpp_answer_is_stored_as_truncated(self):
         """The reason this seam is test-driven rather than trusted.
@@ -1445,6 +1504,90 @@ class TranslationTest(unittest.TestCase):
             json.loads(wire["messages"][1]["tool_calls"][0]["function"]["arguments"]),
             {"path": "a", "content": "b"},
         )
+
+    def test_each_tool_result_gets_its_own_calls_id(self):
+        """Two calls in one assistant turn must get two distinct result ids.
+
+        The defect: `calls_seen` counted forward and every tool message then took
+        `call_{calls_seen - 1}`, the LAST call of the turn before it. Both
+        results came out as `call_1` -- the first answered the wrong call and
+        `call_0` was never answered. llama.cpp's templates key a result off the
+        matching `tool_call_id`, so that renders a result for a call the model
+        never sees, which is the malformed-tool-name 500 measured on the wire.
+        """
+        wire = serving.to_wire({"messages": [
+            {"role": "user", "content": "do it"},
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"function": {"name": "write_file", "arguments": {"path": "a"}}},
+                {"function": {"name": "write_file", "arguments": {"path": "b"}}},
+            ]},
+            {"role": "tool", "content": "wrote a", "tool_name": "write_file"},
+            {"role": "tool", "content": "wrote b", "tool_name": "write_file"},
+        ]})
+        call_ids = [c["id"] for c in wire["messages"][1]["tool_calls"]]
+        self.assertEqual(len(set(call_ids)), 2, "the two calls must not share an id")
+        self.assertEqual(wire["messages"][2]["tool_call_id"], call_ids[0])
+        self.assertEqual(wire["messages"][3]["tool_call_id"], call_ids[1])
+
+    def test_tool_ids_are_unique_across_a_whole_conversation(self):
+        """Two exchanges in one history each restarted at `call_0` (measured on
+        the wire). The OpenAI shape these ids are written for treats an id as
+        unique per conversation, and a template that matched a result to the
+        first call with that id would pair round 3's result with round 1's."""
+        wire = serving.to_wire({"messages": [
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"function": {"name": "write_file", "arguments": {"path": "a"}}}]},
+            {"role": "tool", "content": "wrote a", "tool_name": "write_file"},
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"function": {"name": "read_file", "arguments": {"path": "a"}}}]},
+            {"role": "tool", "content": "contents", "tool_name": "read_file"},
+        ]})
+        ids = [call["id"] for message in wire["messages"]
+               for call in message.get("tool_calls", [])]
+        self.assertEqual(len(ids), 2)
+        self.assertEqual(len(set(ids)), 2, f"ids repeated across turns: {ids}")
+        # And the second result answers the second call, not the first.
+        self.assertEqual(wire["messages"][2]["tool_call_id"], ids[0])
+        self.assertEqual(wire["messages"][4]["tool_call_id"], ids[1])
+
+    def test_tool_ids_restart_per_turn_and_survive_a_second_exchange(self):
+        """Ids are positional per turn, so round 3 re-translates the same
+        history to the same ids. Without that, a result in a later round is
+        paired to a call from a turn the model no longer has in context."""
+        body = {"messages": [
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"function": {"name": "read_file", "arguments": {"path": "a"}}}]},
+            {"role": "tool", "content": "one", "tool_name": "read_file"},
+            {"role": "assistant", "content": "", "tool_calls": [
+                {"function": {"name": "read_file", "arguments": {"path": "b"}}}]},
+            {"role": "tool", "content": "two", "tool_name": "read_file"},
+        ]}
+        wire = serving.to_wire(body)
+        # Every result answers the call immediately above it, in order.
+        for index, message in enumerate(wire["messages"]):
+            if message["role"] != "tool":
+                continue
+            preceding = wire["messages"][index - 1]
+            self.assertEqual(
+                message["tool_call_id"],
+                preceding["tool_calls"][0]["id"],
+                f"result at index {index} is not paired with the call above it",
+            )
+        # Re-translating the same history yields the same ids, so the round
+        # after a tool exchange is byte-identical to the one before it.
+        self.assertEqual(serving.to_wire(body), wire)
+
+    def test_a_tool_result_is_never_left_without_an_id(self):
+        """A result with no call to pair against still has to carry a key:
+        llama.cpp drops a tool message that has no `tool_call_id`, so an empty
+        value would turn this history into an orphan rather than a bad pair."""
+        wire = serving.to_wire({"messages": [
+            {"role": "user", "content": "go"},
+            {"role": "tool", "content": "orphan", "tool_name": "read_file"},
+        ]})
+        self.assertTrue(wire["messages"][1]["tool_call_id"])
 
     def test_structured_tool_calls_are_preserved_in_the_response(self):
         """The coder slot carries its answer in tool_calls with empty content;
