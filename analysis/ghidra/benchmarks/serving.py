@@ -602,11 +602,20 @@ class LlamaCppServer:
                 raise EngineUnavailable(str(second)) from second
 
     def _launch(self, *, kv_offload: bool) -> None:
+        # `--entrypoint` overrides the image's own, which is `/app/tools.sh`: a
+        # subcommand *dispatcher*, not a passthrough. Handing it the binary as an
+        # argument made it treat `/app/llama-server` as a tool name and exit 0
+        # having printed its usage list -- so the container "started" and then
+        # exited while loading, every model, on the first real run.
+        # `read_in_container` overrides the same way for the same reason.
+        # The override is the absolute path because tools.sh's own branch runs a
+        # RELATIVE `./llama-server` and so depends on WORKDIR; this one must not.
         argv = [
             "run", "-d", "--name", self.name, "--gpus", "all",
             "-v", f"{OLLAMA_VOLUME}:/root/.ollama:ro",
             "-p", f"127.0.0.1:{self.port}:{self.port}",
-            LLAMA_IMAGE, LLAMA_BINARY,
+            "--entrypoint", LLAMA_BINARY,
+            LLAMA_IMAGE,
             "-m", self.gguf["gguf"],
             *server_flags(self.num_ctx, kv_offload=kv_offload),
         ]

@@ -132,14 +132,16 @@ class FakeRemote:
     def flags_of(self, index=0):
         """The server flags of launch `index`, without the `-m <gguf>` pair.
 
-        The model file is not a flag -- it has its own recorded field -- so the
-        two are compared as separate things. A method, not a property, because
-        the retry assertions are about launch *1* rather than launch 0.
+        Everything after the image is the container's command; the model file is
+        not a flag -- it has its own recorded field -- so the two are compared as
+        separate things. Slicing from the image rather than from the binary is
+        what keeps this correct once the binary moved to `--entrypoint`, where it
+        appears *before* the image. A method, not a property, because the retry
+        assertions are about launch *1* rather than launch 0.
         """
         argv = self.launches[index]
-        flags = argv[argv.index(serving.LLAMA_BINARY) + 1:]
-        head = flags[:flags.index("-m")]
-        return head + flags[flags.index("-m") + 2:]
+        tail = argv[argv.index(serving.LLAMA_IMAGE) + 1:]
+        return tail[:tail.index("-m")] + tail[tail.index("-m") + 2:]
 
     @property
     def gguf_of(self, index=0):
@@ -799,17 +801,47 @@ class FlagsTest(unittest.TestCase):
         flags = remote.flags_of(0)
         self.assertEqual(flags[flags.index("-c") + 1], str(evaluate_models.NUM_CTX))
 
-    def test_the_binary_is_invoked_by_full_path(self):
-        """`/app/llama-server` is not on PATH; a bare name fails."""
+    def test_the_entrypoint_is_overridden_with_the_absolute_binary(self):
+        """The image's ENTRYPOINT is `/app/tools.sh`, a subcommand dispatcher.
+
+        Handing it the server as an argument made it print
+        `Unknown command: /app/llama-server` plus a usage list and exit 0, so
+        the container started and exited while loading -- for every model, on
+        every run, with a real GPU, a real GGUF and a healthy fallback
+        recording the wrong reason. tools.sh only reaches llama-server inside
+        one branch (`tools.sh:33`, and that one is a relative `./llama-server`,
+        so it depends on WORKDIR too), which is why appending a tools.sh
+        subcommand is not the fix: overriding the entrypoint is.
+        """
         remote = FakeRemote()
         start(make_session(remote))
         argv = remote.launches[0]
-        self.assertIn(serving.LLAMA_BINARY, argv)
-        # The binary is the image's entrypoint argument, not a bare name: a
-        # container started as `llama-server` would look for it on PATH and find
-        # nothing there, which is how an earlier probe wrongly reported the image
-        # had no llama-server at all.
-        self.assertEqual(argv[argv.index(LLAMA_IMAGE) + 1], serving.LLAMA_BINARY)
+        self.assertEqual(argv[argv.index("--entrypoint") + 1], serving.LLAMA_BINARY)
+        # Absolute, not the relative form tools.sh itself uses: a relative path
+        # resolves against WORKDIR, so it works or does not with the image tag.
+        self.assertTrue(serving.LLAMA_BINARY.startswith("/"),
+                        f"entrypoint must be absolute, got {serving.LLAMA_BINARY!r}")
+        self.assertNotIn("./llama-server", argv)
+        # Override in place of the binary-as-argument: with the image ENTRYPOINT
+        # left alone, argv[0] inside the container is tools.sh again and the
+        # usage list is what answers.
+        self.assertEqual(argv[argv.index(serving.LLAMA_IMAGE) + 1], "-m")
+
+    def test_the_kv_retry_launch_carries_the_same_entrypoint(self):
+        """Both launches, not just the first.
+
+        `--no-kv-offload` goes through `_launch` again, so an override applied
+        only on the first attempt would retry into the same tools.sh usage list
+        and then file a real OOM as an unrunnable server.
+        """
+        remote = FakeRemote(state="exited", log_text="cudaMalloc failed")
+        with mock.patch.object(serving.LlamaCppServer, "_await_ready",
+                               side_effect=RuntimeError("cudaMalloc failed")):
+            start(make_session(remote))
+        self.assertEqual(len(remote.launches), 2)
+        for index in range(2):
+            argv = remote.launches[index]
+            self.assertEqual(argv[argv.index("--entrypoint") + 1], serving.LLAMA_BINARY)
 
 
 # --- wire translation ------------------------------------------------------
