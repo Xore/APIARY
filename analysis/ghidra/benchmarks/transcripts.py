@@ -361,6 +361,16 @@ class Reproducibility:
     # a benchmark record that guesses is not a benchmark record.
     residency: dict[str, Any] | None = None
 
+    # The context window the run was budgeted against, beside the one the
+    # engine actually served. They are different quantities and only one of
+    # them used to be recorded: `--fit-ctx` is the *minimum* fit may set, so it
+    # settles on its own value (measured 2026-10-05: asked for 24576, served
+    # 98048 on a 131072-context model), and a transcript carrying only the
+    # served value contradicts its own request body. A per-request `n_ctx`
+    # cannot reconcile them -- llama-server accepts the field and ignores it --
+    # so both are stated and the gap is readable.
+    n_ctx_requested: int | None = None
+
     _RESIDENCY_FIELDS = (
         ("gpu_layers", int),
         ("layers_total", int),
@@ -411,6 +421,7 @@ class Reproducibility:
             "kv_offload_disabled": self.kv_offload_disabled,
             "fallback_engine": self.fallback_engine,
             **self.residency_fields(),
+            "n_ctx_requested": self.n_ctx_requested,
         }
 
 

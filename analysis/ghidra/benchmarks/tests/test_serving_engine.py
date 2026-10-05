@@ -1049,6 +1049,75 @@ class ResidencyTest(unittest.TestCase):
         self.assertEqual(place["kv_cache_mib"], 480.00)
         self.assertIs(place["ram_offloaded"], True)
 
+    def test_the_record_names_both_the_negotiated_context_and_the_floor(self):
+        """`n_ctx` alone is a lie by omission when fit moves it.
+
+        `--fit-ctx N` is documented as the *minimum* context fit may set, not a
+        request for exactly N, so fit routinely settles on something else: with
+        `--fit-ctx 24576` on a 131072-context model measured 2026-10-05 it
+        logged `context size reduced from 131072 to 98048` and served at
+        `n_ctx = 98048`. Run 2026-10-05-20261005T134600Z-3aee521a recorded that
+        98k-shaped number in `reproducibility.n_ctx` beside a request body
+        saying 24576, and nothing said which one the model actually ran with.
+
+        Per-request `n_ctx` cannot reconcile them -- llama-server accepts the
+        field and ignores it (a 935-token prompt sent with `n_ctx: 256` still
+        logged `n_ctx_slot = 24576`). Context is a server-lifetime fact, so the
+        record has to carry both numbers under names that say which is which.
+        """
+        # The real measured shape: fit reduced context, and the served value
+        # differs from the floor that was passed on the command line.
+        log = (
+            "common_params_fit_impl: context size reduced from 131072 to 98048\n"
+            "load_tensors: offloaded 33/33 layers to GPU\n"
+            "load_tensors:        CUDA0 model buffer size =  5871.99 MiB\n"
+            "llama_context: n_ctx                 = 98048\n"
+            "main: model loaded\n"
+        )
+        server = serving.LlamaCppServer(
+            FakeRemote(log_text=log), "baronllm-llama3.1:q6_k",
+            {"gguf": "/g", "gguf_sha256": "abc123"},
+            num_ctx=24576, request_timeout=evaluate_models.request_timeout,
+        )
+        place = server.provenance()
+        # What the model actually ran with, measured off the server's own log.
+        self.assertEqual(place["n_ctx"], 98048)
+        # The floor that was asked for, so the gap is stated rather than implied.
+        self.assertEqual(place["n_ctx_requested"], 24576)
+
+    def test_a_context_that_needs_no_fitting_reports_the_same_value_twice(self):
+        """No negotiation happened, so the two names carry one number."""
+        place = server_for(FIT_LOG).provenance()
+        self.assertEqual(place["n_ctx"], 24576)
+        self.assertEqual(place["n_ctx_requested"], 24576)
+
+    def test_the_placement_survives_a_log_longer_than_the_tail_bound(self):
+        """The measurement lines are printed at LOAD; the tail bound is not.
+
+        Measured on homeserver 2026-10-05 against the production flags
+        (`--fit-ctx 24576 -lv 4`): the load phase is 13,194 collapsed
+        characters, of which `offloaded 33/33 layers to GPU` is at ~10,000.
+        `server_log()` ended in `[-2000:]`, so on a server that has decoded
+        anything the placement line was cut away and every residency field
+        read `None` -- the `gpu_layers: null` on all four slots of run
+        2026-10-05-20261005T134600Z-3aee521a, on a run that plainly offloaded
+        33/33. `n_ctx` survived only because it sits near the end of the load
+        phase, which is why that field was populated and the rest were not.
+
+        The tail bound exists to cap what is held in memory and shipped over
+        ssh, not to bound what is *searched*: the parse has to see the load
+        lines, so the search runs over the whole captured log.
+        """
+        # A real log: the load phase, then ~40KB of decode chatter after it,
+        # which is what pushed the placement line past a 2000-char tail.
+        long_log = FIT_LOG + ("0.99.999.999 I slot print_timing: id 1 | task 7 | "
+                              "eval time = 187.02 ms / 10 tokens\n" * 3000)
+        place = server_for(long_log).residency()
+        self.assertEqual(place["gpu_layers"], 41)
+        self.assertEqual(place["layers_total"], 42)
+        self.assertEqual(place["vram_mib"], 17880.66)
+        self.assertEqual(place["n_ctx"], 24576)
+
     def test_the_placement_is_read_once_and_survives_teardown(self):
         """The measurement is taken while the container exists, once.
 

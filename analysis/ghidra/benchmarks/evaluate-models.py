@@ -4101,6 +4101,10 @@ def evaluate_slot(
                 # here would make this call site a second place that decides
                 # which keys exist; Reproducibility owns that.
                 residency=Reproducibility.placement_from(serving_record),
+                # The window the run was budgeted against, beside the one the
+                # engine served. Fit settles on its own value, so a record
+                # carrying only the served number contradicts its own request.
+                n_ctx_requested=serving_record.get("n_ctx_requested"),
             ),
         )
         # Before the slot is attempted, and only for the coder slot: it is the

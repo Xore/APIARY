@@ -248,6 +248,34 @@ class TranscriptWriterTest(unittest.TestCase):
         self.assertIsNone(stored["vram_mib"])
         self.assertIsNone(stored["n_ctx"])
 
+    def test_the_requested_context_reaches_the_record(self):
+        """The budgeted window has to survive to the transcript, not stop at the
+        serving record.
+
+        `placement_from()` keeps only the six residency keys, so a
+        `n_ctx_requested` added to the provenance dict is dropped there and a
+        transcript ends up carrying the served window alone -- next to a request
+        body that says something else. Run ...-3aee521a recorded `n_ctx: 98304`
+        against `options.num_ctx: 24576` with nothing stating which was which.
+        """
+        provenance = {
+            "gpu_layers": 33, "layers_total": 33, "vram_mib": 5871.99,
+            "kv_cache_mib": 12256.00, "n_ctx": 98048, "ram_offloaded": False,
+            "n_ctx_requested": 24576,
+        }
+        stored = Reproducibility(
+            residency=Reproducibility.placement_from(provenance),
+            n_ctx_requested=provenance["n_ctx_requested"],
+        ).as_dict()
+        # Both, under names that say which is which.
+        self.assertEqual(stored["n_ctx"], 98048)
+        self.assertEqual(stored["n_ctx_requested"], 24576)
+
+    def test_the_requested_context_is_present_and_null_when_unmeasured(self):
+        """Same rule as every other field: present, never invented."""
+        self.assertIn("n_ctx_requested", Reproducibility().as_dict())
+        self.assertIsNone(Reproducibility().as_dict()["n_ctx_requested"])
+
 
 class SlotRecorderTest(unittest.TestCase):
     def test_no_writer_is_a_silent_no_op(self):
