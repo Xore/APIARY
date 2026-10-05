@@ -164,6 +164,12 @@ def server_flags(num_ctx: int, *, kv_offload: bool = False) -> list[str]:
     del kv_offload  # the KV axis is not the one we need; fit owns placement
     return [
         "--fit-ctx", str(num_ctx),
+        # The placement lines -- `offloaded N/M layers to GPU`, the CUDA0 buffer
+        # sizes -- are emitted at verbosity 4 and this build defaults to 3. So
+        # without this the log says only "model loaded", identically for a CPU
+        # run and a GPU one, and residency() has nothing to measure: the
+        # RAM-only guard silently never fires.
+        "-lv", "4",
         "--host", "0.0.0.0",
         "--port", str(LLAMA_CONTAINER_PORT),
     ]
