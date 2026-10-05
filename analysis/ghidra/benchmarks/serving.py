@@ -146,6 +146,48 @@ def is_vram_oom(text: str | None) -> bool:
     )
 
 
+# --- Malformed tool calls ---------------------------------------------------
+#
+# llama.cpp parses a tool call with a PEG grammar keyed on the tool names the
+# request offered, and rejects the WHOLE generation when the output matches no
+# production. The live `baronllm-llama3.1:q6_k` triggers it two ways:
+# `{"name":"main","parameters":{}}` -- a tool it was never offered -- and a
+# well-named call whose arguments sit under `parameters` where the grammar
+# wants `arguments`, repeated to the output cap. Both were read off the
+# server's own log, `common_chat_peg_parse: unparsed peg-native output:`.
+#
+# That is a model capability result, not a transport failure, and it is the same
+# class of fact as `does not support tools`: a wrong answer, but a knowable one.
+#
+# The alternative is worse, not better. `--skip-chat-parsing` turns the same
+# generation into a silent empty answer, and letting the exception escape turns
+# it into a lost slot: one bad case out of 44 aborts the coder run and the model
+# is left with no coder record at all. So it is classified here, and the caller
+# records the case and finishes the slot.
+
+# The exact phrasing is this build's own, and it reaches the caller as body
+# text; the bare `peg-native` is the substring that survives either wording.
+MALFORMED_TOOL_CALL_PHRASES = (
+    "does not match the expected peg-native format",  # exact from this server
+    "peg-native",
+)
+# Lowered text, same rule as VRAM_OOM_PHRASES above: a marker carrying its own
+# capitals can never match lowered text.
+assert all(p == p.lower() for p in MALFORMED_TOOL_CALL_PHRASES)
+
+
+def is_malformed_tool_call(text: str | None) -> bool:
+    """True when a failure is a tool call the server's PEG parser rejected.
+
+    Deliberately narrower than "any 4xx/5xx from a tool-bearing turn": a VRAM
+    OOM, a timeout and a connection reset are not model capabilities, and
+    recording one of those as `does not support tools` would be the same
+    substitution this whole file is arguing against.
+    """
+    lowered = (text or "").lower()
+    return any(p in lowered for p in MALFORMED_TOOL_CALL_PHRASES)
+
+
 def server_flags(num_ctx: int, *, kv_offload: bool = False) -> list[str]:
     """The llama-server argv tail, placement decided by fit.
 
@@ -643,6 +685,22 @@ def to_wire(body: dict[str, Any]) -> dict[str, Any]:
     shape carries none. Ids are synthesized from the call's position in the
     history, which is stable because the same list is re-translated every round.
 
+    The ids are paired by *queue*, not by a running count. `calls_seen` counted
+    forward through the whole history and every `role:"tool"` message then took
+    `call_{calls_seen - 1}` -- the LAST call of the assistant turn before it. An
+    assistant turn that emits two calls in one message had both results
+    numbered `call_1`: the first result answered the wrong call, and `call_0`
+    was never answered at all. llama.cpp's jinja templates key a tool result off
+    the matching `tool_call_id`, so that renders the follow-up as a tool result
+    for a call the model never sees. Popping the queue in order is what pairs
+    them, and the recorded round-trip in llamacpp_tool_roundtrip.json is a
+    server that answered correctly on exactly that pairing.
+
+    The counter does not reset per turn. Two exchanges in one history both
+    numbered their first call `call_0`, and the OpenAI shape these ids are
+    written for treats an id as unique across the conversation. One counter for
+    the whole history is the same fix for both facts.
+
     A `format` that cannot be expressed does not land here at all:
     `response_format_for()` raises `UnsupportedFormat`, which `request_json()`
     turns into a recorded failure. Dropping the constraint silently is the one
@@ -650,16 +708,25 @@ def to_wire(body: dict[str, Any]) -> dict[str, Any]:
     """
     options = body.get("options") or {}
     messages: list[dict[str, Any]] = []
-    calls_seen = 0
+    # Ids still owed a result, oldest first. A tool message takes the next one;
+    # an assistant turn appends its own. One counter for the whole history, so
+    # no two calls in a conversation share an id.
+    pending: list[str] = []
+    issued = 0
     for message in body.get("messages") or []:
         role = message.get("role")
         entry: dict[str, Any] = {"role": role, "content": message.get("content") or ""}
         if role == "tool":
-            entry["tool_call_id"] = f"call_{calls_seen - 1}"
+            # A result with nothing left to pair against still carries a key:
+            # an id that is wrong lets the template render an orphaned result
+            # and an absent one is the same orphan, but llama.cpp drops a tool
+            # message that has no `tool_call_id` at all.
+            entry["tool_call_id"] = pending.pop(0) if pending else "call_0"
         elif message.get("tool_calls"):
+            first = issued
             entry["tool_calls"] = [
                 {
-                    "id": f"call_{calls_seen + offset}",
+                    "id": f"call_{first + offset}",
                     "type": "function",
                     "function": {
                         "name": (call.get("function") or {}).get("name"),
@@ -670,7 +737,8 @@ def to_wire(body: dict[str, Any]) -> dict[str, Any]:
                 }
                 for offset, call in enumerate(message["tool_calls"])
             ]
-            calls_seen += len(message["tool_calls"])
+            pending.extend(f"call_{first + offset}" for offset in range(len(message["tool_calls"])))
+            issued += len(message["tool_calls"])
             entry["content"] = message.get("content") or None
         messages.append(entry)
     wire: dict[str, Any] = {
