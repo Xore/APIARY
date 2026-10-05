@@ -285,25 +285,56 @@ def with_default_tag(model: str) -> str:
     return f"{model}:{DEFAULT_TAG}"
 
 
-def manifest_path(model: str) -> str:
+def manifest_path(model: str, tags: list[dict[str, Any]] | None = None) -> str:
     """The Ollama manifest for `model`, as a path under /root/.ollama/models.
 
-    An untagged name resolves the way Ollama resolves it -- as `:latest` -- so a
-    manifest may name a model the way a human writes it. What is refused instead
-    is input that names nothing: empty, whitespace, or a bare `:` where a name
-    was expected.
+    Name and tag are **separate path segments**, `/`-separated, because that is
+    how they are stored. Observed on this host, 115 manifest files and no
+    directory-style manifests at all:
 
-    Two namespaces are live on this host: `registry.ollama.ai/library/<name>` for
-    tags pulled by name, and `hf.co/<repo>:<quant>` for GGUF repos imported as
-    `hf.co/`. Ollama's own rule is whether the name already carries a registry,
-    so a tag containing `/` is treated as namespaced.
+        .../manifests/registry.ollama.ai/library/gemma2/27b
+        .../manifests/registry.ollama.ai/library/qwen3-8-27b-q4km/latest
+        .../manifests/registry.ollama.ai/library/ravenx-cyberagent-35b/Q4_K_M
+        .../manifests/hf.co/mradermacher/DeepHat-V1-7B-GGUF/Q4_K_M
+
+    The `:` belongs to Ollama's CLI spelling of a name (`qwen3-8-27b-q4km:latest`),
+    never to a filename; a path ending in one cannot be read, and the `OSError`
+    it produced was filed as `fallback_reason`, which reads like a server that
+    could not load a model rather than a path that never existed.
+
+    Two namespaces are live here: `registry.ollama.ai/library/<name>` for tags
+    pulled by name, and `hf.co/<org>/<repo>` for GGUF repos imported as `hf.co/`.
+    Ollama's own rule is whether the name already carries a registry, so anything
+    with a `/` in the name part is used as-is. Nothing is stripped or case-folded:
+    the quant tags are `Q4_K_M` and `i1-Q4_K_S`, spelled as created.
+
+    **The tag is never guessed.** A bare name is resolved against `tags` --
+    `/api/tags`, the one place Ollama reports the canonical `name:tag` for every
+    installed model -- before the caller's own `:tag` is considered, so the
+    server's spelling wins. A caller-supplied tag is trusted only when the server
+    is silent or does not list the model at all. When neither yields a tag this
+    raises rather than inventing `:latest`: `latest` is what happens to be the
+    filename for the library models on this roster, not a rule that holds for a
+    repo imported as `hf.co/<org>/<repo>`, where the filename is the quantisation
+    (`Q4_K_M`). `canonical_tag()` is the resolver, already shared with
+    `/api/show` and `/api/ps`, so all three reads agree on which tag this is.
     """
-    if not (model or "").strip() or model.strip() in {":", "/"}:
+    model = (model or "").strip()
+    if not model or model in {":", "/"}:
         raise UnresolvableModel(f"not a model name: {model!r}")
-    name, _, tag = with_default_tag(model.strip()).rpartition(":")
+    reported = canonical_tag(tags or [], model)
+    if reported is not None:
+        model = reported
+    name, sep, tag = model.rpartition(":")
+    if not (sep and name and tag):
+        raise UnresolvableModel(
+            f"{model!r} names no tag and /api/tags does not list it, so there is "
+            f"no manifest to read; name it as Ollama reports it, "
+            f"`<name>:<tag>`."
+        )
     if "/" not in name:
         name = f"registry.ollama.ai/library/{name}"
-    return f"/root/.ollama/models/manifests/{name}:{tag}"
+    return f"/root/.ollama/models/manifests/{name}/{tag}"
 
 
 def gguf_from_manifest(manifest: dict[str, Any]) -> str:
@@ -322,9 +353,30 @@ def gguf_from_manifest(manifest: dict[str, Any]) -> str:
     raise ValueError("manifest has no model layer")
 
 
-def resolve_gguf(remote: Remote, model: str) -> dict[str, Any]:
+def installed_tags(base_url: str, request_json) -> list[dict[str, Any]]:
+    """What `/api/tags` lists, or raise the reason it could not be read.
+
+    Only ever used to *improve* a name (`manifest_path`, and `/api/show` and
+    `/api/ps` via `canonical_tag`). A read that fails raises on purpose rather
+    than being swallowed: a bare name with nothing to resolve it from would then
+    have to be guessed, and a guessed tag is a path that does not exist whose
+    `OSError` `open()` files as `fallback_reason` -- a server problem on the
+    record for what is an unreadable metadata endpoint. That is the same
+    misreading `require_ollama_endpoint()` exists to prevent one layer up.
+    """
+    payload = request_json(f"{base_url}/api/tags",
+                          timeout=ENDPOINT_PROBE_TIMEOUT_SECONDS)
+    if not isinstance(payload, dict) or not isinstance(payload.get("models"), list):
+        raise WrongEndpoint(
+            f"{base_url}/api/tags did not answer with an Ollama tag list "
+            f"(got {type(payload).__name__}); it is not an Ollama endpoint."
+        )
+    return payload["models"]
+
+
+def resolve_gguf(remote: Remote, model: str, tags: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """The GGUF to load for `model`, plus what the record needs to name it."""
-    path = manifest_path(model)
+    path = manifest_path(model, tags)
     gguf = gguf_from_manifest(json.loads(remote.read_in_container(path)))
     return {"gguf": gguf, "manifest_path": path, "gguf_sha256": gguf.rsplit("sha256-", 1)[-1]}
 
@@ -909,7 +961,11 @@ class ModelSession:
     def _start_llama_cpp(self) -> LlamaCppServer:
         remote = self._remote or Remote()
         self._remote = remote
-        gguf = resolve_gguf(remote, self.model)
+        # The tag comes from the server's own tag list, not from the caller's
+        # spelling and not from a default: `manifest_path` needs a tag it did not
+        # invent, and this session already holds the transport that reads it.
+        tags = installed_tags(self.base_url, self.request_json)
+        gguf = resolve_gguf(remote, self.model, tags)
         server = LlamaCppServer(
             remote, self.model, gguf,
             num_ctx=self.num_ctx,
