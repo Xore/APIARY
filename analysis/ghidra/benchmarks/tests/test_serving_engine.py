@@ -90,6 +90,7 @@ class FakeRemote:
         self.launches = []
         self.removed = []
         self.reads = []
+        self.log_reads = []
         self.tunnels = []
         self.closed = False
         # Popped by docker("run", ...): the health state that launch produces.
@@ -109,6 +110,9 @@ class FakeRemote:
                 return mock.Mock(returncode=failure[0], stdout="", stderr=failure[1])
             return mock.Mock(returncode=0, stdout="deadbeef\n", stderr="")
         if argv[:1] == ("logs",):
+            # Counted, not just returned: `residency()` is an ssh round-trip,
+            # and how many times a run makes it is part of what is under test.
+            self.log_reads.append(list(argv))
             return mock.Mock(returncode=0, stdout=self.log_text, stderr="")
         if argv[:1] == ("inspect",) and "{{.State.Status}}" in " ".join(argv):
             return mock.Mock(returncode=0, stdout=self.state, stderr="")
@@ -906,6 +910,30 @@ def server_for(log_text):
     )
 
 
+# The log of a CPU-decoded run, verbatim: fit probes the device with a
+# throwaway model, retries, and gives up on the card. Three `offloaded N/M`
+# lines and only the last one describes the weights that would serve.
+PROBE_THEN_CPU_LOG = (
+    "common_params_fit_impl: getting device memory data for initial parameters:\n"
+    "load_tensors: offloaded 42/42 layers to GPU\n"
+    "load_tensors:        CUDA0 model buffer size =     0.00 MiB\n"
+    "load_tensors:        CPU_Mapped model buffer size = 18056.75 MiB\n"
+    "common_params_fit_impl: projected to use 25441 MiB of device memory vs. "
+    "486 MiB of free device memory\n"
+    "common_params_fit_impl: context size reduced from 262144 to 24576\n"
+    "load_tensors: offloaded  1/42 layers to GPU\n"
+    "load_tensors:        CUDA0 model buffer size =     0.00 MiB\n"
+    "load_tensors: offloaded 0/42 layers to GPU\n"
+    "load_tensors:        CUDA0 model buffer size =     0.00 MiB\n"
+    "load_tensors:        CPU_Mapped model buffer size = 18056.75 MiB\n"
+    "llama_kv_cache:      CUDA0 KV buffer size =     0.00 MiB\n"
+    "llama_context: n_ctx                 = 24576\n"
+    "common_fit_params: successfully fit params to free device memory\n"
+    "llama_model_load: loaded meta data\n"
+    "main: model loaded\n"
+)
+
+
 class ResidencyTest(unittest.TestCase):
     """`residency()` is the record's only source of where the model lives.
 
@@ -955,6 +983,113 @@ class ResidencyTest(unittest.TestCase):
         place = server_for(FIT_LOG).residency()
         self.assertNotEqual(place["vram_mib"], 4231.19)
 
+    def test_a_probe_placement_is_not_the_placement(self):
+        """The first `offloaded N/M` is a throwaway probe model, not this one.
+
+        Fit measures device memory by loading a probe, and the probe logs its
+        own placement before the real weights load. Reading the first match
+        reported the probe's `42/42` for a run that shed every layer to RAM, and
+        the residency guard passed it as a full GPU offload.
+        """
+        place = server_for(PROBE_THEN_CPU_LOG).residency()
+        self.assertEqual(place["gpu_layers"], 0)
+        self.assertEqual(place["layers_total"], 42)
+        self.assertEqual(place["vram_mib"], 0.0)
+        self.assertEqual(place["kv_cache_mib"], 0.0)
+        self.assertIs(place["ram_offloaded"], True)
+
+    def test_a_layer_count_a_zero_buffer_contradicts_is_not_a_placement(self):
+        """`offloaded N/M` is printed before allocation, so N>0 proves nothing.
+
+        The probe's `42/42` sits next to `CUDA0 model buffer size = 0.00 MiB`:
+        nothing was placed on the card. Taking the count on its own lets a
+        CPU-only run be recorded as a legitimate llama.cpp grade, which is
+        exactly what the residency guard exists to prevent. One placement line,
+        so this fails only if the buffer size is not required to back it.
+        """
+        place = server_for(
+            "load_tensors: offloaded 42/42 layers to GPU\n"
+            "load_tensors:        CUDA0 model buffer size =     0.00 MiB\n"
+            "load_tensors:        CPU_Mapped model buffer size = 18056.75 MiB\n"
+            "main: model loaded\n"
+        ).residency()
+        self.assertEqual(place["gpu_layers"], 0)
+        self.assertEqual(place["vram_mib"], 0.0)
+        self.assertIs(place["ram_offloaded"], True)
+
+    def test_the_final_load_of_a_healthy_run_is_the_one_reported(self):
+        """The last placement's own buffers, not the probe's `0.00 MiB`.
+
+        A healthy fit probes the device first too, so taking the first match
+        records a working 41/42 GPU run as the probe that preceded it -- and
+        the mirror image of the same mistake, a full GPU run refused.
+        """
+        log = (
+            "common_params_fit_impl: getting device memory data for initial parameters:\n"
+            "load_tensors: offloaded 42/42 layers to GPU\n"
+            "load_tensors:        CUDA0 model buffer size =     0.00 MiB\n"
+            "common_params_fit_impl: projected to use 25441 MiB of device memory vs. "
+            "20100 MiB of free device memory\n"
+            "load_tensors: offloaded 41/42 layers to GPU\n"
+            "load_tensors:        CUDA0 model buffer size = 17880.66 MiB\n"
+            "llama_kv_cache:      CUDA0 KV buffer size =    480.00 MiB\n"
+            "llama_context: n_ctx                 = 24576\n"
+            "main: model loaded\n"
+        )
+        place = server_for(log).residency()
+        self.assertEqual(place["gpu_layers"], 41)
+        self.assertEqual(place["layers_total"], 42)
+        self.assertEqual(place["vram_mib"], 17880.66)
+        self.assertEqual(place["kv_cache_mib"], 480.00)
+        self.assertIs(place["ram_offloaded"], True)
+
+    def test_the_placement_is_read_once_and_survives_teardown(self):
+        """The measurement is taken while the container exists, once.
+
+        `docker logs` on a removed container returns nothing, and parsing
+        nothing yields `None` for every field -- which is exactly how a run
+        that plainly offloaded to the card recorded `gpu_layers: null`. The
+        value has to come from the read made at load time, and no later read
+        may be needed or attempted.
+        """
+        remote = FakeRemote(log_text=FIT_LOG)
+        server = serving.LlamaCppServer(
+            remote, "gemma2:27b", {"gguf": "/g", "gguf_sha256": "abc123"},
+            num_ctx=24576, request_timeout=evaluate_models.request_timeout,
+        )
+        server._require_gpu_residency()
+        reads_after_load = len(remote.log_reads)
+
+        server.teardown()
+        # A removed container answers `docker logs` with nothing at all.
+        remote.log_text = ""
+        place = server.residency()
+
+        self.assertEqual(place["gpu_layers"], 41)
+        self.assertEqual(place["layers_total"], 42)
+        self.assertEqual(place["vram_mib"], 17880.66)
+        self.assertEqual(place["kv_cache_mib"], 480.00)
+        self.assertEqual(place["n_ctx"], 24576)
+        self.assertIs(place["ram_offloaded"], True)
+        self.assertEqual(len(remote.log_reads), reads_after_load,
+                         "the cached value must not be re-read after teardown")
+
+    def test_a_repeated_read_is_one_ssh_round_trip_not_several(self):
+        """`provenance()` and `_require_gpu_residency()` both want it.
+
+        They are called at the same moment in the launch path, and each is an
+        `ssh docker logs`. Caching is what makes the second one free.
+        """
+        remote = FakeRemote(log_text=FIT_LOG)
+        server = serving.LlamaCppServer(
+            remote, "gemma2:27b", {"gguf": "/g", "gguf_sha256": "abc123"},
+            num_ctx=24576, request_timeout=evaluate_models.request_timeout,
+        )
+        server._require_gpu_residency()
+        server.provenance()
+        server.provenance()
+        self.assertEqual(len(remote.log_reads), 1)
+
 
 class GpuResidencyGuardTest(unittest.TestCase):
     """A grade decoded on the CPU is worthless here, so this is a failure.
@@ -998,6 +1133,17 @@ class GpuResidencyGuardTest(unittest.TestCase):
         start(session)
         self.assertEqual(session.engine, "ollama")
         self.assertIn("0/42 layers in VRAM", session.fallback_reason)
+
+    def test_a_probe_before_a_cpu_only_load_is_still_refused(self):
+        """The live bug: the probe's 42/42 used to pass this guard.
+
+        A confirmed CPU-decoded run reported `gpu_layers: 42` because the probe
+        was read, so the grade was stored as a legitimate llama.cpp result.
+        """
+        server = server_for(PROBE_THEN_CPU_LOG)
+        with self.assertRaises(serving.EngineUnavailable) as caught:
+            server._require_gpu_residency()
+        self.assertIn("0/42", str(caught.exception))
 
 
 class EnginePrintTest(unittest.TestCase):
@@ -1633,6 +1779,41 @@ class TranscriptAttributionTest(unittest.TestCase):
         self.assertEqual(record["reproducibility"]["engine"], "llama.cpp")
         self.assertIs(record["reproducibility"]["kv_offload_disabled"], False)
         self.assertIsNone(record["reproducibility"]["fallback_engine"])
+
+    def test_the_measured_placement_reaches_the_written_record(self):
+        """The six placement keys, carrying the server's own measurement.
+
+        `Reproducibility` declared three engine fields and emitted exactly
+        those, so a provenance dict that held the measurement perfectly still
+        had it dropped on the way to the JSONL -- 28 records with a null
+        `gpu_layers` beside an engine that had obviously offloaded.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            record = self._record(make_session(FakeRemote(log_text=FIT_LOG)), tmpdir)
+        reproducibility = record["reproducibility"]
+        for field in ("gpu_layers", "layers_total", "vram_mib", "kv_cache_mib",
+                      "n_ctx", "ram_offloaded"):
+            with self.subTest(field=field):
+                self.assertIn(field, reproducibility)
+        self.assertEqual(reproducibility["gpu_layers"], 41)
+        self.assertEqual(reproducibility["layers_total"], 42)
+        self.assertEqual(reproducibility["vram_mib"], 17880.66)
+        self.assertEqual(reproducibility["kv_cache_mib"], 480.00)
+        self.assertEqual(reproducibility["n_ctx"], 24576)
+        self.assertIs(reproducibility["ram_offloaded"], True)
+
+    def test_a_log_with_nothing_to_measure_records_null_not_a_guess(self):
+        """A server that printed no placement line leaves every key null.
+
+        Absence is the honest reading; a zero would say the card held nothing
+        and fail a healthy model for the wrong reason.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            record = self._record(make_session(FakeRemote(log_text="main: model loaded\n")), tmpdir)
+        for field in ("gpu_layers", "layers_total", "vram_mib", "kv_cache_mib",
+                      "n_ctx", "ram_offloaded"):
+            with self.subTest(field=field):
+                self.assertIsNone(record["reproducibility"][field])
 
     def test_a_fallback_record_says_ollama_took_over(self):
         remote = FakeRemote(state="exited", log_text="unsupported model architecture")
