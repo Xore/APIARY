@@ -1450,3 +1450,270 @@ no AI/assistant attribution found
   changes this again the same class of failure returns, and it would be
   worth an upstream note.
 - **Nothing pushed.** Commits are local on `ci/3501-base-image-gate`.
+
+---
+
+# Session 3 — clearing the backlog: six pin moves, 40 exemptions, gate green
+
+Follow-up on `.task-exempt.md`, same branch `ci/3501-base-image-gate`.
+The brief's rule was that an exemption claims *this repo cannot fix the
+finding*, so every remaining image was tried as a pin move first and only
+exempted when the scan showed there was nowhere to move to.
+
+**The gate is green for the first time.** Measured over every reference
+`list-docker-base-images.py` emits, replaying the workflow's own classify
+loop:
+
+```
+$ python3 scripts/list-docker-base-images.py > images.txt     # 66 refs
+$ <the workflow's per-image scan + classify, verbatim>
+flagged=0 unresolved=0 exempt=40 scan_failed=0
+GATE: PASS
+```
+
+40 refs match a written exemption, 0 flagged, 0 unresolvable, 0 scan
+failures — the last of these three sessions' runs, and the first where all
+four buckets are the way they should be.
+
+## What moved, and what it fixed
+
+Six pins moved, each because a scan showed the candidate was clean or
+measurably better — the pin move *is* the fix, so these carry no exemption:
+
+| image | old ref | new ref | why it moved |
+|---|---|---|---|
+| ghidra service base | `eclipse-temurin:21-jdk-jammy@sha256:e0c60c48…` | `eclipse-temurin:21-jdk@sha256:3e3c176f…` | jammy variant measured 1 fixable; the current 21-jdk tag measures **0** |
+| arkime capture/viewer/pcap-init | `arkime:v6.7.0@sha256:754ac8d5…` | `arkime:v6.8.0@sha256:196d5e70…` | v6.8.0 is the newest published v6 release; 169 total / 89 fixable → 3 total / 1 fixable |
+| arkime-init | `arkime:v6-latest@sha256:754ac8d5…` | `arkime:v6-latest@sha256:196d5e70…` | same rebuild, `v6-latest` now resolves to the v6.8.0 manifest |
+| technitium dns | `technitium/dns-server:15.4.0@sha256:df7d90ef…` | `technitium/dns-server:15.6.0@sha256:1045db38…` | 15.6.0 measures clean; same major, same versioned on-disk config |
+| keycloak | `quay.io/keycloak/keycloak:latest` (unpinned) | `…:latest@sha256:b0f60d48…` | **digest-pinned, tag unchanged** — see below |
+| rex86-eval | `nvidia/cuda:12.4.1-devel-ubuntu22.04` (unpinned) | `…:sha256:da679129…` | **digest-pinned, tag unchanged** — see below |
+
+Four of these were ordinary fixes: the pin moved to an image that scans
+better. Two were not moves at all — they are the two of the brief's five
+unpinned pins where the image genuinely cannot move, pinned to a digest so
+the exemption keyed to it means something:
+
+- **`quay.io/keycloak/keycloak:latest`** — stays on `:latest` by decision
+  (its comment says so: for the stack's identity provider, staying current
+  outranks a reproducible image id, and it was deliberately unpinned after
+  CVE-2026-18963). It measures **0** fixable CRITICAL/HIGH and so needs no
+  exemption; the digest is what stops the exemption table and the gate from
+  chasing a moving target on a tag that means "newest". `pull_policy:
+  always` stays, so the tag still floats — the digest is the floor, not a
+  freeze. The comment above it was rewritten, because it said "unpinned on
+  purpose" directly above a now-pinned line.
+- **`nvidia/cuda:12.4.1-devel-ubuntu22.04`** — cannot move at all: 352
+  fixable, 336 of them `linux-libc-dev`, and #160 pins the CUDA version
+  because the model merge must be pure weight arithmetic and never touch the
+  GPU. 12.8.1-devel on the same ubuntu measures 337 — the same wall. Pinning
+  the digest makes the exemption meaningful; the version does not move.
+
+`docker.n8n.io/n8nio/n8n:latest` stayed unpinned: it is named only by the
+GHOSTS-vendored compose, is never built from, and pinning a vendored
+upstream's floating reference buys nothing here — the key carries `None`
+and the reason says the digest could not even be resolved on this mirror
+(HTTP 429, retried). `postgres:16.8` and `grafana/grafana` are likewise
+emitted bare and exempt with `None`; both are vendored-compose references
+with no `FROM` in the tree to pin them from.
+
+## The exemptions, and the shape they come in
+
+`ACCEPTED_CVES` grew from 5 entries to 40, 35 added and none retired. They
+fall into three shapes, and the shape is the argument:
+
+1. **Build stage no shipped image inherits** (5 keys: `node:22`,
+   `rust:1-bookworm`, `rust:1-slim-bookworm`,
+   `mcr.microsoft.com/dotnet/sdk:10.0.101`, `golang:1.27-bookworm`) —
+   resolved by walking every tracked Dockerfile's stage graph.
+2. **Third-party image with no clean candidate reachable** (the large
+   group) — every one measured twice, once as pinned and once at the newest
+   candidate resolvable, so "no fix exists" is a claim with two scans behind
+   it. The recurring shapes: a Go stdlib or vendored JS bundle only an
+   upstream rebuild moves (`nicolaka/netshoot` 440, `dtagdevsec/conpot` 52,
+   `ollama/ollama` 45); an on-disk format this repo does not own
+   (`postgres`, `mongo`, `zeek` — index format, oplog, log schema); and the
+   one upstream-debian wall that shows up under five different images.
+3. **Sandbox-only toolbox** (`nicolaka/netshoot` also reads this way) — an
+   analysis sandbox that captures traffic and is torn down, never a service,
+   no application code inside.
+
+### The upstream-debian wall, and why it is one entry repeated five times
+
+`CVE-2026-103111` in `libpcre2-8-0` on debian trixie/bookworm appears under
+the python tags, `debian:bookworm-slim`, `docker.io/library/debian:bookworm-slim`
+and now arkime. It is the same advisory: debian's security update for pcre2,
+which no image-layer change can carry. The evidence that it is genuinely
+immovable rather than a lazy exemption is that **the same wall was
+crossed**: `debian:bookworm-slim` measures 1 fixable, and
+`debian:trixie-slim` measures **5** — trixie trades this one pcre2 finding
+for openssl 3.5.7 and `libssl3t64`. There is no distribution that both fixes
+pcre2 and does not introduce worse. That is the ceiling, and it is stated
+in the entry rather than implied.
+
+### Arkime — the two keys, and why both exist
+
+Arkime was the last image to be classified and it is the cleanest example
+of why the matching rule is exact-match. `honeypot-elk/compose.yml` names
+`v6.8.0`, `honeypot-init/compose.yml` names `v6-latest`, **both at the same
+digest**; `main()` therefore emits two distinct references for one image and
+the rule requires a key per emitted reference. This is the same situation as
+`postgres:16.8` (bare + digest-pinned) and the two `debian:bookworm-slim`
+spellings, and the reason is written into each entry rather than collapsed
+away.
+
+The measurement behind both:
+
+```
+$ trivy image --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
+    --format json arkime:v6.8.0@sha256:196d5e70…
+HIGH  CVE-2026-103111  libpcre2-8-0@10.46-1~deb13u2 -> 10.46-1~deb13u3
+
+$ docker run --rm --entrypoint sh arkime:v6.8.0@sha256:196d5e70… \
+      -c 'grep PRETTY_NAME /etc/os-release'
+PRETTY_NAME="Debian GNU/Linux 13 (trixie)"
+```
+
+One finding, entirely upstream debian's, on the same advisory the python
+entries already carry. And there is nowhere to move to, checked against the
+**paginated** tag list (the brief flags that the tags endpoint truncates at
+100 per page — an unpaginated list would have made "no newer tag exists"
+look proved when it was not):
+
+```
+$ <paginated ghcr tag list for arkime/arkime/arkime>   # 5001 tags
+v6 plain: [... v6.6.0, v6.7.0, v6.8.0, v6.8.0-ja4]     # nothing above v6.8.0
+$ docker buildx imagetools inspect arkime:v6-latest --format '{{.Manifest.Digest}}'
+sha256:196d5e70…      # identical to v6.8.0
+```
+
+v6.8.0 is the newest published v6 release and `v6-latest` resolves to it,
+so the floating tag is not an escape hatch either. The entry retires itself
+when arkime ships a trixie rebuild carrying the pcre2 update.
+
+## Emission unchanged apart from the deliberate moves
+
+The brief asks that emission not shift apart from pins deliberately moved.
+Measured by reverting the six files in place and re-running against HEAD,
+then restoring:
+
+```
+$ # six files reverted to HEAD, script as committed
+before=66 refs
+$ # restored
+after=66 refs
+ADDED   eclipse-temurin:21-jdk@sha256:3e3c176f…
+ADDED   ghcr.io/arkime/arkime/arkime:v6.8.0@sha256:196d5e70…
+ADDED   ghcr.io/arkime/arkime/arkime:v6-latest@sha256:196d5e70…
+ADDED   nvidia/cuda:12.4.1-devel-ubuntu22.04@sha256:da679129…
+ADDED   quay.io/keycloak/keycloak:latest@sha256:b0f60d48…
+ADDED   technitium/dns-server:15.6.0@sha256:1045db38…
+REMOVED eclipse-temurin:21-jdk-jammy@sha256:e0c60c48…
+REMOVED ghcr.io/arkime/arkime/arkime:v6.7.0@sha256:754ac8d5…
+REMOVED ghcr.io/arkime/arkime/arkime:v6-latest@sha256:754ac8d5…
+REMOVED nvidia/cuda:12.4.1-devel-ubuntu22.04
+REMOVED quay.io/keycloak/keycloak:latest
+REMOVED technitium/dns-server:15.4.0@sha256:df7d90ef…
+```
+
+Six added, six removed, one-for-one. No reference appeared or vanished as a
+side effect.
+
+## Negative control — and this time it discriminates
+
+The previous session could not use the exemption-removal test, because the
+gate was red either way: an exit code of 1 proves nothing when it is 1
+before and after. With the gate green it is a real test.
+
+```
+$ # remove the two arkime keys
+$ python3 -c '… allow_cve_findings(arkime@v6.8.0@sha256:196d5e70…)' ; echo $?
+1                                       # not exempt -> the classifier flags it
+$ # restore
+$ python3 -c '… allow_cve_findings(arkime@v6.8.0@sha256:196d5e70…)' ; echo $?
+0                                       # exempt again
+```
+
+The removal is detected and the restore is detected, on a gate that was
+green when both ran. The digest-keying is also checked to bite: a tag that
+has moved is not exempt.
+
+```
+$ python3 -c '… allow_cve_findings("ghcr.io/arkime/arkime/arkime:v6.9.0@sha256:196d5e70…")' ; echo $?
+1                                       # a tag that does not exist gets no pass
+```
+
+## The gate was not weakened
+
+```
+$ git diff | grep -E '^[+-].*(severity|ignore-unfixed|exit-code)'
+(no change to severity, --ignore-unfixed, or --exit-code)
+$ grep -n 'exit 1' .github/workflows/image-security-scan.yml
+203:            exit 1
+```
+
+No blanket ignore, no all-images rule, no severity change, no threshold. The
+only workflow-adjacent change in the whole series was the classifier fix in
+`a7cb77e5`, and the scan-failed bucket from that commit is untouched: it
+still sits before the exemption lookup, and it still reports coverage gaps
+as warnings rather than passes.
+
+## Tests
+
+```
+$ /usr/bin/python3.12 -m pytest scripts/tests tests/docs -q
+1000 passed, 6 skipped, 1 xfailed, 93 subtests passed in 175.14s (0:02:55)
+
+$ /usr/bin/python3.12 -m pytest scripts/tests/test_3501_base_image_cve_exemptions.py -q
+14 passed
+
+$ python3 scripts/check-ai-attribution.py --text <every changed file>
+no AI/assistant attribution found
+```
+
+Run against the final tree, after the last comment edits — not against a
+tree that had since moved underneath the result.
+
+The two images the report calls clean were measured directly rather than
+inherited from an earlier run's tally:
+
+```
+$ trivy image --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed \
+    --exit-code 1 --format json <each>
+exit=0 findings=0  quay.io/keycloak/keycloak:latest@sha256:b0f60d48…
+exit=0 findings=0  eclipse-temurin:21-jdk@sha256:3e3c176f…
+```
+
+Which is why neither carries an `ACCEPTED_CVES` key: a clean image needs no
+exemption, and adding one would have been a way to make the gate pass
+without moving anything.
+
+Key accounting, checked against HEAD:
+
+```
+keys at HEAD: 5   keys now: 40
+retired: none     added: 35
+emitted refs == 66
+keys matching no emitted ref: none
+```
+
+The exemption test asserts every key is a reference the script actually
+emits, which is why it is run on all 40. No key retired this session: every
+pin move replaced a reference that the script re-emits under the new
+digest, which is why the emission diff shows six added and six removed
+rather than six retirements.
+
+## Not done
+
+- **Nothing pushed.** Commits are local on `ci/3501-base-image-gate`.
+- **The arkime and debian/pcre2 wall is upstream's, not fixed here.** Six
+  images carry the same `CVE-2026-103111`; the fix is a debian rebuild in
+  each, and debian is currently making the alternative worse (trixie: 5).
+- **`docker.n8n.io/n8nio/n8n:latest` could not be digest-resolved** on this
+  run — the mirror returned HTTP 429 through repeated retries. Its key
+  carries `None` for that reason and the reason says so; a future run with
+  the mirror reachable can pin it.
+- **`CONTAINER-SCAN-MEASUREMENT.md` is stale and was left alone.** It is the
+  prior PR's (#3516) snapshot and still lists `arkime:v6.7.0` and the
+  retired digests as live rows. Rewriting it is that PR's artifact, not this
+  change's, and no test or workflow reads it.

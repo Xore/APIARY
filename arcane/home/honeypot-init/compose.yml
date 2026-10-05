@@ -292,7 +292,7 @@ services:
 
   arkime-init:
     <<: *runtime-defaults
-    image: ghcr.io/arkime/arkime/arkime:v6-latest@sha256:754ac8d50c8d4136462c3bb3701c400be66310020ab01d5ea94a4e73942b0127
+    image: ghcr.io/arkime/arkime/arkime:v6-latest@sha256:196d5e70b7e2f030c658403f1359ae2497e9df87100aff0e6b012aa2d5469f0d
     container_name: hp-arkime-init
     restart: no
     command:

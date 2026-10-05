@@ -535,7 +535,7 @@ services:
   # needed for the chmod once root no longer owns the path post-chown).
   arkime-pcap-init:
     <<: *runtime-defaults
-    image: ghcr.io/arkime/arkime/arkime:v6.7.0@sha256:754ac8d50c8d4136462c3bb3701c400be66310020ab01d5ea94a4e73942b0127
+    image: ghcr.io/arkime/arkime/arkime:v6.8.0@sha256:196d5e70b7e2f030c658403f1359ae2497e9df87100aff0e6b012aa2d5469f0d
     container_name: hp-arkime-pcap-init
     restart: "no"
     entrypoint: ["/bin/sh", "-c"]
@@ -556,8 +556,8 @@ services:
     # offline files", merged 2026-05-19, first released in v6.4.0) fixes
     # the exact deadlock this container hit live -- "Waiting for reader
     # slot N to drain, finishWaiting=255" repeating forever until manually
-    # restarted. v6.7.0 is the latest stable release and includes it.
-    image: ghcr.io/arkime/arkime/arkime:v6.7.0@sha256:754ac8d50c8d4136462c3bb3701c400be66310020ab01d5ea94a4e73942b0127
+    # restarted. v6.8.0 is the latest stable release and includes it.
+    image: ghcr.io/arkime/arkime/arkime:v6.8.0@sha256:196d5e70b7e2f030c658403f1359ae2497e9df87100aff0e6b012aa2d5469f0d
     container_name: hp-arkime-capture
     restart: unless-stopped
     # Offline import mode: -R watches the locally synced pcap dir (see
@@ -700,7 +700,7 @@ services:
     <<: *runtime-defaults
     # #1497: pinned for the same reason as arkime-capture above -- keep
     # both in lockstep, same image either way.
-    image: ghcr.io/arkime/arkime/arkime:v6.7.0@sha256:754ac8d50c8d4136462c3bb3701c400be66310020ab01d5ea94a4e73942b0127
+    image: ghcr.io/arkime/arkime/arkime:v6.8.0@sha256:196d5e70b7e2f030c658403f1359ae2497e9df87100aff0e6b012aa2d5469f0d
     container_name: hp-arkime-viewer
     restart: unless-stopped
     # #126: waits on the marker directly instead of depends_on-ing
