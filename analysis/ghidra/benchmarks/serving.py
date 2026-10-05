@@ -999,9 +999,21 @@ class LlamaCppServer:
         return value if completed.returncode == 0 and value else None
 
     def server_log(self, lines: int = 60) -> str:
-        """The tail of the server's own log -- where the OOM text lives."""
+        """The server's own log -- where the OOM text and the placement live.
+
+        The `docker logs --tail N` bound is what keeps this cheap; nothing
+        further trims the text. It used to end in `[-2000:]` as well, which
+        silently discarded the measurements: the placement lines are printed
+        once, at load, and a server that has decoded since then has buried them
+        under per-token chatter (13,194 collapsed chars at load, against a
+        2,000-char tail, measured 2026-10-05). That is how every
+        `gpu_layers` in run 2026-10-05-20261005T134600Z-3aee521a read `null`
+        on a load that had plainly offloaded 33/33 layers. What is held in
+        memory is bounded by the lines requested; what is *searched* is not,
+        because the parse is what the log is read for.
+        """
         completed = self.remote.docker("logs", "--tail", str(lines), self.name, timeout=30)
-        return " ".join((completed.stdout + completed.stderr).split())[-2000:]
+        return " ".join((completed.stdout + completed.stderr).split())
 
     def residency(self) -> dict[str, Any]:
         """Where the model actually lives, measured from the server's own log.
@@ -1116,6 +1128,15 @@ class LlamaCppServer:
             "started_at": self.started_at,
             # Measured placement, not the flags we asked for. See residency().
             **self.residency(),
+            # The two context numbers are different quantities, so they get
+            # different names. `--fit-ctx` is the *minimum* fit may set, not a
+            # request for exactly that value: measured 2026-10-05, `--fit-ctx
+            # 24576` on a 131072-context model served at n_ctx 98048. Recording
+            # only one of them is how run ...-3aee521a came to assert a context
+            # its request body contradicted. This cannot be reconciled per
+            # request -- llama-server accepts `n_ctx` in the body and ignores it
+            # -- so the record states both and lets a reader see the gap.
+            "n_ctx_requested": self.num_ctx,
             # The URL that answered, so the record names the endpoint rather
             # than only the engine. `ModelSession.provenance()` merges this
             # with the Ollama endpoint; the two are different servers.
@@ -1396,6 +1417,7 @@ class ModelSession:
                 # it in.
                 "gpu_layers": None, "layers_total": None, "vram_mib": None,
                 "kv_cache_mib": None, "n_ctx": None, "ram_offloaded": None,
+                "n_ctx_requested": self.num_ctx,
             })
         record["engine"] = self.engine
         record["fallback_engine"] = self.fallback_engine
