@@ -2108,8 +2108,9 @@ jobs:
               git for-each-ref --format='%(refname)' refs/remotes \
                 | grep -v 'origin/HEAD$' \
                 | grep -v "^${pr_merge_ref}$" \
-                | sed 's|^|delete |' \
-                | git update-ref --stdin || true
+                | while read ref; do
+                    git update-ref -d "$ref" || { echo "::error::secret-scan: failed to delete $ref"; exit 1; }
+                  done || exit 1
               # Prove the purge did what it claims: a scan that still sees
               # refs would be measuring whatever the workspace was reused
               # from, silently, and the assertion below would be worthless.
