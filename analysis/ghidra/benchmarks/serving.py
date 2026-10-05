@@ -441,19 +441,201 @@ def canonical_tag(tags: list[dict[str, Any]], model: str) -> str | None:
 
 # --- Wire translation ------------------------------------------------------
 
+# A JSON schema the harness is willing to send to a strict-constrained engine.
+# Not a guess at llama.cpp's limits: llama.cpp runs this schema through
+# json_schema_to_grammar(), which supports a defined subset, and anything outside
+# it raises *during generation* rather than at request time -- a 500 mid-answer,
+# not a 400 on send. So the constraint is on what this function may emit.
+#
+# Deliberately a property list, not a probe. Verifying against the running server
+# means a live engine in the unit suite, which conftest.py exists to forbid; the
+# session schema is a reviewed artifact pinned by
+# SESSION_EFFECTIVE_SCHEMA_SHA256, so pinning what it may contain here is the
+# same contract by another name.
+SCHEMA_KEYWORDS = frozenset({
+    "type", "properties", "required", "additionalProperties",
+    "items", "enum", "const", "description", "title", "default",
+    "minItems", "maxItems", "minLength", "maxLength", "pattern",
+    "anyOf", "oneOf", "allOf", "not", "definitions", "$defs", "$ref",
+})
+# These are *keywords*, checked at keyword positions only. A schema's own property
+# names sit under `properties` as keys of the very same dict, so walking every
+# key would read `intent`, `summary` and `mitre_attack` as keywords and reject the
+# shipped session schema -- which is the failure this guard must not have.
+# SCHEMA_VALUE_KEYWORDS names the keys whose *values* are schemas (or lists/maps
+# of them), and only those get walked.
+SCHEMA_VALUE_KEYWORDS = frozenset({
+    "properties", "items", "additionalProperties", "not",
+    "anyOf", "oneOf", "allOf", "definitions", "$defs",
+})
+SCHEMA_MAP_KEYWORDS = frozenset({"properties", "definitions", "$defs"})
+# `"$ref": "#/$defs/x"` is the one indirection a reviewable schema uses and the
+# grammar builder resolves the pointer against the same document, so a local
+# pointer is expressible; anything else is not.
+SCHEMA_LOCAL_REF_PREFIX = "#/"
+
+
+class UnsupportedFormat(ValueError):
+    """The engine cannot honour the constraint the harness asked for.
+
+    Its own type because it is not a transport failure and must not be filed as
+    one. The brief's rule is explicit: a constraint that cannot be sent must be
+    recorded with an honest reason, never quietly dropped and then graded -- an
+    unconstrained answer that scores is indistinguishable from a real pass, which
+    is worse than a visible `unsupported_by_engine` because it is silent.
+
+    Its own type also because `chat()` catches `Exception` and stores the
+    exception's text as the record's error, so a raised error is already the
+    honest-failure path; no new plumbing is needed to make it visible.
+    """
+
+    def __init__(self, reason: str, *, format_spec: Any):
+        super().__init__(reason)
+        self.reason = reason
+        self.format_spec = format_spec
+
+
+def response_format_for(spec: Any) -> dict[str, Any]:
+    """The `response_format` llama.cpp accepts for one harness `format`.
+
+    llama.cpp's server-common.cpp is the authority and it is unambiguous
+    (tools/server/server-common.cpp, `oaicompat_chat_params_parse`):
+
+        if (response_type == "json_object") {
+            if (response_format.contains("schema") || json_schema.empty()) {
+                json_schema = json_value(response_format, "schema", json::object());
+            }
+        } else if (response_type == "json_schema") {
+            auto schema_wrapper = json_value(response_format, "json_schema", json::object());
+            json_schema = json_value(schema_wrapper, "schema", json::object());
+        } else if (!response_type.empty() && response_type != "text") {
+            throw std::invalid_argument("response_format type must be one of "
+                "\\"text\\" or \\"json_object\\", but got: " + response_type);
+        }
+
+    So exactly two shapes reach a grammar, and a bare schema is neither:
+    `{"type": "json_object", "schema": {...}}` and
+    `{"type": "json_schema", "json_schema": {"schema": {...}}}`. Ollama's native
+    `format` is the schema itself, which is why the sessions slot 400'd: the
+    schema arrived with no `type`, became the empty string, and fell to the throw.
+    That is the recorded failure verbatim, from
+    /tmp/roster-run/transcripts/2026-10-05-20261005T032348Z-bb853c8d.
+
+    `json_object` carrying the schema under `schema` is the chosen mapping rather
+    than the `json_schema` wrapper because both land in the same `json_schema`
+    variable and this one is a single hop: the wrapper adds a nesting level whose
+    only content is the same schema.
+
+    Raises `UnsupportedFormat` for a spec no accepted shape can carry, so the
+    answer is recorded as unmeasured rather than graded unconstrained.
+    """
+    if spec == "json":
+        return {"type": "json_object"}
+    if not isinstance(spec, dict):
+        # A PEG grammar or any other opaque constraint. llama.cpp's own grammar
+        # field takes GBNF text, not Ollama's spec object; passing the object
+        # through is the 400 this function exists to prevent.
+        raise UnsupportedFormat(
+            "unsupported_by_engine: llama.cpp's /v1/chat/completions takes no "
+            f"equivalent for this format ({type(spec).__name__}); a PEG grammar "
+            "has no OpenAI form, so no constraint was sent and this answer is "
+            "not graded against one",
+            format_spec=spec,
+        )
+    # Already in one of the two accepted shapes: pass it through untouched.
+    declared = spec.get("type")
+    if declared in ("json_object", "json_schema", "text"):
+        return spec
+    if not _grammar_expressible(spec, root=spec):
+        raise UnsupportedFormat(
+            "unsupported_by_engine: this schema uses a keyword "
+            "json_schema_to_grammar cannot express, so llama.cpp would accept "
+            "the request and then fail mid-answer; no constraint was sent and "
+            "this answer is not graded against one",
+            format_spec=spec,
+        )
+    return {"type": "json_object", "schema": spec}
+
+
+def _grammar_expressible(schema: Any, *, root: Any = None) -> bool:
+    """True when every *keyword* in `schema` is one json_schema_to_grammar handles.
+
+    Recursive over the nested schemas a session schema is made of, so a keyword
+    buried four levels down cannot pass. Property *names* are not keywords and are
+    never checked: they are the keys of the dict that `properties` maps to, and
+    the shipped schema calls them `intent`, `summary` and `mitre_attack`.
+    """
+    if isinstance(schema, dict):
+        for key, value in schema.items():
+            if key not in SCHEMA_KEYWORDS:
+                return False
+            if key == "$ref":
+                # Only a pointer into this same document resolves. A remote or
+                # file ref is not something the grammar builder can fetch.
+                if not (isinstance(value, str) and value.startswith(SCHEMA_LOCAL_REF_PREFIX)):
+                    return False
+                if root is None or not _ref_resolves(value, root):
+                    return False
+                continue
+            # The keys under these maps are property/definition names, not
+            # schema keywords. Only their values are schemas.
+            if key in SCHEMA_MAP_KEYWORDS:
+                if not isinstance(value, dict) or not all(
+                    _grammar_expressible(item, root=root) for item in value.values()
+                ):
+                    return False
+            elif key in SCHEMA_VALUE_KEYWORDS and not _grammar_expressible(value, root=root):
+                return False
+            if key == "items" and isinstance(value, list):
+                if not all(_grammar_expressible(item, root=root) for item in value):
+                    return False
+        return True
+    if isinstance(schema, list):
+        return all(_grammar_expressible(item, root=root) for item in schema)
+    # Scalars under enum/const/default/const are values, not schemas.
+    return True
+
+
+def _ref_resolves(pointer: str, root: Any) -> bool:
+    """True when a local JSON pointer names something in `root`.
+
+    A `$ref` that dangles is the one indirection json_schema_to_grammar follows
+    by itself, so it is checked here rather than left to become a grammar-build
+    failure inside the server.
+    """
+    node = root
+    for token in pointer.lstrip("#/").split("/"):
+        if not token:
+            continue
+        token = token.replace("~1", "/").replace("~0", "~")
+        if isinstance(node, dict) and token in node:
+            node = node[token]
+        elif isinstance(node, list) and token.isdigit() and int(token) < len(node):
+            node = node[int(token)]
+        else:
+            return False
+    return True
+
+
 def to_wire(body: dict[str, Any]) -> dict[str, Any]:
     """Ollama-shaped harness body -> llama.cpp's /v1/chat/completions.
 
     Sampling translates name-for-name where both sides agree (temperature, seed,
     repeat_penalty, repeat_last_n), so a llama.cpp answer is decoded the way the
-    record says it was. `format` becomes `response_format`. `think` is dropped:
-    it is Ollama's analysis-channel switch with no llama.cpp equivalent, and
-    llama.cpp's own templates own the channel. `keep_alive` is dropped because
-    the process *is* the lifetime here.
+    record says it was. `format` becomes `response_format` via
+    `wire_response_format()`, which is where the two engines' grammar shapes
+    actually differ. `think` is dropped: it is Ollama's analysis-channel switch
+    with no llama.cpp equivalent, and llama.cpp's own templates own the channel.
+    `keep_alive` is dropped because the process *is* the lifetime here.
 
     Tool turns need ids llama.cpp pairs a result to a call with, and Ollama's
     shape carries none. Ids are synthesized from the call's position in the
     history, which is stable because the same list is re-translated every round.
+
+    A `format` that cannot be expressed does not land here at all:
+    `response_format_for()` raises `UnsupportedFormat`, which `request_json()`
+    turns into a recorded failure. Dropping the constraint silently is the one
+    outcome the brief rules out, and it cannot happen by omission here.
     """
     options = body.get("options") or {}
     messages: list[dict[str, Any]] = []
@@ -495,9 +677,7 @@ def to_wire(body: dict[str, Any]) -> dict[str, Any]:
         if key in options:
             wire[key] = options[key]
     if body.get("format") is not None:
-        wire["response_format"] = (
-            {"type": "json_object"} if body["format"] == "json" else body["format"]
-        )
+        wire["response_format"] = response_format_for(body["format"])
     if body.get("tools"):
         wire["tools"] = body["tools"]
     return wire
@@ -513,6 +693,24 @@ FINISH_REASONS = {"stop": "stop", "length": "length", "tool_calls": "stop"}
 def from_wire(payload: dict[str, Any]) -> dict[str, Any]:
     """llama.cpp's response -> the Ollama-shaped dict the harness reads."""
     choice = (payload.get("choices") or [{}])[0] or {}
+    message = dict(choice.get("message") or {})
+    if message.get("tool_calls"):
+        tool_calls = []
+        for call in message["tool_calls"]:
+            call = dict(call)
+            function = dict(call.get("function") or {})
+            arguments = function.get("arguments")
+            if isinstance(arguments, str):
+                try:
+                    decoded = json.loads(arguments)
+                except ValueError:
+                    pass
+                else:
+                    if isinstance(decoded, dict):
+                        function["arguments"] = decoded
+            call["function"] = function
+            tool_calls.append(call)
+        message["tool_calls"] = tool_calls
     timings = payload.get("timings") or {}
     usage = payload.get("usage") or {}
     prompt_tokens = usage.get("prompt_tokens") or timings.get("prompt_n")
@@ -520,7 +718,7 @@ def from_wire(payload: dict[str, Any]) -> dict[str, Any]:
     predicted_ms = timings.get("predicted_ms")
     finish = choice.get("finish_reason")
     return {
-        "message": dict(choice.get("message") or {}),
+        "message": message,
         "done_reason": FINISH_REASONS.get(finish, finish),
         "prompt_eval_count": prompt_tokens,
         "eval_count": output_tokens,

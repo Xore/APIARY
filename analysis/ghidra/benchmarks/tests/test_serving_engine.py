@@ -68,6 +68,12 @@ def _load(path, name):
 serving = _load(BENCHMARKS_DIR / "serving.py", "serving")
 evaluate_models = _load(BENCHMARKS_DIR / "evaluate-models.py", "evaluate_models")
 transcripts = _load(BENCHMARKS_DIR / "transcripts.py", "transcripts")
+LLAMACPP_CAPTURE = json.loads(
+    (BENCHMARKS_DIR / "tests/fixtures/llamacpp_structured_capture.json").read_text()
+)
+LLAMACPP_CAPTURES = {
+    capture["label"]: capture for capture in LLAMACPP_CAPTURE["captures"]
+}
 
 
 # --- a stub host that records everything it was asked to do ----------------
@@ -1273,10 +1279,15 @@ class TranslationTest(unittest.TestCase):
         self.assertEqual(serving.to_wire({"format": "json", "messages": []})["response_format"],
                          {"type": "json_object"})
 
-    def test_a_schema_dict_is_passed_through_unchanged(self):
-        schema = evaluate_models.session_schema()
-        self.assertEqual(serving.to_wire({"format": schema, "messages": []})["response_format"],
-                         schema)
+    def test_the_captured_session_schema_uses_the_accepted_llama_cpp_shape(self):
+        captured = LLAMACPP_CAPTURES["sessions-schema-asis"]
+        self.assertEqual(serving.to_wire(captured["harness_body"]),
+                         captured["wire_request"])
+        self.assertEqual(
+            captured["wire_request"]["response_format"],
+            {"type": "json_object", "schema": evaluate_models.session_schema()},
+        )
+        self.assertEqual(captured["raw_response"]["choices"][0]["finish_reason"], "stop")
 
     def test_ollama_only_fields_are_not_sent(self):
         wire = serving.to_wire({"think": True, "keep_alive": "10m", "messages": []})
@@ -1309,6 +1320,63 @@ class TranslationTest(unittest.TestCase):
             "tool_calls": [{"function": {"name": "write_file", "arguments": {"path": "a"}}}],
         }, "finish_reason": "tool_calls"}]})
         self.assertEqual(evaluate_models.assistant_text(result["message"]) != "", True)
+
+    def test_captured_openai_tool_arguments_become_the_harness_dict_shape(self):
+        captured = LLAMACPP_CAPTURES["coder-tools"]
+        raw_arguments = captured["raw_response"]["choices"][0]["message"][
+            "tool_calls"
+        ][0]["function"]["arguments"]
+        self.assertIsInstance(raw_arguments, str)
+
+        message = serving.from_wire(captured["raw_response"])["message"]
+        arguments = message["tool_calls"][0]["function"]["arguments"]
+        self.assertIsInstance(arguments, dict)
+
+        round_trip = serving.to_wire({"messages": [message]})
+        self.assertEqual(
+            round_trip["messages"][0]["tool_calls"][0]["function"]["arguments"],
+            raw_arguments,
+        )
+
+    def test_revdeck_uses_the_sampling_that_stopped_the_captured_loop(self):
+        """revdeck must go out with its own sampling.
+
+        The captured `revdeck-prose` request is the one a revdeck body really
+        produced, so asserting the harness reproduces its `options` proves the
+        per-slot exception is actually on the wire -- not merely defined in
+        `REVDECK_SAMPLING` and never applied.
+        """
+        captured = LLAMACPP_CAPTURES["revdeck-prose"]
+        case = next(
+            case for case in evaluate_models.REV_CASES
+            if case.name == "process-injection"
+        )
+        requests = []
+
+        def transport(_url, body):
+            requests.append(body)
+            return {"message": {"content": "complete"}, "done_reason": "stop"}
+
+        with mock.patch.object(evaluate_models, "REV_CASES", (case,)):
+            evaluate_models.score_revdeck(
+                "http://ignored", captured["harness_body"]["model"], 16384,
+                transport=transport,
+            )
+
+        self.assertEqual(
+            requests[0]["options"]["repeat_penalty"],
+            evaluate_models.REVDECK_SAMPLING["repeat_penalty"],
+        )
+        self.assertEqual(
+            requests[0]["options"]["repeat_last_n"],
+            evaluate_models.REVDECK_SAMPLING["repeat_last_n"],
+        )
+        # The other slots keep their own sampling; the exception is not global.
+        self.assertNotEqual(evaluate_models.REVDECK_SAMPLING,
+                            evaluate_models.HARMONY_SAMPLING)
+        self.assertEqual(
+            captured["raw_response"]["choices"][0]["finish_reason"], "stop"
+        )
 
 
 # --- the transport ---------------------------------------------------------
