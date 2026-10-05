@@ -176,6 +176,11 @@ def server_flags(num_ctx: int, *, kv_offload: bool = False) -> list[str]:
         # run and a GPU one, and residency() has nothing to measure: the
         # RAM-only guard silently never fires.
         "-lv", "4",
+        # Tool calling is rendered through the model's jinja chat template. This
+        # build defaults it to on, but a default is a property of the image, not
+        # of our contract: pin it so a llama.cpp upgrade that flips it cannot
+        # silently turn every tool call into plain prose.
+        "--jinja",
         "--host", "0.0.0.0",
         "--port", str(LLAMA_CONTAINER_PORT),
     ]
