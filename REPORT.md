@@ -1351,7 +1351,7 @@ authorize URL and the form action were both fine (380 and 393 chars). The
 
 ```
 $ # identical jar, identical request, both curl versions
-8.21.0:  008a: Cookie: AUTH_SESSION_ID=ei11SWpsalJpbk5Mam9WaXlUNkFjdDFHLm16YzlU
+8.21.0:  008a: Cookie: AUTH_SESSION_ID=<redacted-session-value>
 8.22.0:  * cookie 'KC_RESTART' dropped, domain '[file]' must not set cookies for 'gwtest-kc-<pid>'
          * cookie 'KC_AUTH_SESSION_HASH' dropped, domain '[file]' must not set cookies for 'gwtest-kc-<pid>'
 ```
