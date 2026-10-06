@@ -2030,9 +2030,9 @@ class RecordingTest(unittest.TestCase):
         remote = FakeRemote()
         session = make_session(remote)
         start(session)
-        self.assertEqual(len(remote.removed), 1, "the pre-start teardown")
+        self.assertEqual(len(remote.removed), 2, "the pre-start teardown + old-container cleanup")
         session.close()
-        self.assertEqual(len(remote.removed), 2)
+        self.assertEqual(len(remote.removed), 3)
         self.assertIsNone(session.server)
 
 

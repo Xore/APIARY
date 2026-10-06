@@ -908,6 +908,10 @@ class LlamaCppServer:
         # `read_in_container` overrides the same way for the same reason.
         # The override is the absolute path because tools.sh's own branch runs a
         # RELATIVE `./llama-server` and so depends on WORKDIR; this one must not.
+        # Kill any leftover containers from previous models that still hold port 8080.
+        self.remote.docker("ps", "-q", "--filter", "name=ghidra-llamacpp-", timeout=30)
+        # ^ prints nothing when none exist; docker rm -f on empty input is a no-op.
+        self.remote.docker("rm", "-f", "$(docker ps -q --filter name=ghidra-llamacpp-)", timeout=180)
         argv = [
             "run", "-d", "--name", self.name, "--gpus", "all",
             "-v", f"{OLLAMA_VOLUME}:/root/.ollama:ro",
