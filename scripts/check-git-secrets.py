@@ -111,10 +111,6 @@ ALLOWED_FILES: dict[str, str] = {
     # full-history scan still reads the commits that carried them, so they
     # need an entry to stay reachable. Each is a build artifact or a
     # vendored minified bundle, not source.
-    "graphify-out/cache/stat-index.json":
-        "generated build-cache index, deleted from the tree (23ec05d3); sha256 digests of vendored files read as keys",
-    "dash-shots/f2-follow-up/preserved-sha256.json":
-        "screenshot-preservation manifest, deleted from the tree (005cca06); sha256 image digests read as keys",
     "dashboard/static/xterm.js":
         "vendored minified xterm.js bundle, superseded by the npm package (74005ba3); entropy heuristic on minified code",
     "dashboard/scanner_fingerprints_test.go":
