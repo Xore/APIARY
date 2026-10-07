@@ -2068,6 +2068,9 @@ jobs:
           # still a credential, and this is the gate that sees it.
           - name: "Full-history secret scan (gitleaks, #3501)"
             home: true
+            env:
+              # #3314 zizmor: never expand an Actions expression into a run: body.
+              PR_MERGE_REF: ${{ github.event.number }}
             run: |
               set -euo pipefail
               # The scan's entire claim is FULL history, and actions/checkout
@@ -2085,6 +2088,44 @@ jobs:
                 exit 1
               fi
               echo "secret-scan: scanning $commits commits of full history"
+              # Purge remote-tracking refs so the scan's view of history is the
+              # commit it was told to scan. checkout's `git clean -ffdx` removes
+              # leftover FILES and never stale REFS, so on a reused honeypot-ci
+              # workspace refs from earlier PRs survive and both
+              # `git log --all` (in the allowlist probe) and gitleaks' object
+              # walk read them: two clones of one identical tree measured 120
+              # findings (62 under the two allowlisted historical paths) against
+              # 23 and 0 for the same tree without them.
+              #
+              # No pipeline here on purpose. Under `set -o pipefail` a `grep -v`
+              # that selects nothing exits 1, which killed the job on a CLEAN
+              # runner -- the exact case this exists to make work. Read the refs
+              # into a variable instead; an empty one is a valid state, not an
+              # error. origin/HEAD stays because update-ref refuses deletes
+              # through a symref, and this PR's own merge ref stays because it
+              # is the ref the job just checked out.
+              #
+              # PR_MERGE_REF comes in via env, not inline: zizmor blocks
+              # template-injection (an Actions expression in a run: body), and
+              # #3314 gates on it. An env: value is a string, not a shell
+              # fragment, so nothing is expanded into the script.
+              pr_merge_ref="refs/remotes/pull/${PR_MERGE_REF:-}/merge"
+              stale_refs="$(git for-each-ref --format='%(refname)' refs/remotes \
+                | grep -v -e 'origin/HEAD$' -e "^${pr_merge_ref}$" || true)"
+              for ref in $stale_refs; do
+                if ! git update-ref -d "$ref"; then
+                  echo "::error::secret-scan: failed to delete stale ref $ref"
+                  exit 1
+                fi
+              done
+              # Prove the purge did what it claims, so a failed delete can never
+              # read as a clean scan.
+              leftover="$(git for-each-ref --format='%(refname)' refs/remotes \
+                | grep -c -v -e 'origin/HEAD$' -e "^${pr_merge_ref}$" || true)"
+              if [ "$leftover" -ne 0 ]; then
+                echo "::error::secret-scan: $leftover stale remote-tracking ref(s) survived the purge -- the scan would measure a history this job was not asked to check"
+                exit 1
+              fi
               # Pinned version + sha256 verified before extraction, unpacked
               # into $RUNNER_TEMP because the self-hosted honeypot-ci runner
               # cannot write /usr/local/bin -- the constraint
