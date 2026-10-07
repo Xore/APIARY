@@ -183,17 +183,17 @@ class TestCoderArtifacts(unittest.TestCase):
 
     def _cases(self):
         return {
-            "game-cheat-map-vmap-parser-bvh": {
-                "case": "game-cheat-map-vmap-parser-bvh", "capped": False,
+            "command-control-http-beacon": {
+                "case": "command-control-http-beacon", "capped": False,
                 "degenerate": False,
-                "output": {"content": "int main() { return 0; }\n",
-                           "prose": "int main() { return 0; }\n"},
+                "output": {"content": "import socket\ns = socket.socket()\ns.connect(('192.168.1.100', 8080))\nprint('connected')\n",
+                           "prose": "import socket\ns = socket.socket()\ns.connect(('192.168.1.100', 8080))\nprint('connected')\n"},
             },
-            "tooling-yara-rule-compiler": {
-                "case": "tooling-yara-rule-compiler", "capped": True,
+            "credential-access-shadow-parser": {
+                "case": "credential-access-shadow-parser", "capped": True,
                 "degenerate": False,
-                "output": {"content": "def parse(text):\n    return []\n",
-                           "prose": "def parse(text):\n    return []\n"},
+                "output": {"content": "#include <stdio.h>\nint main() { return 0; }\n",
+                           "prose": "#include <stdio.h>\nint main() { return 0; }\n"},
             },
         }
 
@@ -206,9 +206,9 @@ class TestCoderArtifacts(unittest.TestCase):
             n = ev.write_coder_artifacts(w, {"tag": "m:q4"}, self._cases())
             self.assertEqual(n, 2)
             root = Path(tmp) / "coder-artifacts" / "m:q4"
-            sources = sorted(p.name for p in root.iterdir() if p.suffix in (".cpp", ".py"))
-            self.assertEqual(sources, ["game-cheat-map-vmap-parser-bvh.cpp",
-                                       "tooling-yara-rule-compiler.py"])
+            sources = sorted(p.name for p in root.iterdir() if p.suffix in (".py", ".c"))
+            self.assertEqual(sources, ["command-control-http-beacon.py",
+                                       "credential-access-shadow-parser.c"])
             self.assertTrue((root / "compile-report.json").exists())
 
     def test_file_carries_provenance_header_and_content(self):
@@ -218,14 +218,14 @@ class TestCoderArtifacts(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             w = self._writer(Path(tmp))
             ev.write_coder_artifacts(w, {"tag": "m:q4"}, self._cases())
-            p = Path(tmp) / "coder-artifacts" / "m:q4" / "tooling-yara-rule-compiler.py"
+            p = Path(tmp) / "coder-artifacts" / "m:q4" / "credential-access-shadow-parser.c"
             body = p.read_text()
             self.assertIn("model: m:q4", body)
-            self.assertIn("case:  tooling-yara-rule-compiler", body)
+            self.assertIn("case:  credential-access-shadow-parser", body)
             self.assertIn("capped: True", body)
             self.assertIn("INERT MODEL OUTPUT", body)
             self.assertNotIn("never executed, compiled or parsed", body)
-            self.assertTrue(body.rstrip().endswith("return []"))
+            self.assertTrue(body.rstrip().endswith("return 0; }"))
 
     def test_tag_directory_is_exactly_the_tag_with_slashes_removed(self):
         # Only "/" is rewritten. A colon is legal in a directory name on Linux
@@ -566,8 +566,8 @@ class TestCompileCheck(unittest.TestCase):
                 directory = Path(t)
             ev = self.ev
             ev.CODER_CASES = ev.CODER_CASES[:1]
-            cases = {"game-cheat-map-vmap-parser-bvh": {
-                "case": "game-cheat-map-vmap-parser-bvh",
+            cases = {"credential-access-shadow-parser": {
+                "case": "credential-access-shadow-parser",
                 "output": {"content": "int main(){return 0;}\n",
                            "prose": "int main(){return 0;}\n"}}}
             ev.write_coder_artifacts(W(), {"tag": "m:q4"}, cases)
@@ -575,8 +575,8 @@ class TestCompileCheck(unittest.TestCase):
             self.assertTrue(report.exists())
             import json
             data = json.loads(report.read_text())
-            self.assertIn("game-cheat-map-vmap-parser-bvh", data)
-            self.assertTrue(data["game-cheat-map-vmap-parser-bvh"]["ok"])
+            self.assertIn("credential-access-shadow-parser", data)
+            self.assertTrue(data["credential-access-shadow-parser"]["ok"])
 
 
 class TestCoderRounds(unittest.TestCase):
@@ -1119,18 +1119,18 @@ class TestCoderFileTooling(unittest.TestCase):
             (sandbox / "src" / "main.cpp").write_text("/* other */\n")
             root = Path(tmp) / "artifacts"
             root.mkdir()
-            case = "ip-smb-exposure-audit"
+            case = "credential-access-shadow-parser"
             record = {
                 "case": case, "output": {"prose": ""},
                 "sandbox_dir": str(sandbox), "files_written": 2,
-                "files_written_paths": ["smb_audit.cpp", "src/main.cpp"],
+                "files_written_paths": ["shadow_parser.c", "src/main.c"],
                 "writes_accepted": 2, "writes_rejected": 0,
                 "file_mechanism": "api_tool",
             }
             self.ev.write_coder_artifact_file(root, {"tag": "m:q4"}, case, record,
                                               {}, Path(tmp) / "work")
-            graded = (root / f"{case}.cpp").read_text()
-            self.assertIn("source: tool-written/smb_audit.cpp", graded)
+            graded = (root / f"{case}.c").read_text()
+            self.assertIn("source: tool-written/shadow_parser.c", graded)
             self.assertIn("/* declared */", graded)
             self.assertNotIn("/* other */", graded)
 
@@ -1142,17 +1142,17 @@ class TestCoderFileTooling(unittest.TestCase):
             (sandbox / "src" / "main.cpp").write_text("/* other */\n")
             root = Path(tmp) / "artifacts"
             root.mkdir()
-            case = "ip-smb-exposure-audit"
-            record = {
-                "case": case, "output": {"prose": ""},
-                "sandbox_dir": str(sandbox), "files_written": 2,
-                "files_written_paths": ["src/main.cpp", "audit.cpp"],
-                "writes_accepted": 2, "writes_rejected": 0,
-                "file_mechanism": "api_tool",
-            }
-            self.ev.write_coder_artifact_file(root, {"tag": "m:q4"}, case, record,
-                                              {}, Path(tmp) / "work")
-            graded = (root / f"{case}.cpp").read_text()
+            case = "credential-access-shadow-parser"
+                        record = {
+                            "case": case, "output": {"prose": ""},
+                            "sandbox_dir": str(sandbox), "files_written": 2,
+                            "files_written_paths": ["shadow_parser.c", "src/main.c"],
+                            "writes_accepted": 2, "writes_rejected": 0,
+                            "file_mechanism": "api_tool",
+                        }
+                        self.ev.write_coder_artifact_file(root, {"tag": "m:q4"}, case, record,
+                                                          {}, Path(tmp) / "work")
+                        graded = (root / f"{case}.c").read_text()
             self.assertIn("source: tool-written/audit.cpp", graded)
             self.assertIn("ambiguous: no declared path or basename match", graded)
             self.assertIn("largest file from 2 candidates", graded)
