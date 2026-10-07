@@ -211,12 +211,12 @@ def _sha256_json(value: Any) -> str:
 
 
 CODER_CORPUS_DIR = Path(__file__).resolve().parent / "corpus"
-CODER_CASES_PATH = CODER_CORPUS_DIR / "coder_cases_v1.json"
-CODER_RUBRIC_PATH = CODER_CORPUS_DIR / "coder_cases_v1_rubric.json"
-CODER_CONTRACT_PATH = CODER_CORPUS_DIR / "coder_cases_v1_contract.json"
-CODER_BUCKETS = ("rust", "python", "c", "php", "internal-pentest", "reverse-engineering",
-                "malware-development", "cve-exploitation",
-                "game-cheat-development", "security-tooling")
+CODER_CASES_PATH = CODER_CORPUS_DIR / "coder_cases_v2.json"
+CODER_RUBRIC_PATH = CODER_CORPUS_DIR / "coder_cases_v2_rubric.json"
+CODER_CONTRACT_PATH = CODER_CORPUS_DIR / "coder_cases_v2_contract.json"
+CODER_BUCKETS = ("recon-discovery", "persistence", "credential-access", "defense-evasion",
+                "command-control", "lateral-movement", "exfiltration",
+                "privilege-escalation", "anti-forensics", "utility")
 CODER_CHECKS = (
     "deliverable_present",
     "functional_correctness",
