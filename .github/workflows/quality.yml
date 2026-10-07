@@ -2069,7 +2069,7 @@ jobs:
           - name: "Full-history secret scan (gitleaks, #3501)"
             home: true
             env:
-              # #3314 zizmor: never expand a ${{ }} into a run: body.
+              # #3314 zizmor: never expand an Actions expression into a run: body.
               PR_MERGE_REF: ${{ github.event.number }}
             run: |
               set -euo pipefail
@@ -2106,7 +2106,7 @@ jobs:
               # is the ref the job just checked out.
               #
               # PR_MERGE_REF comes in via env, not inline: zizmor blocks
-              # template-injection (a ${{ }} expanding into a run: body), and
+              # template-injection (an Actions expression in a run: body), and
               # #3314 gates on it. An env: value is a string, not a shell
               # fragment, so nothing is expanded into the script.
               pr_merge_ref="refs/remotes/pull/${PR_MERGE_REF}/merge"
