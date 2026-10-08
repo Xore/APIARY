@@ -769,14 +769,12 @@ services:
     command: TCP4-LISTEN:8090,fork,reuseaddr TCP4:10.8.0.2:19090
     networks: [oidc-dashboard]
 
-  # Staged/beta path for the dashboard modernization port (#1628) --
-  # bridges to dashboard-next directly, side by side with
-  # socat-hp-dashboard above (left untouched). Requires a matching
-  # `ports: ["${HP_BIND:-10.8.0.2}:19092:8080"]` on dashboard-next itself
-  # (arcane/home/honeypot-dashboard/compose.yml) before this resolves to
-  # anything -- see honeypot-dashboard-beta in vps/traefik/dynamic.yml for
-  # the router half, and #1628 for the still-open naming/DNS/Keycloak
-  # decisions this needs before first use.
+  # Staging bridge, side by side with socat-hp-dashboard above (left
+  # untouched). Homeserver port 19092 is bound by the standalone
+  # Xore/apiary-dashboard Arcane project (its
+  # arcane/home/apiary-dashboard/compose.yml), not by dashboard-next any
+  # more; its cutover moves production here by pointing the Traefik
+  # router at this service. The container keeps its historical name.
   socat-hp-dashboard-next:
     image: alpine/socat:latest@sha256:5f275aa1b6e9889c851f61097142ee050fc6ac4615b4ea64ac1f2b0e81ff8d7f
     container_name: socat-hp-dashboard-next
