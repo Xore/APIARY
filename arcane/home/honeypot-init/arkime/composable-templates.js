@@ -296,7 +296,11 @@ async function restore(keepOut) {
       console.log(`restore (dry run): would put ${name} back`);
       continue;
     }
-    const put = await es('PUT', `/_index_template/${name}`, shadowed[name]);
+    // GET returns these and PUT refuses them as system-managed (#3549). Stripped
+    // here rather than at stash time, so a stash written by an older run
+    // restores too.
+    const { created_date, created_date_millis, modified_date, modified_date_millis, ...body } = shadowed[name];
+    const put = await es('PUT', `/_index_template/${name}`, body);
     if (put.status !== 200) {
       throw new Error(`restoring _index_template/${name}: HTTP ${put.status} ${JSON.stringify(put.json)}`);
     }
