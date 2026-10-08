@@ -464,7 +464,10 @@ async function generate() {
       // made it into the composed settings would install cleanly and leave
       // every new index unmanaged -- the exact state this exists to end, and
       // invisible from here, so it is verified rather than assumed.
-      const lifecycle = sim.json?.template?.settings?.index?.['lifecycle.name'];
+      // The simulate API returns settings nested ({lifecycle: {name}}), not as
+      // the flat key the template was written with (#3551); accept either.
+      const index = sim.json?.template?.settings?.index;
+      const lifecycle = index?.lifecycle?.name ?? index?.['lifecycle.name'];
       if (lifecycle !== family.retention) {
         throw new Error(`${family.name}: simulate shows index.lifecycle.name=${lifecycle}, expected ${family.retention}`);
       }
