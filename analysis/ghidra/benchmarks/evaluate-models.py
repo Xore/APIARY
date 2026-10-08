@@ -2833,53 +2833,56 @@ def chat(
     # loop below are byte-identical on both engines. None means Ollama, which is
     # what every existing caller and every test passes.
     post = transport if transport is not None else request_json
-    try:
-        response = post(f"{base_url}/api/chat", body)
-        if tools:
-            response = _bt.conduct_tool_rounds(
-                post, f"{base_url}/api/chat", body, response)
-    except Exception as exc:
-        # A timeout or transport failure is a measurement about this model, not
-        # a hole in the record. Store it, then let the slot handle it.
-        detail = f"{type(exc).__name__}: {exc}"
-        if isinstance(exc, urllib.error.HTTPError):
-            cause = _http_error_detail(exc)
-            if cause:
-                detail = f"{type(exc).__name__} {exc.code}: {cause}"
-        malformed = bool(tools) and serving_is_malformed_tool_call(detail)
-        if recorder is not None:
-            recorder.record(
-                case=case,
-                workflow=workflow,
-                request_body=body,
-                error=detail,
-                # A capability verdict, stored beside the error it replaced. A
-                # transcript that only carries the error reads as a slot that
-                # crashed, which is the ambiguity this removes.
-                response={"malformed_tool_call": detail} if malformed else None,
-            )
-        if malformed:
-            # Not a raise. The model emitted a tool call llama.cpp's PEG parser
-            # rejected -- an unoffered name, or arguments under the wrong key --
-            # and that is a capability result for this model, the same class of
-            # fact as `does not support tools`. Raising it here aborted the
-            # entire coder slot on case 1 of 44 and left the model with no coder
-            # record at all, which is strictly worse than one recorded wrong
-            # answer. `done_reason` names it so every scorer that reads the
-            # reason sees a value it already has a rule for, and the case still
-            # streams out to the grader with the cause attached.
-            return {
-                "content": "",
-                "message": {},
-                "prose": "",
-                "wall_seconds": round(time.monotonic() - started, 3),
-                "prompt_tokens": None,
-                "output_tokens": None,
-                "tokens_per_second": None,
-                "done_reason": "malformed_tool_call",
-                "malformed_tool_call": detail,
-            }
-        raise
+    tool_fallback_reason = None
+    while True:
+        try:
+            response = post(f"{base_url}/api/chat", body)
+            if tools:
+                response = _bt.conduct_tool_rounds(
+                    post, f"{base_url}/api/chat", body, response)
+            break
+        except Exception as exc:
+            # A timeout or transport failure is a measurement about this model,
+            # not a hole in the record. Store it, then let the slot handle it.
+            detail = f"{type(exc).__name__}: {exc}"
+            if isinstance(exc, urllib.error.HTTPError):
+                cause = _http_error_detail(exc)
+                if cause:
+                    detail = f"{type(exc).__name__} {exc.code}: {cause}"
+            malformed = bool(
+                tools or tool_fallback_reason
+            ) and serving_is_malformed_tool_call(detail)
+            if malformed and tools:
+                # The system prompt already defines the file-block protocol for
+                # endpoints whose structured tool parser rejects the model's
+                # call. Retry once through that protocol instead of losing the
+                # case to llama.cpp's PEG/JSON parser.
+                tool_fallback_reason = detail
+                body = dict(body)
+                body.pop("tools", None)
+                tools = None
+                continue
+            if recorder is not None:
+                recorder.record(
+                    case=case,
+                    workflow=workflow,
+                    request_body=body,
+                    error=detail,
+                    response={"malformed_tool_call": detail} if malformed else None,
+                )
+            if malformed:
+                return {
+                    "content": "",
+                    "message": {},
+                    "prose": "",
+                    "wall_seconds": round(time.monotonic() - started, 3),
+                    "prompt_tokens": None,
+                    "output_tokens": None,
+                    "tokens_per_second": None,
+                    "done_reason": "malformed_tool_call",
+                    "malformed_tool_call": detail,
+                }
+            raise
     wall_seconds = time.monotonic() - started
     # The one capture of the model's text, for every path that has one:
     # a tool-calling turn carries the answer in `tool_calls` with an empty
@@ -2902,6 +2905,8 @@ def chat(
         "tokens_per_second": round(eval_count / (eval_duration / 1e9), 2) if eval_count and eval_duration else None,
         "done_reason": response.get("done_reason"),
     }
+    if tool_fallback_reason:
+        result["tool_fallback_reason"] = tool_fallback_reason
     if parser is not None:
         # Parsed output is stored alongside the raw text, never instead of it:
         # a JSON-parse failure is itself a measured outcome.

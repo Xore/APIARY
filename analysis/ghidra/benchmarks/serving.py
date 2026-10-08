@@ -170,6 +170,7 @@ def is_vram_oom(text: str | None) -> bool:
 MALFORMED_TOOL_CALL_PHRASES = (
     "does not match the expected peg-native format",  # exact from this server
     "peg-native",
+    "after object key:value pair",
 )
 # Lowered text, same rule as VRAM_OOM_PHRASES above: a marker carrying its own
 # capitals can never match lowered text.
