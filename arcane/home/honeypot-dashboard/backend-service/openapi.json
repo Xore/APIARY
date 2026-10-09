@@ -3418,14 +3418,6 @@
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Success."
-          },
           "401": {
             "content": {
               "text/plain": {
@@ -3436,23 +3428,13 @@
             },
             "description": "No valid service token (or, on the Workbench, no actor identity)."
           },
-          "404": {
+          "501": {
             "content": {
               "application/json": {
                 "schema": {}
               }
             },
-            "description": "No such entity."
-          },
-          "502": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Elasticsearch failed."
+            "description": "No producer writes correlations-v1; the index does not exist."
           }
         },
         "security": [
@@ -3460,7 +3442,7 @@
             "serviceToken": []
           }
         ],
-        "summary": "Entities related to one entity.",
+        "summary": "Entities related to one entity (not implemented).",
         "tags": [
           "other"
         ]
@@ -3480,14 +3462,6 @@
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Success."
-          },
           "401": {
             "content": {
               "text/plain": {
@@ -3498,23 +3472,13 @@
             },
             "description": "No valid service token (or, on the Workbench, no actor identity)."
           },
-          "404": {
+          "501": {
             "content": {
               "application/json": {
                 "schema": {}
               }
             },
-            "description": "No such entity."
-          },
-          "502": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Elasticsearch failed."
+            "description": "No entity.id field exists on the event indices; no entity model is written."
           }
         },
         "security": [
@@ -3522,7 +3486,7 @@
             "serviceToken": []
           }
         ],
-        "summary": "Timeline for one entity.",
+        "summary": "Timeline for one entity (not implemented).",
         "tags": [
           "other"
         ]
@@ -5657,7 +5621,7 @@
         "operationId": "get_api_v1_investigate_asn__id_",
         "parameters": [
           {
-            "description": "Document id.",
+            "description": "AS number, with or without the AS prefix.",
             "in": "path",
             "name": "id",
             "required": true,
@@ -5673,7 +5637,17 @@
                 "schema": {}
               }
             },
-            "description": "Success."
+            "description": "{asn, organization, provider, events, sources_total, first, last, sources: [{key, count}]} over EVENT_INDICES, top 50 sources."
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not an AS number."
           },
           "401": {
             "content": {
@@ -5691,7 +5665,7 @@
                 "schema": {}
               }
             },
-            "description": "No such document."
+            "description": "No events from this ASN."
           },
           "502": {
             "content": {
@@ -5709,7 +5683,7 @@
             "serviceToken": []
           }
         ],
-        "summary": "One ASN record.",
+        "summary": "One ASN, aggregated from its events.",
         "tags": [
           "investigate"
         ]
@@ -5726,7 +5700,7 @@
                 "schema": {}
               }
             },
-            "description": "Success."
+            "description": "{total, rows} of dashboard-ip-block-v1 records, newest block first. No blocks yet is {\"total\":0,\"rows\":[]}."
           },
           "401": {
             "content": {
@@ -6121,7 +6095,7 @@
         "operationId": "get_api_v1_investigate_session__id__summary",
         "parameters": [
           {
-            "description": "Document id.",
+            "description": "Session id.",
             "in": "path",
             "name": "id",
             "required": true,
@@ -6137,7 +6111,7 @@
                 "schema": {}
               }
             },
-            "description": "Success."
+            "description": "{id, events, first, last, sensors, commands, sources} over EVENT_INDICES."
           },
           "401": {
             "content": {
@@ -6155,7 +6129,7 @@
                 "schema": {}
               }
             },
-            "description": "No such document."
+            "description": "No such session."
           },
           "502": {
             "content": {
@@ -6173,7 +6147,7 @@
             "serviceToken": []
           }
         ],
-        "summary": "One session summary.",
+        "summary": "One session summary, aggregated from its events.",
         "tags": [
           "investigate"
         ]
@@ -6184,14 +6158,6 @@
         "operationId": "get_api_v1_ioc_catalog",
         "parameters": [],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Success."
-          },
           "401": {
             "content": {
               "text/plain": {
@@ -6202,15 +6168,13 @@
             },
             "description": "No valid service token (or, on the Workbench, no actor identity)."
           },
-          "502": {
+          "501": {
             "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
+              "application/json": {
+                "schema": {}
               }
             },
-            "description": "Elasticsearch failed."
+            "description": "No producer writes the IOC catalog; ioc-catalog-v1 does not exist."
           }
         },
         "security": [
@@ -6218,7 +6182,7 @@
             "serviceToken": []
           }
         ],
-        "summary": "IOC catalog.",
+        "summary": "IOC catalog (not implemented).",
         "tags": [
           "other"
         ]
@@ -6246,14 +6210,6 @@
           }
         ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Success."
-          },
           "401": {
             "content": {
               "text/plain": {
@@ -6264,23 +6220,13 @@
             },
             "description": "No valid service token (or, on the Workbench, no actor identity)."
           },
-          "404": {
+          "501": {
             "content": {
               "application/json": {
                 "schema": {}
               }
             },
-            "description": "No such IOC."
-          },
-          "502": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Elasticsearch failed."
+            "description": "No producer writes IOC documents; ioc-v1 does not exist."
           }
         },
         "security": [
@@ -6288,7 +6234,7 @@
             "serviceToken": []
           }
         ],
-        "summary": "One IOC.",
+        "summary": "One IOC (not implemented).",
         "tags": [
           "other"
         ]
@@ -7513,7 +7459,7 @@
         "operationId": "get_api_v1_payloads__id__delivery",
         "parameters": [
           {
-            "description": "Document id.",
+            "description": "Payload SHA-256 (honeypot.canonical_shasum).",
             "in": "path",
             "name": "id",
             "required": true,
@@ -7529,7 +7475,7 @@
                 "schema": {}
               }
             },
-            "description": "Success."
+            "description": "{total, events (newest 100), sessions: [{session, events, first, last}], sources: [{key, count}]}."
           },
           "401": {
             "content": {
@@ -7547,7 +7493,7 @@
                 "schema": {}
               }
             },
-            "description": "No such document."
+            "description": "No event carries this payload hash."
           },
           "502": {
             "content": {
@@ -7565,7 +7511,7 @@
             "serviceToken": []
           }
         ],
-        "summary": "One payload delivery record.",
+        "summary": "Events, sessions and sources that carried one payload hash.",
         "tags": [
           "stores"
         ]
@@ -10216,6 +10162,7 @@
         "operationId": "get_api_v1_sources__ip__events",
         "parameters": [
           {
+            "description": "Source IPv4 or IPv6 address.",
             "in": "path",
             "name": "ip",
             "required": true,
@@ -10224,6 +10171,7 @@
             }
           },
           {
+            "description": "1h, 6h, 24h (default), 7d or 30d.",
             "in": "query",
             "name": "range",
             "required": false,
@@ -10239,7 +10187,7 @@
                 "schema": {}
               }
             },
-            "description": "Success."
+            "description": "Page of raw event documents from EVENT_INDICES, newest first, at most 100. Nothing in range is {\"total\":0,\"rows\":[]}."
           },
           "400": {
             "content": {
@@ -10249,7 +10197,7 @@
                 }
               }
             },
-            "description": "Invalid range."
+            "description": "Invalid ip or range."
           },
           "401": {
             "content": {
@@ -10277,7 +10225,7 @@
             "serviceToken": []
           }
         ],
-        "summary": "Events from one source.",
+        "summary": "Newest events from one source.",
         "tags": [
           "platform"
         ]
@@ -10350,6 +10298,7 @@
         "operationId": "get_api_v1_sources__ip__network",
         "parameters": [
           {
+            "description": "Source IPv4 or IPv6 address.",
             "in": "path",
             "name": "ip",
             "required": true,
@@ -10365,7 +10314,17 @@
                 "schema": {}
               }
             },
-            "description": "Success."
+            "description": "{ip, asn, organization, provider, country, events}, read from the source.as.* and source.geo.* fields of its events."
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Invalid ip."
           },
           "401": {
             "content": {
@@ -10383,7 +10342,7 @@
                 "schema": {}
               }
             },
-            "description": "No such source."
+            "description": "No events from this source."
           },
           "502": {
             "content": {
@@ -10401,7 +10360,7 @@
             "serviceToken": []
           }
         ],
-        "summary": "Network information for one source.",
+        "summary": "ASN, organization, provider and country for one source.",
         "tags": [
           "platform"
         ]
@@ -10412,6 +10371,7 @@
         "operationId": "get_api_v1_sources__ip__sessions",
         "parameters": [
           {
+            "description": "Source IPv4 or IPv6 address.",
             "in": "path",
             "name": "ip",
             "required": true,
@@ -10420,6 +10380,7 @@
             }
           },
           {
+            "description": "1h, 6h, 24h (default), 7d or 30d.",
             "in": "query",
             "name": "range",
             "required": false,
@@ -10435,7 +10396,7 @@
                 "schema": {}
               }
             },
-            "description": "Success."
+            "description": "{total: distinct sessions, rows: [{session, events, first, last}]}, newest session first. Nothing in range is {\"total\":0,\"rows\":[]}."
           },
           "400": {
             "content": {
@@ -10445,7 +10406,7 @@
                 }
               }
             },
-            "description": "Invalid range."
+            "description": "Invalid ip or range."
           },
           "401": {
             "content": {
@@ -10473,7 +10434,7 @@
             "serviceToken": []
           }
         ],
-        "summary": "Sessions from one source.",
+        "summary": "Sessions from one source, aggregated from its events.",
         "tags": [
           "platform"
         ]
@@ -10484,6 +10445,7 @@
         "operationId": "get_api_v1_sources__ip__timeline",
         "parameters": [
           {
+            "description": "Source IPv4 or IPv6 address.",
             "in": "path",
             "name": "ip",
             "required": true,
@@ -10492,6 +10454,7 @@
             }
           },
           {
+            "description": "1h, 6h, 24h (default), 7d or 30d.",
             "in": "query",
             "name": "range",
             "required": false,
@@ -10507,7 +10470,7 @@
                 "schema": {}
               }
             },
-            "description": "Success."
+            "description": "Page of raw event documents: the newest 100 in range, oldest first. Nothing in range is {\"total\":0,\"rows\":[]}."
           },
           "400": {
             "content": {
@@ -10517,7 +10480,7 @@
                 }
               }
             },
-            "description": "Invalid range."
+            "description": "Invalid ip or range."
           },
           "401": {
             "content": {
