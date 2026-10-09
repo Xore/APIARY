@@ -76,6 +76,7 @@ from serving import (
     canonical_tag as serving_canonical_tag,
     is_malformed_tool_call as serving_is_malformed_tool_call,
     ollama_transport as serving_ollama_transport,
+    colibri_transport as serving_colibri_transport,
     probe_ollama_endpoint,
 )  # noqa: E402
 
@@ -86,7 +87,8 @@ from serving import (
 # the only thing that moves KV, and it fires on a measured OOM or not at all.
 ENGINE_LLAMACPP = "llamacpp"
 ENGINE_OLLAMA = "ollama"
-ENGINES = (ENGINE_LLAMACPP, ENGINE_OLLAMA)
+ENGINE_COLIBRI = "colibri"
+ENGINES = (ENGINE_LLAMACPP, ENGINE_OLLAMA, ENGINE_COLIBRI)
 
 # Where Ollama actually is, from this repo's own configuration rather than from
 # a guess about the workstation:
@@ -4638,9 +4640,12 @@ def main() -> int:
              "/app/llama-server per model against the GGUF its Ollama manifest "
              "already points at, and falls back to Ollama only if llama.cpp "
              "cannot load the model. ollama pins the run to the pre-existing "
-             "/api/chat path. Either way the engine that served each model is "
+             "/api/chat path. colibri uses the colibri engine for big models. "
+             "Either way the engine that served each model is "
              "recorded on every transcript record and in the report.",
     )
+    parser.add_argument("--colibri-base-url", default="http://127.0.0.1:8973",
+        help="Base URL for the colibri engine (default: http://127.0.0.1:8973)")
     parser.add_argument("--context", type=int, default=16384)
     parser.add_argument("--manifest", help="Approved/candidate manifest; evaluates each model only for its slot")
     parser.add_argument("--output", help="Operator-side path for the verbose report (required with --manifest)")
@@ -4781,6 +4786,10 @@ def open_session(
     if args.engine == ENGINE_OLLAMA:
         session.engine, session.fallback_engine = ENGINE_OLLAMA, None
         session.transport = serving_ollama_transport(base_url, request_json)
+        return session
+    if args.engine == ENGINE_COLIBRI:
+        session.engine, session.fallback_engine = ENGINE_COLIBRI, None
+        session.transport = serving_colibri_transport(args.colibri_base_url, request_json)
         return session
     print(f"  engine: starting llama.cpp for {model}", flush=True)
     # `session.open()` raises `UnresolvableModel` for a name that is not a model

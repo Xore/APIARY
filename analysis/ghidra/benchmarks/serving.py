@@ -1256,6 +1256,26 @@ def ollama_transport(base_url: str, request_json) -> Any:
     return post
 
 
+def colibri_transport(base_url: str, request_json) -> Any:
+    """Transport for the colibri engine: OpenAI-compatible /v1/chat/completions.
+
+    Colibri speaks the OpenAI API, same as llama.cpp's server, so the same
+    to_wire/from_wire translation applies.
+    """
+    endpoint = f"{base_url.rstrip('/')}/v1/chat/completions"
+
+    def post(url: str, body: dict[str, Any] | None = None,
+             timeout: int | None = None) -> dict[str, Any]:
+        data = json.dumps(to_wire(body or {})).encode()
+        request = urllib.request.Request(
+            endpoint, data=data,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return from_wire(json.loads(response.read()))
+    return post
+
+
 class WrongEndpoint(RuntimeError):
     """The URL answers, but it is not an Ollama.
 
