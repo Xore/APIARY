@@ -2616,11 +2616,11 @@ mod tests {
         let identities = json!({"hits": {"hits": [{"_id": "i1", "_source": {"id": "i1abcdefgh", "ips": ["203.0.113.7", "203.0.113.8"], "events": 9}}]}});
         let items = identity_items(&identities, &["203.0.113.7".to_string()], "ip:203.0.113.7");
         assert_eq!((items[0]["id"].clone(), items[0]["label"].clone(), items[0]["count"].clone(), items[0]["note"].clone()), (json!("i1abcdefgh"), json!("i1abcdef"), json!(1), json!("2 IPs")));
-        let flows = json!({"hits": {"hits": [{"_id": "f", "_source": {"community_id": "1:abc=", "src_ip": "203.0.113.7", "dst_ip": "87.106.162.235", "dst_port": 5900, "events": 7, "sensors": ["huginn", "zeek"]}}]}});
+        let flows = json!({"hits": {"hits": [{"_id": "f", "_source": {"community_id": "1:abc=", "src_ip": "203.0.113.7", "dst_ip": "198.51.100.10", "dst_port": 5900, "events": 7, "sensors": ["huginn", "zeek"]}}]}});
         let items = flow_items(&flows, "ip:203.0.113.7");
         assert_eq!(items[0]["id"], "1:abc=");
         assert_eq!(items[0]["count"], 7);
-        assert_eq!(items[0]["note"], "203.0.113.7 → 87.106.162.235:5900 · 7 events across huginn, zeek");
+        assert_eq!(items[0]["note"], "203.0.113.7 → 198.51.100.10:5900 · 7 events across huginn, zeek");
         let campaigns = json!({"hits": {"hits": [{"_id": "203.0.113.0/24", "_source": {"cidr": "203.0.113.0/24", "score": 34, "events": 576}}]}});
         let items = campaign_items(&campaigns, "ip:203.0.113.7");
         assert_eq!((items[0]["id"].clone(), items[0]["note"].clone(), items[0]["count"].clone()), (json!("203.0.113.0/24"), json!("score 34"), json!(576)));
