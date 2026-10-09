@@ -660,6 +660,11 @@ JSON
 # own template so it can carry its own ILM policy -- and so a query can tell
 # the two vantage points apart. Higher priority than zeek-events, whose
 # pattern also matches, because the more specific one must win.
+# #3570: source.as.* (written by geoip-honeypot) must be mapped explicitly,
+# as the zeek-events template does. Left to dynamic mapping, the geoip
+# processor's string output became `text` in zeek-proxy-v1-conn-2026.10.01
+# and any terms agg on source.as.type failed that shard. Applies to indices
+# created after this template is PUT; existing ones are not touched.
 curl -fsS -X PUT "$es_url/_index_template/zeek-proxy-events" \
   -H 'Content-Type: application/json' \
   --data-binary @- <<'JSON'
@@ -681,7 +686,17 @@ curl -fsS -X PUT "$es_url/_index_template/zeek-proxy-events" \
         "event": { "properties": { "sensor": { "type": "keyword" }, "category": { "type": "keyword" } } },
         "source": { "properties": {
           "ip": { "type": "ip", "ignore_malformed": true },
-          "port": { "type": "integer", "ignore_malformed": true }
+          "port": { "type": "integer", "ignore_malformed": true },
+          "geo": { "properties": {
+            "location": { "type": "geo_point" },
+            "country_iso_code": { "type": "keyword" },
+            "city_name": { "type": "keyword" }
+          } },
+          "as": { "properties": {
+            "asn": { "type": "long" },
+            "organization_name": { "type": "keyword" },
+            "type": { "type": "keyword" }
+          } }
         } },
         "destination": { "properties": {
           "ip": { "type": "ip", "ignore_malformed": true },

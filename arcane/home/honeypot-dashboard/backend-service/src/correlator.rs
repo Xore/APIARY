@@ -265,6 +265,7 @@ async fn fetch_campaign_aggregates(state: &AppState, since: chrono::DateTime<chr
         }
     });
     let result = state.es.search_index(&[HONEYPOT_INDEX_PATTERN], body).await?;
+    crate::es::warn_on_failed_shards("correlator campaign aggregations", &result);
     let mut out = Vec::new();
     for agg_name in ["cidrs_v4", "cidrs_v6"] {
         for b in result["aggregations"][agg_name]["buckets"].as_array().into_iter().flatten() {
@@ -330,6 +331,7 @@ async fn fetch_cluster_aggregates(state: &AppState, since: chrono::DateTime<chro
         }
     });
     let result = state.es.search_index(&[HONEYPOT_INDEX_PATTERN], body).await?;
+    crate::es::warn_on_failed_shards("correlator cluster aggregations", &result);
     let mut out = Vec::new();
     let add = |kind: &str, buckets: &[Value], value_of: &dyn Fn(&Value) -> String, out: &mut Vec<ClusterBucket>| {
         for b in buckets {
