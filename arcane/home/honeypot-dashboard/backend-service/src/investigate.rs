@@ -385,6 +385,7 @@ fn portbridge_row(src: &Value) -> EventRow {
     if !os.is_empty() {
         detail.push_str(&format!(" · p0f: {os}"));
     }
+    let src_ip = text(&src["portbridge"]["src_ip"]);
     EventRow {
         // A portbridge document is the relay's own record, so there is no
         // second join to disagree with it.
@@ -394,8 +395,18 @@ fn portbridge_row(src: &Value) -> EventRow {
         id: String::new(),
         time: text(&src["@timestamp"]),
         sensor: "portbridge".to_string(),
-        src_ip: text(&src["portbridge"]["src_ip"]),
+        // #3555: read from the same document as everything else here. A
+        // portbridge doc has `source.geo.city_name` (1.4M docs) and no
+        // `source.port`, so src_port stays absent for these rows in practice.
+        src_port: if src_ip.is_empty() { None } else { crate::events::src_port_from_source(src) },
+        src_ip,
         country: String::new(),
+        city: Some(text(&src["source"]["geo"]["city_name"])).filter(|city| !city.is_empty()),
+        // No rating, kind or technique is written by the relay, so none is
+        // invented here.
+        severity: None,
+        kind: None,
+        techniques: Vec::new(),
         port,
         proto: String::new(),
         detail,
