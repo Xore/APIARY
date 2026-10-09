@@ -197,10 +197,10 @@ alone. Re-verify against whatever Arcane version is pinned in
 happened and the re-verification has not:** every item below was confirmed
 against `v2.8.0`–`v2.9.0` (including the no-`profiles:`-support finding,
 which cites the upstream issue as still open at `v2.8.1`), while
-`docker-compose.arcane.yml` now pins `ghcr.io/getarcaneapp/manager:v2.11.1`
-by digest. Nothing here is claimed to be false of `v2.11.1` — it is claimed
-to be unconfirmed against it, and three minor versions of upstream is
-exactly the gap that re-verification is for.
+`docker-compose.arcane.yml` now pins `ghcr.io/getarcaneapp/manager:v2.15.1`
+by digest (2026-10-09; previously `v2.11.1`). Nothing here is claimed to be
+false of `v2.15.1` — it is claimed to be unconfirmed against it, and seven
+minor versions of upstream is exactly the gap that re-verification is for.
 
 - **`"project directory is not inside a mounted directory"` is a false
   warning against every stack with a relative bind-mount source, under
