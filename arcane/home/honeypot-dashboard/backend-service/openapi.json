@@ -5085,6 +5085,306 @@
         ]
       }
     },
+    "/api/v1/facets/{kind}": {
+      "get": {
+        "operationId": "get_api_v1_facets__kind_",
+        "parameters": [
+          {
+            "description": "Facet family. Only `events` is served.",
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Single source address.",
+            "in": "query",
+            "name": "ip",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated source addresses.",
+            "in": "query",
+            "name": "ips",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Sensor name.",
+            "in": "query",
+            "name": "sensor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "ISO country code.",
+            "in": "query",
+            "name": "country",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "City name.",
+            "in": "query",
+            "name": "city",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Destination port.",
+            "in": "query",
+            "name": "port",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Transport protocol.",
+            "in": "query",
+            "name": "proto",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "honeypot.event kind filter.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Captured-payload hash.",
+            "in": "query",
+            "name": "shasum",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "One flow across every sensor.",
+            "in": "query",
+            "name": "community_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Free-text query_string.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Go-style relative window (24h, 7d); defaults to 10d like the explorer.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Decoy persona id.",
+            "in": "query",
+            "name": "persona",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Decoy site id.",
+            "in": "query",
+            "name": "site",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Decoy asset id.",
+            "in": "query",
+            "name": "asset",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Client fingerprint.",
+            "in": "query",
+            "name": "fingerprint",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact command text.",
+            "in": "query",
+            "name": "cmd",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "\"user / pass\" pair.",
+            "in": "query",
+            "name": "cred",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Request path.",
+            "in": "query",
+            "name": "path",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Session id.",
+            "in": "query",
+            "name": "session",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Source AS number.",
+            "in": "query",
+            "name": "asn",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Source network organization.",
+            "in": "query",
+            "name": "org",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider class.",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "IDS alert signature.",
+            "in": "query",
+            "name": "sig",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Detection category.",
+            "in": "query",
+            "name": "cat",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Success: `{kind, total, sensors, sources, countries, protocols, ports, signatures, kinds, personas, providers, cities}`, each list `[{value, count}]`."
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Rejected: the request was understood but its input is not acceptable."
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "No valid service token (or, on the Workbench, no actor identity)."
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "No such record, store, or route for the values given."
+          },
+          "502": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Elasticsearch (or a sibling it proxies) refused or failed the query."
+          }
+        },
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "summary": "Counted value lists for the filter pickers.",
+        "tags": [
+          "other"
+        ]
+      }
+    },
     "/api/v1/filter-values": {
       "get": {
         "operationId": "get_api_v1_filter_values",
@@ -8990,6 +9290,90 @@
           }
         ],
         "summary": "Delete one generated report.",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/api/v1/reports/preview": {
+      "post": {
+        "operationId": "post_api_v1_reports_preview",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "description": "Deserialized by the handler into `ReportDefinition`. The shape is left open here on purpose -- see the module doc.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The preview: `{period: {from, to}, events, sources, sensors, sessions, sections: [{id, label, rows, pages, columns: [string, string], sample: [[string, string]]}], pages, empty_filter?: {field, message}}`."
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Rejected: the request was understood but its input is not acceptable."
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "No valid service token (or, on the Workbench, no actor identity)."
+          },
+          "415": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran."
+          },
+          "422": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the definition (invalid fields, or an artifact template that has no telemetry to preview)."
+          },
+          "502": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Elasticsearch (or a sibling it proxies) refused or failed the query."
+          }
+        },
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "summary": "What a report definition would contain, without rendering it.",
         "tags": [
           "reports"
         ]
