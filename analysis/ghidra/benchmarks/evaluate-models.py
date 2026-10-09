@@ -76,7 +76,6 @@ from serving import (
     canonical_tag as serving_canonical_tag,
     is_malformed_tool_call as serving_is_malformed_tool_call,
     ollama_transport as serving_ollama_transport,
-    colibri_transport as serving_colibri_transport,
     probe_ollama_endpoint,
 )  # noqa: E402
 
@@ -4782,14 +4781,11 @@ def open_session(
         request_json=request_json,
         request_timeout=request_timeout,
         log=lambda message: print(message, file=sys.stderr, flush=True),
+        colibri_base_url=getattr(args, 'colibri_base_url', None),
     )
     if args.engine == ENGINE_OLLAMA:
         session.engine, session.fallback_engine = ENGINE_OLLAMA, None
         session.transport = serving_ollama_transport(base_url, request_json)
-        return session
-    if args.engine == ENGINE_COLIBRI:
-        session.engine, session.fallback_engine = ENGINE_COLIBRI, None
-        session.transport = serving_colibri_transport(args.colibri_base_url, request_json)
         return session
     print(f"  engine: starting llama.cpp for {model}", flush=True)
     # `session.open()` raises `UnresolvableModel` for a name that is not a model
