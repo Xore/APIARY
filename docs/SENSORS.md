@@ -225,9 +225,11 @@ Web UI: `http://<HP_BIND>:19080` (`arkime.<domain>` via Traefik).
 >   connection along with the upstream source port it will arrive on; ship that
 >   dir to the home stack (same mount pattern as Suricata, but **without
 >   `x-systemd.automount`** — autofs triggers return EPERM to container
->   processes) and the dashboard joins it by source port. The join reaches back
->   one log rotation; connections older than that are reported as
->   **Unattributed** on `/source-health` rather than blamed on the tunnel peer.
+>   processes) and the enrichment worker joins it by source port and
+>   connection start time at ingest. The mount must not use
+>   `default_permissions`, or the worker (uid 65534) cannot read the log and
+>   attribution silently stops (#3573). Join rule, outcomes and the history
+>   backfill: [TUNNEL-ATTRIBUTION.md](TUNNEL-ATTRIBUTION.md).
 >
 > Suricata already sees real IPs (it sniffs the public interface on the VPS).
 > Net result: the live dashboard can pivot on a single attacker IP across every

@@ -2134,7 +2134,14 @@ step_sshfs_mounts() {
     dirs+=("$dir")
   done
 
-  local opts="_netdev,ro,reconnect,ServerAliveInterval=15,ServerAliveCountMax=3,IdentityFile=/root/.ssh/strato_vps,port=2222,allow_other,default_permissions,StrictHostKeyChecking=accept-new"
+  # #3573: no default_permissions. With it, the kernel enforces the files'
+  # VPS-side modes locally -- portbridge.json is root:root 0640 -- so the
+  # ip-enrichment worker (uid 65534) got EACCES and left every tunnelled
+  # event unattributed. #1677 removed it from the live fstab once; the
+  # 2026-09 rebuild put it back from here. Access is still gated by the
+  # read-only mount and the root SSH key; allow_other only lets local
+  # readers through.
+  local opts="_netdev,ro,reconnect,ServerAliveInterval=15,ServerAliveCountMax=3,IdentityFile=/root/.ssh/strato_vps,port=2222,allow_other,StrictHostKeyChecking=accept-new"
   # The comment block below is written once; the per-directory lines follow.
   grep -q "read-only VPS log mounts" /etc/fstab || cat >>/etc/fstab <<EOF
 
@@ -2159,11 +2166,38 @@ EOF
       echo "root@${VPS_WG_ADDRESS}:/opt/stacks/apiary/logs/$name $dir fuse.sshfs $opts 0 0" >>/etc/fstab
   done
 
+  # #3573: lines written by an older run of this step still carry
+  # default_permissions, and the append above never rewrites an existing
+  # line. Strip it from those entries and remount them so the change takes.
+  local remount=()
+  for dir in "${dirs[@]}"; do
+    if grep -E "[[:space:]]${dir}[[:space:]]+fuse\.sshfs[[:space:]].*default_permissions" /etc/fstab >/dev/null; then
+      sed -i -E "\#[[:space:]]${dir}[[:space:]]+fuse\.sshfs[[:space:]]# { s/,default_permissions//; s/default_permissions,// }" /etc/fstab
+      remount+=("$dir")
+    fi
+  done
+  if ((${#remount[@]})); then
+    systemctl daemon-reload 2>/dev/null || true
+    for dir in "${remount[@]}"; do
+      umount "$dir" 2>/dev/null || umount -l "$dir" 2>/dev/null || true
+    done
+  fi
+
   local failed=0
   for dir in "${dirs[@]}"; do
     mountpoint -q "$dir" || mount "$dir" || failed=1
     mountpoint -q "$dir" || { echo "sshfs mount failed: $dir" >&2; failed=1; }
   done
+
+  # #3573: the check that would have caught the regression. The worker that
+  # joins tunnelled events to portbridge's log runs as nobody (65534); if it
+  # cannot read the log, attribution stops with no error anywhere else.
+  local pb_log
+  pb_log="$(readlink -f "$REPO_DIR/logs/portbridge")/portbridge.json"
+  if [[ -e "$pb_log" ]] && ! setpriv --reuid=65534 --regid=65534 --clear-groups head -c 1 "$pb_log" >/dev/null 2>&1; then
+    echo "portbridge log is not readable as uid 65534 ($pb_log): tunnel attribution would silently stop -- check the sshfs options in /etc/fstab (#3573)" >&2
+    failed=1
+  fi
   return "$failed"
 }
 
