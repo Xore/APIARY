@@ -322,8 +322,8 @@ jobs:
       - name: Pick cache backend
         id: cache
         run: |
-          # scripts/install-homeserver.sh's provision-buildx-cache step owns
-          # creating /var/buildx-cache as github-ci-runner (/var itself
+          # scripts/github-ci-runner/provision-buildx-cache.sh (#3606) owns
+          # creating /var/buildx-cache for the runner users (/var itself
           # is root:root 0755, so this step cannot create it). Degrade to
           # type=gha rather than `bash -e`-failing all 18 matrix rows if
           # that step has not run on this box yet -- losing the local cache
@@ -343,7 +343,7 @@ jobs:
             } >> "$GITHUB_OUTPUT"
           else
             if [ "${{ needs.ci-target.outputs.homeserver }}" = "true" ]; then
-              echo "::warning::$dir is not writable by $(id -un) -- falling back to type=gha. Run scripts/install-homeserver.sh's provision-buildx-cache step (#2822)."
+              echo "::warning::$dir is not usable by $(id -un) on $RUNNER_NAME (groups: $(id -Gn)) -- falling back to type=gha. Run scripts/github-ci-runner/provision-buildx-cache.sh as root on this host (#3606)."
             fi
             echo "from=type=gha,scope=${{ matrix.image }}" >> "$GITHUB_OUTPUT"
             echo "to=type=gha,mode=max,scope=${{ matrix.image }}" >> "$GITHUB_OUTPUT"
