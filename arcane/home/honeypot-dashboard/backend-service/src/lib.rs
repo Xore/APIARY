@@ -56,6 +56,7 @@ pub mod obs;
 pub mod event_page;
 pub mod es_importer;
 pub mod events;
+pub mod facets;
 pub mod exports;
 pub mod fusion;
 pub mod ghidra_submit;
@@ -609,7 +610,10 @@ pub fn api_router() -> ContractRouter {
         .routes(utoipa_axum::routes!(reports_api::templates))
         .routes(utoipa_axum::routes!(reports_api::list_definitions, reports_api::create_definition))
         .routes(utoipa_axum::routes!(reports_api::get_definition, reports_api::replace_definition, reports_api::delete_definition))
+        .routes(utoipa_axum::routes!(reports_api::preview))
         .routes(utoipa_axum::routes!(reports_api::generate))
+        // #3524: counted value lists for the filter pickers.
+        .routes(utoipa_axum::routes!(facets::get))
         .routes(utoipa_axum::routes!(reports_api::delete_generated))
         .routes(utoipa_axum::routes!(artifacts::list))
         .routes(utoipa_axum::routes!(artifacts::download))

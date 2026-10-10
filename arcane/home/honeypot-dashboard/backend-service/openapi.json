@@ -3409,15 +3409,43 @@
         "operationId": "get_api_v1_entities__id__related",
         "parameters": [
           {
+            "description": "Entity id, same format as /entities/{id}/timeline.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "1h, 6h, 24h, 7d (default) or 30d.",
+            "in": "query",
+            "name": "range",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "{id, entity: {kind, value}, range, groups: [{kind, label, items: [{id, label, note, count, reason}]}]}. Empty groups are dropped. Group kinds: source, session, payload, credential, fingerprint, command, url, signature, cve, asn, network (CIDR), sensor, identity (attackers-v1), flow (community id, flow-links-v1), campaign (campaigns-v1). Several `source` groups carry the sources that share a payload, fingerprint, credential, /24 or ASN with the entity (found outside it). `count` is events (flows: events; identities: shared addresses); `reason` states the relation. Credentials are `user:password` and never come from scrubbed sensors; fleet addresses are excluded."
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Malformed id or bad range."
+          },
           "401": {
             "content": {
               "text/plain": {
@@ -3428,13 +3456,25 @@
             },
             "description": "No valid service token (or, on the Workbench, no actor identity)."
           },
-          "501": {
+          "404": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
-            "description": "No producer writes correlations-v1; the index does not exist."
+            "description": "Identity or campaign does not exist, or the id is a fleet address."
+          },
+          "502": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Elasticsearch failed."
           }
         },
         "security": [
@@ -3442,7 +3482,7 @@
             "serviceToken": []
           }
         ],
-        "summary": "Entities related to one entity (not implemented).",
+        "summary": "Entities that share pivots with one entity.",
         "tags": [
           "other"
         ]
@@ -3453,15 +3493,54 @@
         "operationId": "get_api_v1_entities__id__timeline",
         "parameters": [
           {
+            "description": "Entity id `kind:value`: ip:1.2.3.4 (alias source:), cidr:1.2.3.0/24 (network:; encode the slash), asn:13335, session:<id>, payload:<sha256> (hash:), identity:<attackers-v1 id>, campaign:<cidr>, cluster:<kind>:<value>, ioc:<kind>:<value>. A bare id is inferred: address, CIDR, AS<n>, 32/40/64-digit hex hash, else session.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "1h, 6h, 24h (default), 7d or 30d.",
+            "in": "query",
+            "name": "range",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Items to return, 1-500 (default 100).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
           }
         ],
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "{id, entity: {kind, value}, range, total, items: [{id, at, kind, title, detail, severity, href}]}, newest first. kind is event, alert, capture, canary, anomaly or llm; severity is critical/high/medium/low/info or null; href is the dashboard route of the record. total is the number of items found before the limit. Nothing in range is an empty `items` list. ML anomalies match the entity's address or the ids of its returned events; LLM analyses its address, sessions or payload hash. Fleet addresses are excluded."
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Malformed id, bad range or bad limit."
+          },
           "401": {
             "content": {
               "text/plain": {
@@ -3472,13 +3551,25 @@
             },
             "description": "No valid service token (or, on the Workbench, no actor identity)."
           },
-          "501": {
+          "404": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
-            "description": "No entity.id field exists on the event indices; no entity model is written."
+            "description": "Identity or campaign does not exist, or the id is a fleet address."
+          },
+          "502": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Elasticsearch failed."
           }
         },
         "security": [
@@ -3486,7 +3577,7 @@
             "serviceToken": []
           }
         ],
-        "summary": "Timeline for one entity (not implemented).",
+        "summary": "Chronological activity for one entity: events, alerts, canary triggers, ML anomalies and LLM analyses.",
         "tags": [
           "other"
         ]
@@ -5085,6 +5176,306 @@
         ]
       }
     },
+    "/api/v1/facets/{kind}": {
+      "get": {
+        "operationId": "get_api_v1_facets__kind_",
+        "parameters": [
+          {
+            "description": "Facet family. Only `events` is served.",
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Single source address.",
+            "in": "query",
+            "name": "ip",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated source addresses.",
+            "in": "query",
+            "name": "ips",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Sensor name.",
+            "in": "query",
+            "name": "sensor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "ISO country code.",
+            "in": "query",
+            "name": "country",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "City name.",
+            "in": "query",
+            "name": "city",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Destination port.",
+            "in": "query",
+            "name": "port",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Transport protocol.",
+            "in": "query",
+            "name": "proto",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "honeypot.event kind filter.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Captured-payload hash.",
+            "in": "query",
+            "name": "shasum",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "One flow across every sensor.",
+            "in": "query",
+            "name": "community_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Free-text query_string.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Go-style relative window (24h, 7d); defaults to 10d like the explorer.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Decoy persona id.",
+            "in": "query",
+            "name": "persona",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Decoy site id.",
+            "in": "query",
+            "name": "site",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Decoy asset id.",
+            "in": "query",
+            "name": "asset",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Client fingerprint.",
+            "in": "query",
+            "name": "fingerprint",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact command text.",
+            "in": "query",
+            "name": "cmd",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "\"user / pass\" pair.",
+            "in": "query",
+            "name": "cred",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Request path.",
+            "in": "query",
+            "name": "path",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Session id.",
+            "in": "query",
+            "name": "session",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Source AS number.",
+            "in": "query",
+            "name": "asn",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Source network organization.",
+            "in": "query",
+            "name": "org",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider class.",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "IDS alert signature.",
+            "in": "query",
+            "name": "sig",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Detection category.",
+            "in": "query",
+            "name": "cat",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Success: `{kind, total, sensors, sources, countries, protocols, ports, signatures, kinds, personas, providers, cities}`, each list `[{value, count}]`."
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Rejected: the request was understood but its input is not acceptable."
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "No valid service token (or, on the Workbench, no actor identity)."
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "No such record, store, or route for the values given."
+          },
+          "502": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Elasticsearch (or a sibling it proxies) refused or failed the query."
+          }
+        },
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "summary": "Counted value lists for the filter pickers.",
+        "tags": [
+          "other"
+        ]
+      }
+    },
     "/api/v1/filter-values": {
       "get": {
         "operationId": "get_api_v1_filter_values",
@@ -6156,8 +6547,65 @@
     "/api/v1/ioc/catalog": {
       "get": {
         "operationId": "get_api_v1_ioc_catalog",
-        "parameters": [],
+        "parameters": [
+          {
+            "description": "Only this kind: hash, domain, url, credential, command, fingerprint, cve, signature, username or password. Default all ten.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Case-insensitive substring filter on the indicator value.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Values per kind, 1-100 (default 25).",
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "1h, 6h, 24h, 7d (default) or 30d.",
+            "in": "query",
+            "name": "range",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "{range, size, kinds: {<kind>: [{id, kind, value, events, sources, sessions, first_seen, last_seen}]}, truncated: [kind]}, busiest value first. Every kind is present (empty list when nothing was seen); `truncated` names kinds with more values than `size`. `sources` counts distinct source.ip. Credential values are `user:password` (password-only is `:password`); sensors whose stored passwords are scrubbed (http-honeypot, cisco-asa-honeypot) are excluded from credential and password rows. Fleet addresses are excluded."
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unknown kind, bad size or bad range."
+          },
           "401": {
             "content": {
               "text/plain": {
@@ -6168,13 +6616,15 @@
             },
             "description": "No valid service token (or, on the Workbench, no actor identity)."
           },
-          "501": {
+          "502": {
             "content": {
-              "application/json": {
-                "schema": {}
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
-            "description": "No producer writes the IOC catalog; ioc-catalog-v1 does not exist."
+            "description": "Elasticsearch failed."
           }
         },
         "security": [
@@ -6182,7 +6632,7 @@
             "serviceToken": []
           }
         ],
-        "summary": "IOC catalog (not implemented).",
+        "summary": "Indicators seen, by kind, aggregated from the event indices.",
         "tags": [
           "other"
         ]
@@ -6193,6 +6643,7 @@
         "operationId": "get_api_v1_ioc__kind___value_",
         "parameters": [
           {
+            "description": "hash, domain, url, credential, command, fingerprint, cve, signature, username or password.",
             "in": "path",
             "name": "kind",
             "required": true,
@@ -6201,15 +6652,43 @@
             }
           },
           {
+            "description": "The indicator value, URL-encoded. A credential is user:password.",
             "in": "path",
             "name": "value",
             "required": true,
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "1h, 6h, 24h, 7d or 30d (default).",
+            "in": "query",
+            "name": "range",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "{id, kind, value, range, events, first_seen, last_seen, sources_total, sessions_total, sensors: [{key, count}], sources: [{key, count}] (top 20), sessions: [{session, events, first, last}] (newest 20), payloads: [{key, count}] (canonical_shasum in the matching events and, for other kinds, in the matching sessions), recent_events: [{id, time, sensor, src_ip, country, kind, proto, detail, session}] (newest 20)}."
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unknown kind, malformed value or bad range."
+          },
           "401": {
             "content": {
               "text/plain": {
@@ -6220,13 +6699,23 @@
             },
             "description": "No valid service token (or, on the Workbench, no actor identity)."
           },
-          "501": {
+          "404": {
             "content": {
               "application/json": {
                 "schema": {}
               }
             },
-            "description": "No producer writes IOC documents; ioc-v1 does not exist."
+            "description": "The indicator was not seen in range."
+          },
+          "502": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Elasticsearch failed."
           }
         },
         "security": [
@@ -6234,7 +6723,7 @@
             "serviceToken": []
           }
         ],
-        "summary": "One IOC (not implemented).",
+        "summary": "One indicator: counts, sensors, top sources, sessions, payloads and recent events.",
         "tags": [
           "other"
         ]
@@ -8990,6 +9479,90 @@
           }
         ],
         "summary": "Delete one generated report.",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
+    "/api/v1/reports/preview": {
+      "post": {
+        "operationId": "post_api_v1_reports_preview",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "description": "Deserialized by the handler into `ReportDefinition`. The shape is left open here on purpose -- see the module doc.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The preview: `{period: {from, to}, events, sources, sensors, sessions, sections: [{id, label, rows, pages, columns: [string, string], sample: [[string, string]]}], pages, empty_filter?: {field, message}}`."
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Rejected: the request was understood but its input is not acceptable."
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "No valid service token (or, on the Workbench, no actor identity)."
+          },
+          "415": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The `Content-Type` is not `application/json`; the extractor refused the body before the handler ran."
+          },
+          "422": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Well-formed but unprocessable. Two causes, both text/plain: the Json<T> extractor refused the body before the handler ran, or the route's own domain check rejected the definition (invalid fields, or an artifact template that has no telemetry to preview)."
+          },
+          "502": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Elasticsearch (or a sibling it proxies) refused or failed the query."
+          }
+        },
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "summary": "What a report definition would contain, without rendering it.",
         "tags": [
           "reports"
         ]

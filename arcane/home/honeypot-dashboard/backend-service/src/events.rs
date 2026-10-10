@@ -92,7 +92,7 @@ pub struct EventsQuery {
     pub org: Option<String>,
     /// Provider class (source.as.type).
     pub provider: Option<String>,
-    /// IDS alert signature (suricata.eve.alert.signature).
+    /// IDS alert signature, exact match (suricata.eve.alert.signature.keyword).
     pub sig: Option<String>,
     /// Detection category (suricata alert category or honeypot.category).
     pub cat: Option<String>,
@@ -783,7 +783,11 @@ pub fn build_filters(q: &EventsQuery) -> Vec<Value> {
         filters.push(json!({"term": {"source.as.type": provider}}));
     }
     if let Some(sig) = q.sig.as_deref().filter(|v| !v.is_empty()) {
-        filters.push(json!({"term": {"suricata.eve.alert.signature": sig}}));
+        // #3570: the field is `text` (analysed), so a `term` on it can never
+        // match a whole signature. Exact match on the `.keyword` subfield; the
+        // value always comes from the signatures facet (itself a terms agg on
+        // `.keyword`), so exact -- not partial/match_phrase -- is the contract.
+        filters.push(json!({"term": {"suricata.eve.alert.signature.keyword": sig}}));
     }
     if let Some(cat) = q.cat.as_deref().filter(|v| !v.is_empty()) {
         filters.push(any_of(&["suricata.eve.alert.category", "honeypot.category"], cat));
@@ -995,6 +999,28 @@ mod session_scope_tests {
             assert!(rendered.contains(field), "the session clause must match {field}: {rendered}");
         }
         assert!(rendered.contains("\"minimum_should_match\":1"), "{rendered}");
+    }
+
+    #[test]
+    fn sig_filter_is_an_exact_term_on_the_keyword_subfield() {
+        // #3570: a term on the analysed text field never matches a full signature.
+        let q: EventsQuery = serde_json::from_value(json!({"sig": "ET SCAN Example Scan"})).unwrap();
+        let filters = build_filters(&q);
+        assert!(
+            filters.contains(&json!({"term": {"suricata.eve.alert.signature.keyword": "ET SCAN Example Scan"}})),
+            "{filters:?}"
+        );
+        assert!(
+            !filters.iter().any(|f| f["term"].get("suricata.eve.alert.signature").is_some()),
+            "{filters:?}"
+        );
+    }
+
+    #[test]
+    fn no_sig_clause_is_emitted_when_sig_is_empty() {
+        let q: EventsQuery = serde_json::from_value(json!({"sig": ""})).unwrap();
+        let rendered = build_filters(&q).iter().map(|f| f.to_string()).collect::<String>();
+        assert!(!rendered.contains("alert.signature"), "{rendered}");
     }
 
     #[test]
