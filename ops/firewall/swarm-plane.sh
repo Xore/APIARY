@@ -89,8 +89,13 @@ desired_swarm_rules() {
     # IPsec ESP for overlays created with --opt encrypted (BFF, #3579).
     echo "rule family=\"ipv4\" source address=\"$peer\" protocol value=\"esp\" accept"
     # Ops SSH on the admin path, and the Arcane agent's ssh -L to the
-    # manager (arcane-fibre-tunnel on precision, until phase 1 replaces it).
-    echo "rule family=\"ipv4\" source address=\"$peer\" service name=\"ssh\" accept"
+    # manager (arcane-fibre-tunnel on precision). SWARM_SSH_PORT overrides
+    # port 22 where sshd listens elsewhere (VPS: 2222; 22 is a honeypot).
+    if [ -n "${SWARM_SSH_PORT:-}" ]; then
+      echo "rule family=\"ipv4\" source address=\"$peer\" port port=\"$SWARM_SSH_PORT\" protocol=\"tcp\" accept"
+    else
+      echo "rule family=\"ipv4\" source address=\"$peer\" service name=\"ssh\" accept"
+    fi
   done
   # ICMP stays open: PMTU discovery across the 9000 / 1420 MTU boundary
   # depends on "fragmentation needed" messages, and ping is the health probe.
@@ -157,7 +162,8 @@ all_owned() { return 0; }
 nm_connection_for() {
   # wg-quick devices appear as external NM connections; firewalld owns their zone.
   nmcli -g GENERAL.STATE device show "$1" 2>/dev/null | grep -q 'externally' && return 0
-  nmcli -g GENERAL.CONNECTION device show "$1" 2>/dev/null | head -n1
+  # A WireGuard interface that is not up yet has no device: no connection.
+  nmcli -g GENERAL.CONNECTION device show "$1" 2>/dev/null | head -n1 || true
 }
 
 bind_interface() {

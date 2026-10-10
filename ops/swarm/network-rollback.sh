@@ -13,8 +13,8 @@ backup() {
     systemctl is-active "wg-quick@$service" >"$dir/$service.active" || true
     systemctl is-enabled "wg-quick@$service" >"$dir/$service.enabled" 2>/dev/null || true
   done
-  systemctl is-active peer-route.timer >"$dir/peer-route.active" || true
-  systemctl is-enabled peer-route.timer >"$dir/peer-route.enabled" 2>/dev/null || true
+  systemctl is-active peer-route.service >"$dir/peer-route.active" || true
+  systemctl is-enabled peer-route.service >"$dir/peer-route.enabled" 2>/dev/null || true
   if [ -f /home/xore/.config/systemd/user/arcane-fibre-tunnel.service ]; then
     cp -a /home/xore/.config/systemd/user/arcane-fibre-tunnel.service "$dir/arcane-fibre-tunnel.service"
   fi
@@ -70,7 +70,7 @@ rollback() {
   systemctl stop home-wg-forward.service 2>/dev/null || true
   systemctl disable home-wg-forward.service >/dev/null 2>&1 || true
   "$dir/forward-rollback.sh" rollback
-  systemctl stop peer-route.timer 2>/dev/null || true
+  systemctl stop peer-route.service 2>/dev/null || true
   systemctl stop wg-quick@wg-fibre wg-quick@wg-lan 2>/dev/null || true
   if [ -f "$dir/wireguard.tar" ]; then
     tar -C / -xpf "$dir/wireguard.tar"
@@ -90,8 +90,8 @@ rollback() {
     runuser -u xore -- env XDG_RUNTIME_DIR=/run/user/1000 systemctl --user daemon-reload
     runuser -u xore -- env XDG_RUNTIME_DIR=/run/user/1000 systemctl --user restart arcane-fibre-tunnel.service
   fi
-  if [ "$(cat "$dir/peer-route.enabled")" = enabled ]; then systemctl enable peer-route.timer >/dev/null; else systemctl disable peer-route.timer >/dev/null 2>&1 || true; fi
-  if [ "$(cat "$dir/peer-route.active")" = active ]; then systemctl start peer-route.timer; fi
+  if [ "$(cat "$dir/peer-route.enabled")" = enabled ]; then systemctl enable peer-route.service >/dev/null; else systemctl disable peer-route.service >/dev/null 2>&1 || true; fi
+  if [ "$(cat "$dir/peer-route.active")" = active ]; then systemctl start peer-route.service; fi
   for path in /etc/systemd/system/home-wg-forward.service /usr/local/libexec/apiary-home-wg-forward /etc/apiary/homeserver-wg-ports.txt; do
     if [ -e "$dir$path" ]; then
       install -d "$(dirname "$path")"
