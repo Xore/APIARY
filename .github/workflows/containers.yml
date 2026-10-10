@@ -696,11 +696,6 @@ jobs:
           # than being clamped.
           retention-days: 90
 
-      - name: "Why a pull_request row has no SBOM (#3321)"
-        if: matrix.sbom == true && github.event_name == 'pull_request'
-        run: |
-          echo "::notice title=No SBOM on a pull_request::containers.yml builds with push=false and load=false on a pull request, so this row produced no image and therefore no digest to key an inventory to. The SBOM for this change is produced when it reaches main -- where the image is actually pushed, and where the retained artifact matches the deployed digest."
-
   # #3311: the one required status check for this workflow. Matrix row names
   # carry a "(GitHub-hosted)" suffix on fallback days, so no row is a stable
   # context for main's ruleset; this job is. always() so a failed router or

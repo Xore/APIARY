@@ -1589,8 +1589,11 @@ build exactly as before and pay no syft run and no advisory-DB download. The
 steps are also limited to events that push. A `pull_request` row builds with
 `push: false` and `load: false`, so it produces no image and therefore no
 digest — a tag-keyed inventory would describe whatever that tag pointed at
-when syft ran, which is not the thing a CVE question is about. Those rows
-emit a `::notice` saying so instead of leaving the gap unexplained.
+when syft ran, which is not the thing a CVE question is about. This is the
+contract, decided in #3609: **SBOMs are produced on `main` (pushes to main,
+tags and manual runs) only.** Pull-request builds run no SBOM step and emit no
+notice; the inventory for a change is the one written when it reaches `main`,
+where the pushed image digest exists.
 
 **The digest is stamped into the document, not just the filename.** syft's
 CycloneDX output records the image's name and tag and no digest at all
@@ -1668,8 +1671,9 @@ section exists to close.
 
 Honest limitations:
 
-- **Pull requests get no SBOM.** See above. The inventory that matters is the
-  one for the digest that was actually deployed.
+- **Pull requests get no SBOM, by decision (#3609).** SBOMs are main-only.
+  The inventory that matters is the one for the digest that was actually
+  deployed, which exists only after the image is pushed on `main`.
 - **Trivy warns** `Third-party SBOM may lead to inaccurate vulnerability
   detection` on a Syft-generated CycloneDX file, and recommends Trivy
   generate SBOMs itself. The issue specifies `trivy sbom` over a CycloneDX
