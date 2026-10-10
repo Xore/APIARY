@@ -1470,13 +1470,21 @@ The `Pick cache backend` step therefore chooses per executor:
 **The directory must be provisioned before the runner can use it.**
 `/var` is `root:root 0755`, so the workflow cannot create
 `/var/buildx-cache` itself: `mkdir` as `github-ci-runner` fails with
-`Permission denied`. `scripts/install-homeserver.sh`'s
-`provision-buildx-cache` step creates it `2775 github-ci-runner:github-ci-runner`
-(setgid so runner/image subdirectories stay group-owned) and then verifies
-the runner can actually write it, so a rebuild replay (#1609) recreates it
-rather than leaving a hand-made directory nobody records. If the step has
-not run on a given box, `Pick cache backend` emits a workflow warning and
-falls back to `type=gha` -- a slow build, not nineteen failed matrix rows.
+`Permission denied`. `scripts/github-ci-runner/provision-buildx-cache.sh`
+(#3606) provisions it on every executor: it creates the shared
+`github-ci-runner` group, adds every `github-ci-runner[-N]` user to it,
+creates `/var/buildx-cache` `2775 root:github-ci-runner` with a default and
+access ACL for the group, repairs existing subdirectories, and proves each
+runner user can create and remove a file in each per-runner directory. It is
+idempotent and prints `ok ... already correct` on a correct host.
+`install-homeserver.sh`'s `provision-buildx-cache` step and
+`install-ci-runner.sh` (precision, `--build-only`) both run it. A host that
+keeps the cache on another volume sets `BUILDX_CACHE_TARGET=/path` so
+`/var/buildx-cache` becomes a symlink to it (precision:
+`/var/lib/precision-storage/buildx-cache`). Group membership only applies to
+a runner service after it restarts. If the helper has not run on a box,
+`Pick cache backend` falls back to `type=gha`: a slow build, not failed
+matrix rows.
 
 **Bounding it.** `type=local` has *no* eviction: every export leaves
 unreferenced blobs behind in `blobs/sha256/` forever.
