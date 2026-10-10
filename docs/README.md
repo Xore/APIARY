@@ -12,6 +12,7 @@ kind of truth it holds.
 | [ARCHITECTURE.md](ARCHITECTURE.md) | system design: two-machine topology, trust boundaries, the dashboard tier, correlation surfaces, sandbox routes |
 | [PIPELINES.md](PIPELINES.md) | data flow: ingestion → enrichment → indexing → worker loops → dashboard reads; payload lifecycle; full index catalog |
 | [NETWORK.md](NETWORK.md) | network design: CGNAT pattern, ingress paths, source attribution, per-sensor isolation, Docker control surface |
+| [SWARM-NETWORK.md](SWARM-NETWORK.md) | swarm tunnel decisions, phase 0 firewall flows, probes and rollback |
 | [STORAGE.md](STORAGE.md) | storage: host tree contract, who-writes/who-reads, Elasticsearch layout, retention and growth bounds |
 
 ## Runbooks — how to operate it

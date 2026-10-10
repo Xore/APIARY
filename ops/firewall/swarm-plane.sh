@@ -56,8 +56,9 @@ load_env() {
   : "${SWARM_ZONE:=apiary-swarm}"
   : "${SWARM_IFACES:?SWARM_IFACES must list the swarm-plane interfaces}"
   : "${SWARM_PEERS:?SWARM_PEERS must list the allowed peer sources}"
+  : "${SWARM_MANAGER:?SWARM_MANAGER must be 0 or 1}"
+  [[ "$SWARM_MANAGER" = 0 || "$SWARM_MANAGER" = 1 ]] || die "SWARM_MANAGER must be 0 or 1"
   : "${LAN_ZONES:=public}"
-  : "${ACCEPT_RULES:=}"
   for z in $LAN_ZONES; do
     [ "$z" != "$SWARM_ZONE" ] || die "LAN_ZONES must not contain $SWARM_ZONE"
   done
@@ -76,9 +77,10 @@ fw_both() {
 desired_swarm_rules() {
   local peer
   for peer in $SWARM_PEERS; do
-    # Manager API and raft. Open on every node, not just today's manager:
-    # precision is promoted to manager in phase 1 (#3589, decision 1).
-    echo "rule family=\"ipv4\" source address=\"$peer\" port port=\"2377\" protocol=\"tcp\" accept"
+    # Manager API and raft: workers have no 2377 listener.
+    if [ "$SWARM_MANAGER" = 1 ]; then
+      echo "rule family=\"ipv4\" source address=\"$peer\" port port=\"2377\" protocol=\"tcp\" accept"
+    fi
     # Node gossip (memberlist): TCP push/pull and UDP probes, both ways.
     echo "rule family=\"ipv4\" source address=\"$peer\" port port=\"7946\" protocol=\"tcp\" accept"
     echo "rule family=\"ipv4\" source address=\"$peer\" port port=\"7946\" protocol=\"udp\" accept"
@@ -89,14 +91,6 @@ desired_swarm_rules() {
     # Ops SSH on the admin path, and the Arcane agent's ssh -L to the
     # manager (arcane-fibre-tunnel on precision, until phase 1 replaces it).
     echo "rule family=\"ipv4\" source address=\"$peer\" service name=\"ssh\" accept"
-  done
-  local spec zsrc port proto
-  # Underlay rules for WireGuard listeners on this zone's interfaces
-  # (phase 1: the wg-fibre listener on the fibre underlay).
-  for spec in $ACCEPT_RULES; do
-    IFS=',' read -r zone zsrc port proto <<<"$spec"
-    [ "$zone" = "$SWARM_ZONE" ] || continue
-    echo "rule family=\"ipv4\" source address=\"$zsrc\" port port=\"$port\" protocol=\"$proto\" accept"
   done
   # ICMP stays open: PMTU discovery across the 9000 / 1420 MTU boundary
   # depends on "fragmentation needed" messages, and ping is the health probe.
@@ -112,24 +106,15 @@ desired_swarm_rules() {
 # visible in the config and the journal, and drop instead of reject so a
 # scan sees "filtered" with no ICMP answer.
 desired_lan_rules() {
-  local zone="$1" spec zsrc port proto
   for p in 2377/tcp 7946/tcp 7946/udp 4789/udp; do
     echo "rule family=\"ipv4\" port port=\"${p%/*}\" protocol=\"${p#*/}\" log prefix=\"$LOG_PREFIX_LAN\" level=\"warning\" limit value=\"6/m\" drop"
   done
   echo "rule protocol value=\"esp\" log prefix=\"$LOG_PREFIX_LAN\" level=\"warning\" limit value=\"6/m\" drop"
-  # Underlay rules for WireGuard listeners on a LAN interface (phase 1:
-  # the wg-lan fallback path, decision 6). Accepts sort before drops in
-  # firewalld's chain order, and a WG port is never a swarm port.
-  for spec in $ACCEPT_RULES; do
-    IFS=',' read -r z zsrc port proto <<<"$spec"
-    [ "$z" = "$zone" ] || continue
-    echo "rule family=\"ipv4\" source address=\"$zsrc\" port port=\"$port\" protocol=\"$proto\" accept"
-  done
 }
 
 # Rules in a LAN zone that this script owns or that it replaces: the
 # legacy source-scoped swarm accepts (added by hand on 2026-10-09) and its
-# own logged drops / underlay accepts.
+# own logged drops.
 owned_lan_rule() {
   local r="$1"
   case "$r" in
@@ -138,11 +123,6 @@ owned_lan_rule() {
   if [[ "$r" =~ port\ port=\"(2377|7946|4789)\" ]] && [[ "$r" == *" accept" ]]; then
     return 0
   fi
-  local spec z zsrc port proto
-  for spec in $ACCEPT_RULES; do
-    IFS=',' read -r z zsrc port proto <<<"$spec"
-    [ "$r" = "rule family=\"ipv4\" source address=\"$zsrc\" port port=\"$port\" protocol=\"$proto\" accept" ] && return 0
-  done
   return 1
 }
 
@@ -218,7 +198,7 @@ cmd_apply() {
   for ifc in $SWARM_IFACES; do bind_interface "$ifc"; done
   local z
   for z in $LAN_ZONES; do
-    converge_rules "$z" "$(desired_lan_rules "$z")" owned_lan_rule
+    converge_rules "$z" "$(desired_lan_rules)" owned_lan_rule
   done
   cmd_status_loaded
 }
@@ -262,7 +242,7 @@ cmd_arm() {
   need_root
   local dir="$1" delay="${2:-5min}"
   [ -x "$dir/rollback.sh" ] || die "no rollback.sh in $dir"
-  systemctl stop "$ROLLBACK_UNIT.timer" "$ROLLBACK_UNIT.service" 2>/dev/null || true
+  systemctl is-active --quiet "$ROLLBACK_UNIT.timer" && die "rollback timer already armed"
   systemctl reset-failed "$ROLLBACK_UNIT.service" 2>/dev/null || true
   systemd-run --on-active="$delay" --unit="$ROLLBACK_UNIT" /bin/bash "$dir/rollback.sh" "$dir"
   log "rollback armed: $ROLLBACK_UNIT fires in $delay unless disarmed"
