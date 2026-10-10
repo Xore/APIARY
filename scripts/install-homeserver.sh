@@ -1467,7 +1467,7 @@ step_create_shared_resources() {
 
 step_provision_buildx_cache() {
   # #2822: .github/workflows/containers.yml exports every image's layer
-  # cache to type=local under /var/buildx-cache/<image> when the build
+  # cache to type=local under /var/buildx-cache/<runner>/<image> when the build
   # lands on this box's self-hosted runners, because the type=gha cache was
   # measured ~2x over GitHub's 10 GB per-repository ceiling and therefore
   # being LRU-evicted while in use.
@@ -1492,7 +1492,7 @@ step_provision_buildx_cache() {
   # actions.runner.Xore-APIARY.supermicro-ci-* unit) and only
   # github-ci-runner was in the github-ci-runner group, so a Containers row
   # that landed on supermicro-ci-2 got EACCES from the workflow's own
-  # `mkdir -p /var/buildx-cache/<image>` and silently degraded to
+  # `mkdir -p /var/buildx-cache/<runner>/<image>` and silently degraded to
   # type=gha -- the exact quota-evicted cache #2822 moved off. Joining them
   # here (rather than by hand) is what makes a #1609 rebuild reproduce it.
   local cache_dir=/var/buildx-cache
@@ -1523,7 +1523,7 @@ step_provision_buildx_cache() {
   done
 
   # Group membership alone is not enough for subdirectories that already
-  # exist: the workflow creates /var/buildx-cache/<image> with the runner's
+  # exist: the workflow creates /var/buildx-cache/<runner>/<image> with the runner's
   # default umask 022, so a dir made by one runner before the grant existed
   # is 2755 -- group-owned but not group-writable, and the next runner's
   # mkdir/prune inside it still fails. Repair what is there; the workflow

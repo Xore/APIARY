@@ -1340,10 +1340,9 @@ that existing independence into actual wall-clock parallelism. The
 `conpot_persona_pipeline` rows each pick a random host port in `19000-19899`
 for their throwaway Elasticsearch container specifically so two instances
 running one concurrently don't collide on a fixed port; `containers.yml`'s
-buildx cache is `type=local` under `/var/buildx-cache/<image>` when the
-build lands on this box (#2822, below), which is a path on shared local
-disk rather than per-instance state, so a second instance is not cold
-there either -- no extra work needed for that tier.
+buildx cache is `type=local` under `/var/buildx-cache/<runner>/<image>`
+when the build lands on this box (#2822 and #3605, below). Each runner
+keeps its own cache so another job cannot prune it during export.
 
 `actions/setup-go`/`actions/setup-node` cache their toolchain downloads in
 the runner's own persistent tool cache -- unlike an ephemeral GitHub-hosted
@@ -1451,9 +1450,11 @@ the images evicting *each other*, but did nothing about the quota itself.
 
 The `Pick cache backend` step therefore chooses per executor:
 
-- **Homeserver runner** -- `type=local,dest=/var/buildx-cache/<image>`.
+- **Self-hosted runner** -- `type=local,dest=/var/buildx-cache/<runner>/<image>`.
   Local disk on `/var` (see `docs/HOMESERVER-DISK-LAYOUT.md`), outside
-  the GitHub quota entirely, and it survives between runs on this box.
+  the GitHub quota entirely, and it survives between runs on this runner.
+  One job runs per runner, so build and prune never touch that directory
+  concurrently. This uses more disk and starts each runner with a cold cache.
 - **GitHub-hosted fallback** -- `type=gha,scope=<image>`, unchanged. An
   ephemeral runner has no local disk worth caching to.
 
@@ -1462,7 +1463,7 @@ The `Pick cache backend` step therefore chooses per executor:
 `/var/buildx-cache` itself: `mkdir` as `github-ci-runner` fails with
 `Permission denied`. `scripts/install-homeserver.sh`'s
 `provision-buildx-cache` step creates it `2775 github-ci-runner:github-ci-runner`
-(setgid so per-image subdirectories stay group-owned) and then verifies
+(setgid so runner/image subdirectories stay group-owned) and then verifies
 the runner can actually write it, so a rebuild replay (#1609) recreates it
 rather than leaving a hand-made directory nobody records. If the step has
 not run on a given box, `Pick cache backend` emits a workflow warning and
@@ -1470,13 +1471,10 @@ falls back to `type=gha` -- a slow build, not nineteen failed matrix rows.
 
 **Bounding it.** `type=local` has *no* eviction: every export leaves
 unreferenced blobs behind in `blobs/sha256/` forever.
-`scripts/prune-buildx-cache.sh <dir>` runs after each export and deletes
-blobs untouched for `PRUNE_DAYS` (14), then, if the directory is still
-over `MAX_BYTES` (2 GiB per image), clears it outright. The reset is
-deliberate: BuildKit skips the *entire* import when one referenced blob is
-missing (it warns and builds on, exit 0), so a partially trimmed directory
-is worth nothing while still occupying the disk that `/var/benchmarks`
-shares.
+`scripts/prune-buildx-cache.sh <dir>` runs after each export and clears
+the whole runner/image cache if it exceeds `MAX_BYTES` (2 GiB). It does
+not delete individual old blobs: the current index can still reference
+them, so selective pruning can corrupt the next import.
 
 **Reclaiming the existing `type=gha` backlog.** `.github/workflows/cache-cleanup.yml`
 deletes a PR's cache entries when the PR closes. Actions scopes cache
