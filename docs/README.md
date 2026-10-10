@@ -50,6 +50,7 @@ homeserver — how it runs, its config shape, and a host-side inotify finding).
 [deception extensions](DECEPTION-EXTENSIONS.md) ·
 [FMC management-audit contract (#3215: specified, not built)](FMC-MANAGEMENT-AUDIT-CONTRACT.md) ·
 [GeoIP/threat intel](GEOIP-THREAT-INTEL.md) ·
+[tunnel attribution (portbridge join, #3573)](TUNNEL-ATTRIBUTION.md) ·
 [payload workbench](payload-analysis-workbench.md) ·
 [network isolation](honeypot-network-isolation.md) ·
 [agent-intrusion threat model](agent-intrusion-threat-model.md) ·
