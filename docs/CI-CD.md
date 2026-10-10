@@ -37,6 +37,15 @@ below.
   is still there; the nightly's unseeded high-run search is the lane that is
   *meant* to move (#3326, [record](frontend-mutation-pilot.md)).
 
+### Ubuntu 26.04 trial (#3608)
+
+`ubuntu-latest` moves to Ubuntu 26.04 from 2026-10-19. `ubuntu-26-trial.yml`
+runs the image-dependent hosted legs (shellcheck, hadolint, bare `python3`,
+docker tooling, the Playwright `--with-deps` + `redis-server` browser suite) on
+`ubuntu-26.04`. Every job is `continue-on-error: true` and nothing gates on it;
+a red job is the evidence for pinning the matching `quality.yml` job to
+`ubuntu-24.04`. Delete the workflow once `ubuntu-latest` has settled.
+
 ### Advisory frontend testing pilot (#3326)
 
 `frontend-testing-pilot.yml` runs nightly (`41 4 * * *`) and on
@@ -1340,10 +1349,9 @@ that existing independence into actual wall-clock parallelism. The
 `conpot_persona_pipeline` rows each pick a random host port in `19000-19899`
 for their throwaway Elasticsearch container specifically so two instances
 running one concurrently don't collide on a fixed port; `containers.yml`'s
-buildx cache is `type=local` under `/var/buildx-cache/<image>` when the
-build lands on this box (#2822, below), which is a path on shared local
-disk rather than per-instance state, so a second instance is not cold
-there either -- no extra work needed for that tier.
+buildx cache is `type=local` under `/var/buildx-cache/<runner>/<image>`
+when the build lands on this box (#2822 and #3605, below). Each runner
+keeps its own cache so another job cannot prune it during export.
 
 `actions/setup-go`/`actions/setup-node` cache their toolchain downloads in
 the runner's own persistent tool cache -- unlike an ephemeral GitHub-hosted
@@ -1451,32 +1459,39 @@ the images evicting *each other*, but did nothing about the quota itself.
 
 The `Pick cache backend` step therefore chooses per executor:
 
-- **Homeserver runner** -- `type=local,dest=/var/buildx-cache/<image>`.
+- **Self-hosted runner** -- `type=local,dest=/var/buildx-cache/<runner>/<image>`.
   Local disk on `/var` (see `docs/HOMESERVER-DISK-LAYOUT.md`), outside
-  the GitHub quota entirely, and it survives between runs on this box.
+  the GitHub quota entirely, and it survives between runs on this runner.
+  One job runs per runner, so build and prune never touch that directory
+  concurrently. This uses more disk and starts each runner with a cold cache.
 - **GitHub-hosted fallback** -- `type=gha,scope=<image>`, unchanged. An
   ephemeral runner has no local disk worth caching to.
 
 **The directory must be provisioned before the runner can use it.**
 `/var` is `root:root 0755`, so the workflow cannot create
 `/var/buildx-cache` itself: `mkdir` as `github-ci-runner` fails with
-`Permission denied`. `scripts/install-homeserver.sh`'s
-`provision-buildx-cache` step creates it `2775 github-ci-runner:github-ci-runner`
-(setgid so per-image subdirectories stay group-owned) and then verifies
-the runner can actually write it, so a rebuild replay (#1609) recreates it
-rather than leaving a hand-made directory nobody records. If the step has
-not run on a given box, `Pick cache backend` emits a workflow warning and
-falls back to `type=gha` -- a slow build, not nineteen failed matrix rows.
+`Permission denied`. `scripts/github-ci-runner/provision-buildx-cache.sh`
+(#3606) provisions it on every executor: it creates the shared
+`github-ci-runner` group, adds every `github-ci-runner[-N]` user to it,
+creates `/var/buildx-cache` `2775 root:github-ci-runner` with a default and
+access ACL for the group, repairs existing subdirectories, and proves each
+runner user can create and remove a file in each per-runner directory. It is
+idempotent and prints `ok ... already correct` on a correct host.
+`install-homeserver.sh`'s `provision-buildx-cache` step and
+`install-ci-runner.sh` (precision, `--build-only`) both run it. A host that
+keeps the cache on another volume sets `BUILDX_CACHE_TARGET=/path` so
+`/var/buildx-cache` becomes a symlink to it (precision:
+`/var/lib/precision-storage/buildx-cache`). Group membership only applies to
+a runner service after it restarts. If the helper has not run on a box,
+`Pick cache backend` falls back to `type=gha`: a slow build, not failed
+matrix rows.
 
 **Bounding it.** `type=local` has *no* eviction: every export leaves
 unreferenced blobs behind in `blobs/sha256/` forever.
-`scripts/prune-buildx-cache.sh <dir>` runs after each export and deletes
-blobs untouched for `PRUNE_DAYS` (14), then, if the directory is still
-over `MAX_BYTES` (2 GiB per image), clears it outright. The reset is
-deliberate: BuildKit skips the *entire* import when one referenced blob is
-missing (it warns and builds on, exit 0), so a partially trimmed directory
-is worth nothing while still occupying the disk that `/var/benchmarks`
-shares.
+`scripts/prune-buildx-cache.sh <dir>` runs after each export and clears
+the whole runner/image cache if it exceeds `MAX_BYTES` (2 GiB). It does
+not delete individual old blobs: the current index can still reference
+them, so selective pruning can corrupt the next import.
 
 **Reclaiming the existing `type=gha` backlog.** `.github/workflows/cache-cleanup.yml`
 deletes a PR's cache entries when the PR closes. Actions scopes cache
@@ -1591,8 +1606,11 @@ build exactly as before and pay no syft run and no advisory-DB download. The
 steps are also limited to events that push. A `pull_request` row builds with
 `push: false` and `load: false`, so it produces no image and therefore no
 digest — a tag-keyed inventory would describe whatever that tag pointed at
-when syft ran, which is not the thing a CVE question is about. Those rows
-emit a `::notice` saying so instead of leaving the gap unexplained.
+when syft ran, which is not the thing a CVE question is about. This is the
+contract, decided in #3609: **SBOMs are produced on `main` (pushes to main,
+tags and manual runs) only.** Pull-request builds run no SBOM step and emit no
+notice; the inventory for a change is the one written when it reaches `main`,
+where the pushed image digest exists.
 
 **The digest is stamped into the document, not just the filename.** syft's
 CycloneDX output records the image's name and tag and no digest at all
@@ -1670,8 +1688,9 @@ section exists to close.
 
 Honest limitations:
 
-- **Pull requests get no SBOM.** See above. The inventory that matters is the
-  one for the digest that was actually deployed.
+- **Pull requests get no SBOM, by decision (#3609).** SBOMs are main-only.
+  The inventory that matters is the one for the digest that was actually
+  deployed, which exists only after the image is pushed on `main`.
 - **Trivy warns** `Third-party SBOM may lead to inaccurate vulnerability
   detection` on a Syft-generated CycloneDX file, and recommends Trivy
   generate SBOMs itself. The issue specifies `trivy sbom` over a CycloneDX

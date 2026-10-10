@@ -1467,7 +1467,7 @@ step_create_shared_resources() {
 
 step_provision_buildx_cache() {
   # #2822: .github/workflows/containers.yml exports every image's layer
-  # cache to type=local under /var/buildx-cache/<image> when the build
+  # cache to type=local under /var/buildx-cache/<runner>/<image> when the build
   # lands on this box's self-hosted runners, because the type=gha cache was
   # measured ~2x over GitHub's 10 GB per-repository ceiling and therefore
   # being LRU-evicted while in use.
@@ -1492,57 +1492,14 @@ step_provision_buildx_cache() {
   # actions.runner.Xore-APIARY.supermicro-ci-* unit) and only
   # github-ci-runner was in the github-ci-runner group, so a Containers row
   # that landed on supermicro-ci-2 got EACCES from the workflow's own
-  # `mkdir -p /var/buildx-cache/<image>` and silently degraded to
+  # `mkdir -p /var/buildx-cache/<runner>/<image>` and silently degraded to
   # type=gha -- the exact quota-evicted cache #2822 moved off. Joining them
   # here (rather than by hand) is what makes a #1609 rebuild reproduce it.
-  local cache_dir=/var/buildx-cache
-  local runner_user=github-ci-runner
-
-  if ! id -u "$runner_user" >/dev/null 2>&1; then
-    echo "  $runner_user does not exist yet -- creating $cache_dir root-owned;"
-    echo "  re-run this step after the CI runners are installed."
-    install -d -m 0755 "$cache_dir"
-    return 0
-  fi
-
-  install -d -m 2775 -o "$runner_user" -g "$runner_user" "$cache_dir"
-
-  # Empty on a fresh install, where the extra instances do not exist yet --
-  # install-ci-runner.sh is a manual runbook step that runs later. The loops
-  # below then simply do nothing extra, which is the pre-existing behaviour.
-  local extra_users=()
-  mapfile -t extra_users < <(getent passwd | cut -d: -f1 | grep -E '^github-ci-runner-[0-9]+$' | sort)
-
-  local u
-  for u in "${extra_users[@]}"; do
-    if id -nG "$u" 2>/dev/null | tr ' ' '\n' | grep -qx "$runner_user"; then
-      continue
-    fi
-    usermod -aG "$runner_user" "$u"
-    echo "  added $u to the $runner_user group"
-  done
-
-  # Group membership alone is not enough for subdirectories that already
-  # exist: the workflow creates /var/buildx-cache/<image> with the runner's
-  # default umask 022, so a dir made by one runner before the grant existed
-  # is 2755 -- group-owned but not group-writable, and the next runner's
-  # mkdir/prune inside it still fails. Repair what is there; the workflow
-  # sets umask 002 for the ones it creates from now on.
-  chown -R "$runner_user:$runner_user" "$cache_dir"
-  chmod -R g+rwX "$cache_dir"
-
-  # Prove it, rather than assuming install(1) implies the runner can write:
-  # the check that was missing is the whole reason this step exists. Every
-  # runner user is checked, because one unlisted user is exactly how the
-  # 2026-09-06 fallback went unnoticed.
-  for u in "$runner_user" "${extra_users[@]}"; do
-    if ! runuser -u "$u" -- test -w "$cache_dir"; then
-      echo "  ERROR: $cache_dir is not writable by $u" >&2
-      ls -ld "$cache_dir" >&2
-      return 1
-    fi
-  done
-  echo "  $cache_dir writable by $runner_user ${extra_users[*]} (verified)"
+  # #3606: the group, membership, setgid directory, default ACL, repair and
+  # per-user write proof live in one idempotent helper that precision's
+  # install-ci-runner.sh also runs, so both executors are provisioned the same
+  # way and a re-run on a correct host changes nothing.
+  "$REPO_DIR/scripts/github-ci-runner/provision-buildx-cache.sh"
 }
 
 step_provision_image_sbom() {
