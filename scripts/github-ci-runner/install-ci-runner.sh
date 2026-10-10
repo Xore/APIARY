@@ -261,6 +261,12 @@ if ! id "$RUNNER_USER" >/dev/null 2>&1; then
 fi
 install -d -m 0755 -o "$RUNNER_USER" -g "$RUNNER_USER" "$RUNNER_HOME"
 
+# #3606: join the shared buildx-cache group and make sure /var/buildx-cache
+# exists and is writable by every runner user, so Containers uses type=local
+# on this executor instead of the gha fallback. Idempotent; set
+# BUILDX_CACHE_TARGET=/path to keep the cache on another volume (precision).
+"$here/github-ci-runner/provision-buildx-cache.sh"
+
 # SELinux: files under /var are labelled var_t, and systemd's init_t cannot
 # exec a var_t file -- the unit fails 203/EXEC with no AVC logged, the same
 # rule that broke backup-honeypot.service. The runner's own executables
