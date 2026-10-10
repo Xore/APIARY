@@ -256,9 +256,10 @@ step_docker_install() {
 step_docker_daemon_config() {
   # Matches the live VPS's /etc/docker/daemon.json exactly (fetched and
   # diffed against this, not guessed): icc/no-new-privileges/userland-proxy
-  # hardening appropriate for a public-facing edge host, live-restore so a
-  # dockerd restart/upgrade doesn't take every honeypot listener down with
-  # it, bounded log rotation.
+  # hardening appropriate for a public-facing edge host and bounded log
+  # rotation. live-restore is off: the VPS is a swarm worker (#3589) and
+  # dockerd refuses swarm mode with live-restore, so a dockerd restart now
+  # restarts the honeypot listeners (restart policies bring them back).
   cat >/etc/docker/daemon.json <<'EOF'
 {
   "storage-driver": "overlay2",
@@ -270,7 +271,7 @@ step_docker_daemon_config() {
   },
   "icc": false,
   "no-new-privileges": true,
-  "live-restore": true,
+  "live-restore": false,
   "userland-proxy": false,
   "shutdown-timeout": 15,
   "exec-opts": ["native.cgroupdriver=systemd"],

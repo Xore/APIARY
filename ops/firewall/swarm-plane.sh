@@ -89,8 +89,13 @@ desired_swarm_rules() {
     # IPsec ESP for overlays created with --opt encrypted (BFF, #3579).
     echo "rule family=\"ipv4\" source address=\"$peer\" protocol value=\"esp\" accept"
     # Ops SSH on the admin path, and the Arcane agent's ssh -L to the
-    # manager (arcane-fibre-tunnel on precision, until phase 1 replaces it).
-    echo "rule family=\"ipv4\" source address=\"$peer\" service name=\"ssh\" accept"
+    # manager (arcane-fibre-tunnel on precision). SWARM_SSH_PORT overrides
+    # port 22 where sshd listens elsewhere (VPS: 2222; 22 is a honeypot).
+    if [ -n "${SWARM_SSH_PORT:-}" ]; then
+      echo "rule family=\"ipv4\" source address=\"$peer\" port port=\"$SWARM_SSH_PORT\" protocol=\"tcp\" accept"
+    else
+      echo "rule family=\"ipv4\" source address=\"$peer\" service name=\"ssh\" accept"
+    fi
   done
   # ICMP stays open: PMTU discovery across the 9000 / 1420 MTU boundary
   # depends on "fragmentation needed" messages, and ping is the health probe.
