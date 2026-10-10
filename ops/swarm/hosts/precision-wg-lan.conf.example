@@ -1,0 +1,12 @@
+[Interface]
+Address = 10.8.2.2/30
+ListenPort = 51822
+MTU = 1500
+Table = off
+PrivateKey = REPLACE_WITH_HOST_GENERATED_PRIVATE_KEY
+
+[Peer]
+PublicKey = REPLACE_WITH_HOMESERVER_LAN_PUBLIC_KEY
+AllowedIPs = 10.8.2.1/32, 10.8.0.2/32
+Endpoint = 192.168.42.250:51822
+PersistentKeepalive = 15

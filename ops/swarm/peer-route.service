@@ -1,0 +1,9 @@
+[Unit]
+Description=Route manager hub peer over the healthy WireGuard path
+Wants=network-online.target
+After=network-online.target wg-quick@wg-fibre.service wg-quick@wg-lan.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/apiary/swarm-peer.env
+ExecStart=/usr/local/libexec/apiary-swarm-peer-route $PEER_HUB $LOCAL_HUB $FIBRE_PEER $LAN_PEER

@@ -10,7 +10,7 @@ attribution and per-sensor isolation. Those do not change here.
 
 **Status (2026-10-10).**
 - **Phase 0 ([#3588](https://github.com/Xore/APIARY/issues/3588))** is live on homeserver and precision. The direct fibre is in its own default-deny `apiary-swarm` zone, and the swarm plane is closed on every LAN and public interface.
-- **Phase 1 ([#3589](https://github.com/Xore/APIARY/issues/3589))** builds the WireGuard tunnels and re-joins the swarm. It is not started.
+- **Phase 1 ([#3589](https://github.com/Xore/APIARY/issues/3589))** builds the WireGuard tunnels and re-joins the swarm. Host templates and rollback tooling are in [ops/swarm](../ops/swarm/README.md); the live topology has not changed. The diagram below still shows phase 0.
 
 The per-service, per-port evidence behind the flow matrix is the
 [#3588 live/repo port inventory](https://github.com/Xore/APIARY/issues/3588#issuecomment-6098046203),
@@ -97,14 +97,14 @@ In phase 0, inbound swarm rules are bound to an interface in `apiary-swarm`, res
 |---|---|---|---|
 | precision `10.254.250.2` → homeserver `10.254.250.1` | F; TCP 2377, TCP/UDP 7946, UDP 4789, ESP (IP protocol 50) | Manager control, gossip, VXLAN, encrypted overlay | #3588 / live |
 | homeserver `10.254.250.1` → precision `10.254.250.2` | F; TCP/UDP 7946, UDP 4789, ESP | Gossip and overlay; precision has no TCP 2377 listener while it is a worker | #3588 / live |
-| precision → homeserver | F; TCP 22, then loopback TCP 13552 → H TCP 3552 | `arcane-fibre-tunnel` SSH forward to the Arcane manager; the agent listens on loopback TCP 3553 | #3588 / live, replaced in #3589 |
+| precision → homeserver | F; TCP 22, then loopback TCP 13552 → H TCP 3552 | `arcane-fibre-tunnel` user-level SSH forward to the Arcane manager; the agent listens on loopback TCP 3553. Phase 1 keeps the forward but routes its SSH connection over the manager hub address. | #3588 / live; #3589 route change |
 | homeserver ↔ precision | F and L; ICMP | PMTU discovery and health probes | #3588 / live |
 | LAN admin → homeserver/precision | L; TCP 22 | Existing SSH access, kept in `public` | ops / existing |
 | VPS portbridge → homeserver sensors | H; exact TCP/UDP mappings in the [inventory](https://github.com/Xore/APIARY/issues/3588#issuecomment-6098046203), including translated ports | Internet honeypot traffic; attacker `source.ip` preserved | #3573 / existing |
 | VPS Traefik/socat → homeserver gateways | H; the dashboard, Arcane, Keycloak, Kibana and other published ports in the inventory | OIDC-gated tools; no new host openings | #3579 / existing |
 | CI runners → precision registry mirror | local Docker bridge; TCP 5555 → 5000 | Image pulls; not LAN-published | CI / existing |
-| VPS ↔ homeserver/precision | H; WireGuard UDP 51820 underlay, then peer-scoped TCP 2377, TCP/UDP 7946, UDP 4789, ESP | Three-node swarm and encrypted overlays | #3589 |
-| homeserver ↔ precision | fibre WG `10.8.1.0/30` and the LAN fallback; peer-scoped swarm ports above; WG listener UDP ports per #3589 | Direct encrypted swarm path and failover. The only `public` addition is a peer-scoped accept for the LAN tunnel's UDP port | #3589 |
+| VPS worker ↔ homeserver/precision managers | H; WireGuard UDP 51820 underlay, then manager TCP 2377, peer-scoped TCP/UDP 7946, UDP 4789, ESP | Three-node swarm and encrypted overlays | #3589 |
+| homeserver ↔ precision | fibre WG `10.8.1.0/30` over fibre UDP 51821; LAN fallback WG `10.8.2.0/30` over peer-scoped LAN UDP 51822; peer-scoped swarm ports above | Direct encrypted swarm path and failover. The only `public` addition is a peer-scoped accept for UDP 51822 | #3589 |
 | BFF/backend overlay | rides the overlay (VXLAN/ESP above) | Encrypted BFF overlay; no extra host ports | #3579 |
 
 What the phase 0 firewall does *not* cover:

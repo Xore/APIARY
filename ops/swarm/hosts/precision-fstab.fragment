@@ -1,0 +1,5 @@
+# Existing data stays on this XFS volume; bind mounts require it.
+UUID=1439bb06-3116-4490-9450-9678eb26cdf5 /var/lib/precision-storage xfs defaults,noatime 0 0
+/var/lib/precision-storage/live/docker /var/lib/docker none bind,noatime,x-systemd.requires-mounts-for=/var/lib/precision-storage 0 0
+/var/lib/precision-storage/live/github-runners /var/lib/github-runners none bind,noatime,x-systemd.requires-mounts-for=/var/lib/precision-storage 0 0
+/var/lib/precision-storage/live/github-runner-data /var/lib/github-runner-data none bind,noatime,x-systemd.requires-mounts-for=/var/lib/precision-storage 0 0

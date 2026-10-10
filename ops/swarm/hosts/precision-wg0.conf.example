@@ -1,0 +1,10 @@
+[Interface]
+Address = 10.8.0.3/24
+MTU = 1420
+PrivateKey = REPLACE_WITH_HOST_GENERATED_PRIVATE_KEY
+
+[Peer]
+PublicKey = REPLACE_WITH_VPS_HUB_PUBLIC_KEY
+AllowedIPs = 10.8.0.1/32
+Endpoint = REPLACE_WITH_PRIVATE_HOST_ONLY_VPS_ENDPOINT:51820
+PersistentKeepalive = 25
