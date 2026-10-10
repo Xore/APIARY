@@ -96,6 +96,9 @@ desired_swarm_rules() {
   # depends on "fragmentation needed" messages, and ping is the health probe.
   echo 'rule protocol value="icmp" accept'
   echo 'rule protocol value="ipv6-icmp" accept'
+  if [ -n "${WG_FIBRE_PEER:-}" ]; then
+    echo "rule family=\"ipv4\" source address=\"$WG_FIBRE_PEER\" port port=\"51821\" protocol=\"udp\" accept"
+  fi
   # Default deny, logged and rate-limited. Priority 32767 puts it in the
   # zone's _post chain, after every accept above.
   echo "rule priority=\"32767\" log prefix=\"$LOG_PREFIX_DENY\" level=\"info\" limit value=\"10/m\" drop"
@@ -106,6 +109,9 @@ desired_swarm_rules() {
 # visible in the config and the journal, and drop instead of reject so a
 # scan sees "filtered" with no ICMP answer.
 desired_lan_rules() {
+  if [ -n "${WG_LAN_PEER:-}" ]; then
+    echo "rule family=\"ipv4\" source address=\"$WG_LAN_PEER\" port port=\"51822\" protocol=\"udp\" accept"
+  fi
   for p in 2377/tcp 7946/tcp 7946/udp 4789/udp; do
     echo "rule family=\"ipv4\" port port=\"${p%/*}\" protocol=\"${p#*/}\" log prefix=\"$LOG_PREFIX_LAN\" level=\"warning\" limit value=\"6/m\" drop"
   done
@@ -119,6 +125,7 @@ owned_lan_rule() {
   local r="$1"
   case "$r" in
     *"prefix=\"$LOG_PREFIX_LAN\""*) return 0 ;;
+    *"port=\"51822\""*" accept") return 0 ;;
   esac
   if [[ "$r" =~ port\ port=\"(2377|7946|4789)\" ]] && [[ "$r" == *" accept" ]]; then
     return 0
@@ -148,6 +155,8 @@ converge_rules() {
 all_owned() { return 0; }
 
 nm_connection_for() {
+  # wg-quick devices appear as external NM connections; firewalld owns their zone.
+  nmcli -g GENERAL.STATE device show "$1" 2>/dev/null | grep -q 'externally' && return 0
   nmcli -g GENERAL.CONNECTION device show "$1" 2>/dev/null | head -n1
 }
 
@@ -213,7 +222,7 @@ cmd_status_loaded() {
   local z
   for z in $LAN_ZONES; do
     echo "--- zone $z (swarm-plane rules)"
-    firewall-cmd --zone="$z" --list-rich-rules | grep -E 'port="(2377|7946|4789)"|value="esp"' || true
+    firewall-cmd --zone="$z" --list-rich-rules | grep -E 'port="(2377|7946|4789|51822)"|value="esp"' || true
   done
   firewall-cmd --check-config >/dev/null && echo "check-config: ok"
 }

@@ -1,0 +1,11 @@
+[Unit]
+Description=Check manager WireGuard path
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=10s
+AccuracySec=1s
+Unit=peer-route.service
+
+[Install]
+WantedBy=timers.target
