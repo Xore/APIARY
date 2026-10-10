@@ -37,6 +37,15 @@ below.
   is still there; the nightly's unseeded high-run search is the lane that is
   *meant* to move (#3326, [record](frontend-mutation-pilot.md)).
 
+### Ubuntu 26.04 trial (#3608)
+
+`ubuntu-latest` moves to Ubuntu 26.04 from 2026-10-19. `ubuntu-26-trial.yml`
+runs the image-dependent hosted legs (shellcheck, hadolint, bare `python3`,
+docker tooling, the Playwright `--with-deps` + `redis-server` browser suite) on
+`ubuntu-26.04`. Every job is `continue-on-error: true` and nothing gates on it;
+a red job is the evidence for pinning the matching `quality.yml` job to
+`ubuntu-24.04`. Delete the workflow once `ubuntu-latest` has settled.
+
 ### Advisory frontend testing pilot (#3326)
 
 `frontend-testing-pilot.yml` runs nightly (`41 4 * * *`) and on
