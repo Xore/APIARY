@@ -148,22 +148,14 @@ moves to loopback, stays on the LAN or closes is decided in
 
 | Failure | Phase 0 (today) | Phase 1 (after #3589) |
 |---|---|---|
-| **VPS down** | No Internet traffic reaches the sensors (portbridge is on the VPS), so capture pauses because there is nothing to capture. The public dashboards and OIDC gateways are offline. homeserver ↔ precision swarm, Arcane and CI are unaffected (fibre). | The same for ingress. The VPS swarm node goes `Down`. homeserver ↔ precision keep their hub addresses over the fibre tunnel, so the swarm and overlays between them are unaffected. |
+| **VPS down** | No Internet traffic reaches the sensors (portbridge is on the VPS), so capture pauses because there is nothing to capture. The public dashboards and OIDC gateways are offline. homeserver ↔ precision swarm, Arcane and CI are unaffected (fibre). | The same for ingress. The VPS worker goes `Down`. Both managers keep quorum over the fibre tunnel, so the swarm and overlays between them are unaffected. |
 | **Fibre down** | precision is unreachable on its NodeAddr and goes `Down`. Its tasks stop being managed, and the Arcane agent goes offline (its SSH forward rides the fibre). Sensors and ingest on homeserver continue. | The LAN WireGuard tunnel takes over automatically. Overlay traffic continues at the fallback MTU, which is why failover-surviving overlays are sized for 1390. When the fibre recovers, the route switches back. |
-| **Fibre and LAN down** | as fibre down | homeserver and precision lose each other: their hub traffic never routes through the VPS (decision 5). precision stays reachable from the VPS. |
-| **homeserver down** | The sole manager is gone, so the control plane is frozen. Running containers on precision keep running but cannot be rescheduled or updated. Sensors are down. | The same unless managers were added. See quorum. |
-| **precision down** | Its CI runners and registry mirror are offline. No sensor impact. | The same. |
+| **Fibre and LAN down** | as fibre down | The two managers lose quorum: their hub traffic never routes through the VPS (decision 5). Running tasks continue, but scheduling and updates stop until connectivity returns. precision stays reachable from the VPS. |
+| **homeserver down** | The sole manager is gone, so the control plane is frozen. Running containers on precision keep running but cannot be rescheduled or updated. Sensors are down. | The two-manager quorum is lost. Running tasks continue, but scheduling and updates stop; sensors are down. |
+| **precision down** | Its CI runners and registry mirror are offline. No sensor impact. | The two-manager quorum is lost. Running tasks continue, but scheduling and updates stop; sensors are unaffected. |
 | **Rollback timer fires** | The firewall config from before the change is restored. SSH and established flows survive through conntrack. See Rollback. | The same mechanism for the phase 1 rules. |
 
-**Manager quorum.** Raft needs a strict majority of managers. With two managers
-the majority is two, so losing either one stops the control plane. Two managers
-are less available than one. The swarm therefore runs **one manager or three,
-never two**. Today homeserver is the only manager. If #3589 promotes precision,
-it promotes the VPS in the same window (1 → 3). It then verifies `docker node ls`
-from every manager before ending the window, and does not leave the swarm at two
-managers. With three managers, the loss of any one node (including the VPS)
-keeps quorum, provided the other two reach each other: homeserver and precision
-do so over the fibre or its fallback.
+**Manager quorum (accepted decision, [#3587](https://github.com/Xore-Inc/APIARY/issues/3587#issuecomment-6091107601)).** Phase 1 runs **two managers: homeserver and precision**, with the VPS as a **worker**. Raft needs both managers for a majority. If either manager fails or their fibre and LAN paths both fail, existing tasks keep running but scheduling and updates stop until quorum returns. Xore accepted this availability trade-off. Today homeserver is still the sole manager; #3589 promotes precision and joins the VPS as a worker. Verify `docker node ls` from both managers after promotion. Never promote the VPS.
 
 ## Key handling and rotation
 
