@@ -1,62 +1,109 @@
-# Swarm phase 1 host state and rollout (#3589)
+# Swarm phase 1: host state, rollout and runbooks (#3589)
 
-**Status:** templates and safety tooling only; none of this directory has been applied to a host. The live swarm still has homeserver as its sole manager (`Pause`), precision as a worker (`Active`), and no VPS member. Do not report phase 1 complete from this checkout.
+**Status (2026-10-10, applied and verified).** The three nodes form one swarm on the WireGuard hub addresses:
 
-The accepted target is **homeserver + precision managers, VPS worker**. Both managers are needed for quorum; if either fails, existing tasks continue but scheduling and updates stop. The VPS must not be promoted. Compose services, sensor binds, Arcane, runners and registry mirrors stay outside Swarm in this phase.
+| Node | Swarm role, address | Availability | WireGuard | Firewall zone `apiary-swarm` |
+|---|---|---|---|---|
+| homeserver (`supermicro`) | manager (Leader), `10.8.0.2` | `Pause` (tasks schedule on precision, #3583) | `wg0` hub spoke (peer VPS), `wg-fibre` `10.8.1.1`, `wg-lan` `10.8.2.1` | `ens9f1`, `wg0`, `wg-fibre`, `wg-lan`; `DOCKER-USER` hub policy (`home-wg-forward`) |
+| precision | manager (Reachable), `10.8.0.3` | `Active` | `wg0` hub spoke (peer VPS), `wg-fibre` `10.8.1.2`, `wg-lan` `10.8.2.2` | `enp4s0f1`, `wg0`, `wg-fibre`, `wg-lan` |
+| VPS (hostname `localhost`) | worker, `10.8.0.1` | `Active` | `wg0` hub (peers homeserver, precision) | `wg0` |
 
-## Host configuration in git
+Both managers are needed for quorum: if either fails, running tasks continue but scheduling and updates stop (accepted, #3587 decision 1). Never promote the VPS. Phase 1 creates no stack or service. Compose projects, sensor binds, Arcane, runners and the registry mirror are unchanged.
 
-| Host | Existing state to preserve | Phase-1 files |
+The decisions, flow matrix, MTU budget and failure modes are in [docs/SWARM-NETWORK.md](../../docs/SWARM-NETWORK.md).
+
+## What lives where
+
+Keys, preshared keys, join tokens, the VPS public endpoint and the homeserver LAN address never enter git. Templates carry `REPLACE_WITH_*` placeholders that are rendered **on the host**, with keys read from root-only files and not passed on a command line.
+
+| Repo file | Host path | Hosts |
 |---|---|---|
-| homeserver | `ens9f0` LAN: MTU 9000, static LAN address, metric 50; `ens9f1`: `10.254.250.1/30`, MTU 9000, `apiary-swarm` zone; `wg0`: `10.8.0.2/24`, existing VPS tunnel | `hosts/homeserver-wg-{fibre,lan}.conf.example`, `hosts/homeserver.env`, `../firewall/hosts/homeserver.env` |
-| precision | `enp4s0f0` LAN: DHCP, MTU 9000, metric 50; `enp4s0f1`: `10.254.250.2/30`, MTU 9000, `apiary-swarm` zone; `eno1` autoconnect off; `wg` absent | `hosts/precision-wg{0,-fibre,-lan}.conf.example`, `hosts/precision.env`, `hosts/precision-multihome.conf`, `hosts/precision-fstab.fragment`, `../firewall/hosts/precision.env` |
-| VPS | existing `wg0` hub `10.8.0.1/24` and public UDP listener | add precision as a `10.8.0.3/32` peer to host-only `wg0.conf`; `../firewall/hosts/vps.env` |
+| `hosts/*-wg-fibre.conf.example`, `hosts/*-wg-lan.conf.example` | `/etc/wireguard/wg-fibre.conf`, `wg-lan.conf` (0600), `wg-quick@wg-fibre`/`@wg-lan` enabled | homeserver, precision |
+| `hosts/precision-wg0.conf.example` | `/etc/wireguard/wg0.conf`, `wg-quick@wg0` enabled | precision |
+| `vps-hub-peer.sh` | `/usr/local/libexec/apiary-vps-hub-peer`; adds the precision block to the VPS `wg0.conf` | VPS |
+| `peer-route.sh`, `peer-route.service` | `/usr/local/libexec/apiary-swarm-peer-route`, `/etc/systemd/system/peer-route.service` (enabled) | homeserver, precision |
+| `hosts/homeserver.env`, `hosts/precision.env` | `/etc/apiary/swarm-peer.env` | homeserver, precision |
+| `../firewall/swarm-plane.sh`, `../firewall/hosts/*.env` | env rendered to `/etc/apiary/swarm-plane.env` (precision: `REPLACE_WITH_HOMESERVER_LAN_IP` filled in) | all three |
+| `../firewall/home-wg-forward.{sh,service}`, `../firewall/hosts/homeserver-wg-ports.txt` | `/usr/local/libexec/apiary-home-wg-forward`, `/etc/systemd/system/home-wg-forward.service`, `/etc/apiary/homeserver-wg-ports.txt` | homeserver |
+| `nm-profiles.sh`, `hosts/homeserver.nm`, `hosts/precision.nm` | NetworkManager profiles (LAN, fibre, MTU 9000, metrics, zones); placeholders from `/etc/apiary/host.env` | homeserver, precision |
+| `hosts/precision-multihome.conf` | `/etc/sysctl.d/90-apiary-multihome.conf` | precision |
+| `hosts/arcane-fibre-tunnel.service` | `~xore/.config/systemd/user/arcane-fibre-tunnel.service` (user unit, linger on) | precision |
+| `hosts/homeserver-arcane-authorized_keys.fragment` | one line of `~xore/.ssh/authorized_keys` | homeserver |
+| `hosts/precision-fstab.fragment` | `/etc/fstab` lines (XFS volume and three bind mounts) | precision |
+| `hosts/precision-runners.txt` | runner units from `scripts/github-ci-runner/install-ci-runner.sh`, registry mirror from `install-registry-mirror.sh` | precision |
+| `swarm-membership.sh` | runs on the admin workstation (SSH aliases `homeserver`, `precision`, `vps`) | swarm |
+| `scripts/install-vps.sh` (`live-restore: false`) | `/etc/docker/daemon.json` | VPS |
 
-The precision Arcane path is a **user** unit, `hosts/arcane-fibre-tunnel.service`, forwarding `127.0.0.1:13552` to homeserver Arcane. Its current live SSH destination is the raw fibre address; the version here switches it to the homeserver hub address so the fibre/LAN WireGuard route can fail over. Keep its SSH private key and pinned `known_hosts` on the host. Verify the new host-key entry against the existing trusted fibre host key before restarting it.
+homeserver's strict `rp_filter` on `ens9f0`/`eno1` comes from the distribution default (`/usr/lib/sysctl.d/50-redhat.conf`), not a site file. It is what drops spoofed fibre or hub sources arriving on the LAN. `wg-fibre`/`wg-lan` set loose mode in their `PostUp`, because the peer hub `/32` moves between them on failover and `AllowedIPs` already rejects spoofed sources.
 
-Precision's runner services are generated by [`scripts/github-ci-runner/install-ci-runner.sh`](../../scripts/github-ci-runner/install-ci-runner.sh); ten are enabled today. Its registry mirror is generated by [`scripts/github-ci-runner/install-registry-mirror.sh`](../../scripts/github-ci-runner/install-registry-mirror.sh). Reuse those installers and the existing runner registrations. The fstab fragment records the XFS volume and three bind mounts that must be mounted before Docker and runner services start; do not format or recreate that volume.
+Check for drift at any time: `nm-profiles.sh check hosts/HOST.nm`, `swarm-plane.sh status /etc/apiary/swarm-plane.env`, `swarm-membership.sh status`.
 
-## WireGuard and route setup
+## How it was applied (and how to re-apply)
 
-1. Confirm the existing sensor count and recent public `source.ip`, the backfill process state, Arcane precision `online`, no active CI jobs, two Swarm nodes `Ready`, and no armed rollback timers. The 2026-10-10 backfill process is absent and its last log ends with `Host is unreachable`; do not restart it as part of this network rollout.
-2. On each host, create keys locally with `umask 077; wg genkey > /etc/wireguard/NAME.key; wg pubkey < /etc/wireguard/NAME.key > /etc/wireguard/NAME.pub`. Make every private key and rendered `.conf` mode `0600`. Exchange only public keys over SSH. Render the `.conf.example` files on the destination host; the precision hub endpoint is copied from the existing homeserver config into a **host-only** file. Never put the endpoint, private keys, preshared keys or Swarm join tokens in Git, logs or issue comments.
-3. Stage both sides of each tunnel before activating either. Render `REPLACE_WITH_HOMESERVER_LAN_IP` in precision's WireGuard and firewall files from the host-only LAN inventory. On precision install `wireguard-tools` first. Preserve existing `wg0` on homeserver and VPS; add the precision peer to VPS without replacing the homeserver peer. Use `wg-quick@wg0`, `wg-quick@wg-fibre`, and `wg-quick@wg-lan` for the three precision links, and the last two on homeserver. The LAN fallback uses `10.8.2.0/30`; it carries only the other manager's hub `/32`.
-4. Install `peer-route.sh` at `/usr/local/libexec/apiary-swarm-peer-route`, its service/timer under `/etc/systemd/system`, and the host's `hosts/*.env` at `/etc/apiary/swarm-peer.env`. The timer probes the fibre WG address every 10 seconds, uses LAN WG only if fibre fails, and switches back automatically. Both failures retain the last route; the hub peer cannot silently route through the VPS. `ip route get 10.8.0.3 from 10.8.0.2` (and reverse) must name `wg-fibre`, then `wg-lan` during a controlled fibre outage, then `wg-fibre` after recovery.
-5. The `apiary-swarm` zone owns the new tunnel interfaces and allows only peer-scoped Swarm/SSH/ICMP and fibre WG underlay. The LAN zone opens only peer-scoped UDP 51822. On homeserver, `home-wg-forward.sh` adds a default-deny `DOCKER-USER` rule for hub traffic to Docker-published ports; its [port list](../firewall/hosts/homeserver-wg-ports.txt) is the union of repo-declared WG bindings and live ports. Run `python3 ops/firewall/check-home-wg-ports.py LIVE_PORTS_FILE` before applying. The two wildcard pentagi terminal ports are deliberately denied on `wg0` pending #3604; no LAN listener is changed here.
+One host at a time. Before **every** network, firewall or swarm change, arm a dead-man and confirm its timer is active. Then change, prove from outside and inside, and only then disarm. Probes after each step: fresh `ssh HOST` from the workstation, `honeypot-v2*` count rising with recent public `source.ip`, Arcane environment `precision` `online`, runners online, `docker node ls` from a manager.
 
-## Safety gate for every host mutation
+| Dead-man | Host | Restores |
+|---|---|---|
+| `network-rollback.sh backup` / `arm DIR 10min` → `swarm-net-rollback-3589` | homeserver, precision | `/etc/wireguard`, `wg-quick@*` and `peer-route` state, routes, the Arcane user unit, the `DOCKER-USER` hub policy |
+| `swarm-plane.sh backup` / `ROLLBACK_UNIT=fw-rollback-3589 swarm-plane.sh arm DIR 10min` | all | `/etc/firewalld` and NM zone bindings |
+| `vps-hub-peer.sh arm PUBKEY 10min` → `vps-hub-peer-rollback-3589` | VPS | removes that one hub peer and restores `wg0.conf`, **without** touching the homeserver peer (no `syncconf` or restart) |
+| `swarm-membership.sh arm 10min` → user unit `swarm-membership-rollback-3589` | workstation | phase-0 membership: homeserver sole manager on `10.254.250.1` (`Pause`), precision worker |
 
-Work on **one host at a time**. Before *each* WG, route, firewall or Swarm change, inspect current jobs/containers, SSH, routes, firewall zones and timers; save the current config. `network-rollback.sh backup` creates a root-only host snapshot including the existing WireGuard keys, routes, service states, Arcane user unit and homeserver `DOCKER-USER` policy. `../firewall/swarm-plane.sh backup hosts/HOST.env` saves firewalld and NetworkManager zone bindings. Arm both rollbacks **before** changing the host:
+Order used on 2026-10-10:
+1. `wireguard-tools` on precision.
+2. Keys generated on each host (`umask 077; wg genkey`); only public keys and the PSK are piped host to host. Templates are rendered in place.
+3. precision, then homeserver: firewall (adds UDP 51821 from the fibre peer in `apiary-swarm` and UDP 51822 from the peer LAN address in `public`), `wg-fibre` and `wg-lan` up, interfaces bound to `apiary-swarm`. MTU proof with `ping -M do` (below).
+4. VPS: `vps-hub-peer.sh arm`, then `add` the precision peer (`10.8.0.3/32`, PSK). precision: `wg0` up, `peer-route.service`. Prove that homeserver↔precision hub traffic does not touch the VPS: the VPS precision-peer counters stay flat while precision pings `10.8.0.2`.
+5. `swarm-membership.sh managers` (homeserver re-initialised on `10.8.0.2` with the existing `10.200.0.0/16` /24 address pool, `Pause`, ingress MTU 1310; precision joins as manager on `10.8.0.3`).
+6. homeserver `wg0` into `apiary-swarm` plus `home-wg-forward`. Then VPS `wg0` into `apiary-swarm` (`SWARM_SSH_PORT=2222`: VPS port 22 is the cowrie honeypot). `check-home-wg-ports.py LIVE_PORTS` must pass first. Watch the `APIARY-WG-IN` DROP counter: it must not grow with normal traffic.
+7. VPS: `live-restore` off via `systemctl reload docker` (no container restart; swarm refuses live-restore), then `swarm-membership.sh join-vps` and `labels`.
+8. `arcane-fibre-tunnel` switched to `xore@10.8.0.2`, after pinning `10.8.0.2` in its `known_hosts` only if its key equals the trusted `10.254.250.1` entry, and adding `10.8.0.3` to the `from=` of its `authorized_keys` line.
 
-```sh
-backup=$(sudo -n ops/swarm/network-rollback.sh backup)
-sudo -n ops/swarm/network-rollback.sh arm "$backup" 20min
-fw_backup=$(sudo -n ops/firewall/swarm-plane.sh backup ops/firewall/hosts/HOST.env)
-sudo -n ops/firewall/swarm-plane.sh arm "$fw_backup" 20min
-```
+### Proofs to repeat after any change
 
-The 20-minute window is needed for an Arcane sync, CI probe and a one-minute ingest/source check. The network rollback removes the new `DOCKER-USER` chain and restores its prior service files and active/enabled state. Confirm **both timers are active** before the first mutation. If a check fails, leave the timers to restore state or run the saved rollback scripts immediately. Do not leave a stale timer armed after a successful check.
+- **MTU**, `ping -M do` (payload = MTU − 28): `wg-fibre` `-s 8892` passes, `-s 8893` → `Message too long`; `wg-lan` `-s 1472`/`1473`; hub `wg0` `-s 1392`/`1393`; raw fibre `-s 8972`.
+- **Fibre failover:** on precision, drop all traffic on the fibre inside a dead-man:
+  ```sh
+  sudo systemd-run --on-active=3min --unit=fibre-cut-rollback-3589 /usr/sbin/nft delete table inet cut3589
+  sudo nft -f - <<'EOF'
+  table inet cut3589 {
+    chain in  { type filter hook input  priority -300; iifname "enp4s0f1" drop; }
+    chain out { type filter hook output priority -300; oifname "enp4s0f1" drop; }
+  }
+  EOF
+  ```
+  Expected: `ip route show exact 10.8.0.2/32` names `wg-lan` within about 3 s, both managers stay `Ready`/`Leader`/`Reachable`, Arcane `precision` stays `online`, and after `nft delete table inet cut3589` the route returns to `wg-fibre` without loss. Measured on 2026-10-10: a 2.7 s gap, and no Raft election.
+- **Outside:** `nmap -Pn -sT -sU -p T:2377,7946,U:7946,4789` against the VPS public address and both LAN addresses: TCP `filtered`, UDP `open|filtered`, logged as `apiary-swarm-lan:`.
 
-On homeserver, after both timers are armed and the current live port inventory passes `check-home-wg-ports.py`, install `home-wg-forward.sh` as `/usr/local/libexec/apiary-home-wg-forward` (mode `0755`), `home-wg-forward.service` under `/etc/systemd/system/`, and `hosts/homeserver-wg-ports.txt` as `/etc/apiary/homeserver-wg-ports.txt`. Run `systemctl daemon-reload` and `systemctl enable --now home-wg-forward.service`. Keep the network rollback timer armed through the outside sensor and Arcane probes; its saved script does not depend on the checkout or newly installed service files.
+## Runbook: node maintenance (drain → work → active)
 
-For each host, prove a fresh `ssh HOST` from this workstation, current required flows from peers, WireGuard handshake and MTU, Arcane precision environment and a GitOps sync, runner availability, both current Swarm nodes `Ready`, and a rising `honeypot-v2*` count with recent public attacker `source.ip`. After those pass, disarm all timers on that host and confirm they are inactive. VPS peer creation comes first (the existing home tunnel must still work), then precision tunnels, then homeserver tunnels; stage host-only configs beforehand. Probe fibre failure and recovery before changing Swarm addresses. Keep the homeserver `Pause` availability unless a bounded test temporarily needs `Active`, and restore it immediately.
+1. Record state: `docker node ls`, `docker node inspect NODE --format '{{.Spec.Availability}}'`, active CI jobs (`gh api repos/Xore-Inc/APIARY/actions/runners`), any running backfill, and the `honeypot-v2*` count.
+2. Wait until no CI job or backfill would be cut off. For precision, also stop the runner units if the work restarts Docker.
+3. `docker node update --availability drain NODE` (from a manager). Draining moves tasks; it does **not** remove a manager's Raft vote.
+4. Do the work. **Powering off or rebooting a manager loses quorum**: running tasks continue, but nothing schedules until it is back. Keep the window short, and never take both managers down. Losing the VPS worker costs only its tasks.
+5. Restore the recorded availability: precision and VPS `active`; homeserver `pause`, never `active` (#3583).
+6. Verify: `docker node ls` from both managers (all `Ready`, one Leader), `wg show` handshakes on the node's tunnels, `ip route show exact 10.8.0.2/32` (or `10.8.0.3/32`) via `wg-fibre`, `peer-route.service` active, Arcane `precision` online, runners online, ingest rising with public `source.ip`.
 
-## Swarm membership and labels
+## Runbook: restart after a precision storage migration or reboot
 
-Do not start membership changes until the tunnels, firewalls, route failover and an **automatic membership rollback** have been proven. Existing `docker service ls` and `docker stack ls` are empty, but the old node IDs, availability and manager address still need a host-only snapshot. The transition is: re-advertise/rejoin homeserver at `10.8.0.2` with `--data-path-addr 10.8.0.2` and `Pause`; rejoin precision at `10.8.0.3` with `--data-path-addr 10.8.0.3`, then promote it; join VPS at `10.8.0.1` **as worker**. Use host-private join tokens. Check `docker node ls` from both managers, and `docker info` on each node. Never leave the VPS as manager.
+Lesson from #3584: Docker and the runners must never start on empty mountpoints.
+1. **Before** starting Docker or runners: `findmnt /var/lib/precision-storage /var/lib/docker /var/lib/github-runners /var/lib/github-runner-data` shows the XFS volume and the three binds from `/var/lib/precision-storage/live/*`, matching `hosts/precision-fstab.fragment`. If one is missing, **stop**: starting on the root filesystem creates divergent state.
+2. Network: `nm-profiles.sh check hosts/precision.nm`; `wg show` for `wg0`, `wg-fibre` and `wg-lan`; `systemctl is-active peer-route.service`; `ip route show exact 10.8.0.2/32` via `wg-fibre`; `firewall-cmd --get-active-zones` lists `enp4s0f1 wg0 wg-fibre wg-lan` in `apiary-swarm`.
+3. Docker: `docker info` (swarm `active`, NodeAddr `10.8.0.3`, manager), and `docker node ls` from both managers.
+4. Arcane: `systemctl --user is-active arcane-fibre-tunnel`, `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:13552/api/health` → 200, and environment `precision` `online` in the manager.
+5. Runners: every unit in `hosts/precision-runners.txt` active and online in GitHub. `ci-registry-mirror.service` active, published on `172.16.0.1:5555` only.
+6. Run a GitOps sync, and confirm homeserver ingest is still rising with public `source.ip`.
 
-Set node labels after membership is stable:
+## Runbook: key rotation
 
-| Node | `role` | `edge` | `sensor` | `gpu` | `storage` |
-|---|---|---|---|---|---|
-| homeserver | `manager` | `false` | `true` | `true` | `true` |
-| precision | `manager` | `false` | `false` | `false` | `true` |
-| VPS | `worker` | `true` | `false` | `false` | `false` |
+Run on suspected compromise or yearly, one tunnel at a time, inside the dead-man of the host whose key changes (procedure and rationale: [docs/SWARM-NETWORK.md](../../docs/SWARM-NETWORK.md#key-handling-and-rotation)).
+- **`wg-fibre` / `wg-lan`** (homeserver↔precision): rotate one side while the other tunnel carries the hub route. Example: rotating `wg-fibre`, first confirm the failover proof above works. Then generate the new key on the host, pipe the new public key into the peer's config, and `wg set` both ends; `peer-route` fails over and back on its own. Record the date on the issue.
+- **Hub `wg0`, precision spoke:** generate a new precision `wg0.key` and a new PSK on the VPS (`wg genpsk`). On the VPS, `vps-hub-peer.sh arm OLD.pub`, then add the new peer with `vps-hub-peer.sh add` and remove the old one with `wg set wg0 peer OLD remove` (and its `wg0.conf` block). Re-render precision `wg0.conf`, then `systemctl restart wg-quick@wg0` on precision. Precision's hub path carries only VPS↔precision swarm traffic.
+- **Hub `wg0`, homeserver spoke or VPS key:** this tunnel carries live sensor forwarding. Use `scripts/install-homeserver.sh`'s `step_wireguard_sync_vps_peer` path, inside a VPS dead-man, with ingest probes, at a quiet time. A VPS key change also needs re-rendering precision `wg0.conf`.
+- **Arcane tunnel SSH key:** a new key pair in `/var/lib/github-runners/precision-services/arcane/ssh/` on precision, and a matching update of the restricted line from `hosts/homeserver-arcane-authorized_keys.fragment`.
 
-These labels describe placement for later phases; phase 1 creates no stack or service. The swarm overlay MTU must be sized for the smallest path it may use (hub 1310, fibre/LAN failover 1390); do not move workloads in this phase.
+## Known consequences
 
-## Maintenance and storage restart
-
-For precision maintenance, record `docker node inspect` availability, `docker node update --availability drain precision`, perform the work, then `docker node update --availability active precision`. Draining does **not** remove its manager vote; powering it off loses quorum. For homeserver, restore its recorded `Pause` state after work, not `Active`. Before any restart, record runner jobs and sensor ingest; schedule only when no active backfill or CI job would be interrupted.
-
-After a precision storage migration or reboot: verify `findmnt /var/lib/precision-storage /var/lib/docker /var/lib/github-runners /var/lib/github-runner-data` and the fstab fragment **before** starting Docker or runners; then check `docker info`, both managers `Ready`, the Arcane user tunnel plus agent, all runner units, registry mirror, fibre/LAN routes and handshakes, and an Arcane sync. Confirm homeserver sensors still capture and recent documents retain public `source.ip`. If a mount is missing, stop: starting Docker or runners on empty mountpoints can create divergent state on the root filesystem.
+- The VPS dockerd now runs without `live-restore` (swarm requirement). A dockerd restart there restarts portbridge and the edge containers; restart policies bring them back.
+- `scripts/install-vps.sh` rewrites `wg0.conf` with only the homeserver peer. After a VPS rebuild, re-add precision with `vps-hub-peer.sh add`.
+- The Arcane manager stays a Compose project; phase 3 (#3590) moves stacks under Arcane GitOps.

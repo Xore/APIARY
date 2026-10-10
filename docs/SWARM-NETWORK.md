@@ -10,7 +10,7 @@ attribution and per-sensor isolation. Those do not change here.
 
 **Status (2026-10-10).**
 - **Phase 0 ([#3588](https://github.com/Xore/APIARY/issues/3588))** is live on homeserver and precision. The direct fibre is in its own default-deny `apiary-swarm` zone, and the swarm plane is closed on every LAN and public interface.
-- **Phase 1 ([#3589](https://github.com/Xore/APIARY/issues/3589))** builds the WireGuard tunnels and re-joins the swarm. Host templates and rollback tooling are in [ops/swarm](../ops/swarm/README.md); the live topology has not changed. The diagram below still shows phase 0.
+- **Phase 1 ([#3589](https://github.com/Xore/APIARY/issues/3589))** is live on all three nodes. The VPS hub carries precision as a second spoke (`10.8.0.3`). homeserver ↔ precision run WireGuard over the fibre (`wg-fibre`), with an automatic LAN fallback (`wg-lan`). The swarm was re-initialised on the hub addresses: homeserver and precision are managers, the VPS is a worker, and node labels are set. Every WireGuard interface is in `apiary-swarm`. Host state, rollout and runbooks are in [ops/swarm](../ops/swarm/README.md).
 
 The per-service, per-port evidence behind the flow matrix is the
 [#3588 live/repo port inventory](https://github.com/Xore/APIARY/issues/3588#issuecomment-6098046203),
@@ -19,30 +19,30 @@ taken on 2026-10-10. Check live state again before changing a host.
 ## Topology
 
 The explorable diagram is [`diagrams/swarm-network-topology.html`](diagrams/swarm-network-topology.html).
-Solid edges carry traffic today. Dashed edges are built in phase 1.
+All edges carry traffic today (phase 1). The dotted edge is the LAN fallback, used only while the fibre tunnel fails.
 
 ```mermaid
 flowchart TB
   inet(("Internet"))
   vps["VPS hub<br/>wg0 10.8.0.1<br/>portbridge, Traefik"]
-  subgraph hs["homeserver (supermicro): swarm manager, availability Pause, sensors, Arcane"]
-    hsn["hub 10.8.0.2"]
-    hsz["ens9f1 10.254.250.1<br/>zone apiary-swarm<br/>fibre WG 10.8.1.1"]
+  subgraph hs["homeserver (supermicro): swarm manager (Leader), availability Pause, sensors, Arcane"]
+    hsn["hub wg0 10.8.0.2"]
+    hsz["wg-fibre 10.8.1.1 over ens9f1 10.254.250.1<br/>wg-lan 10.8.2.1<br/>zone apiary-swarm"]
   end
-  subgraph pr["precision: swarm worker, CI runners, registry mirror"]
-    prz["enp4s0f1 10.254.250.2<br/>zone apiary-swarm<br/>fibre WG 10.8.1.2"]
-    prn["hub 10.8.0.3"]
+  subgraph pr["precision: swarm manager, CI runners, registry mirror"]
+    prz["wg-fibre 10.8.1.2 over enp4s0f1 10.254.250.2<br/>wg-lan 10.8.2.2<br/>zone apiary-swarm"]
+    prn["hub wg0 10.8.0.3"]
   end
   lan["home LAN /24, MTU 9000<br/>zone public"]
 
   inet -->|"sensor ports, admin SSH, WG 51820/udp"| vps
-  vps ==>|"hub WG, MTU 1420: sensors, gateways"| hsn
-  vps -.->|"hub WG, phase 1"| prn
+  vps ==>|"hub WG, MTU 1420: sensors, gateways, swarm worker"| hsn
+  vps ==>|"hub WG, MTU 1420: swarm worker"| prn
   hsn --- hsz
-  hsz <==>|"10 Gb fibre, MTU 9000; WG from phase 1"| prz
+  hsz <==>|"wg-fibre, MTU 8920: manager hub /32s"| prz
   prz --- prn
-  hsn -.->|"WG fallback, MTU 1500, phase 1"| lan
-  prn -.->|"WG fallback, MTU 1500, phase 1"| lan
+  hsz -.-|"wg-lan, MTU 1500: fallback"| lan
+  prz -.-|"wg-lan, MTU 1500: fallback"| lan
 ```
 
 ## Decisions
@@ -66,13 +66,15 @@ decision on #3587.
 | Link | Underlay | WireGuard interface | Addresses | Interface MTU |
 |---|---|---|---|---|
 | VPS hub | public Internet, UDP 51820 | `wg0` on each host | `10.8.0.1` / `.2` / `.3` | 1420 (default) |
-| Fibre | `10.254.250.0/30`, MTU 9000 | fibre tunnel (named in #3589) | `10.8.1.1` / `10.8.1.2` | 8920 (9000 − 80) |
-| LAN fallback | home LAN `/24`, MTU 9000 | LAN tunnel (named in #3589) | per #3589 | 1500 |
-| Swarm today (phase 0) | fibre `/30`, no WireGuard | none | NodeAddr `10.254.250.1` / `.2` | 9000 |
+| Fibre | `10.254.250.0/30`, MTU 9000, UDP 51821 | `wg-fibre` | `10.8.1.1` / `10.8.1.2` | 8920 (9000 − 80) |
+| LAN fallback | home LAN `/24`, MTU 9000, UDP 51822 | `wg-lan` | `10.8.2.1` / `10.8.2.2` | 1500 |
+| Swarm (phase 1) | the tunnels above | NodeAddr and data path = hub address | `10.8.0.2` / `.3` managers, `.1` worker | overlay ingress 1310 |
+
+Routing: each manager holds a host route for the other manager's hub `/32` (`10.8.0.3` on homeserver, `10.8.0.2` on precision), kept on `wg-fibre` by `peer-route.service`. It moves to `wg-lan` after two failed fibre probes, and back after three good ones. The hub `wg0` peers carry only `10.8.0.1/32` on the spokes, so manager-to-manager traffic can never detour through the VPS.
 
 The largest overlay MTU on a path is the WireGuard interface MTU, minus 50 for
 VXLAN, minus up to 60 for ESP on `--opt encrypted` overlays. The numbers below are
-derived; #3589 verifies each one with `ping -M do -s <MTU − 28>` across the overlay.
+derived. On 2026-10-10 #3589 verified the WireGuard interface MTUs with `ping -M do -s <MTU − 28>` (passes) and `<MTU − 27>` (`Message too long`) on `wg-fibre` (8920), `wg-lan` (1500) and hub `wg0` (1420). Encrypted test overlays carried traffic at 1390 (managers) and 1310 (including the VPS).
 
 | Overlay spans | Largest overlay MTU |
 |---|---|
@@ -91,7 +93,7 @@ Interfaces:
 - `H` is the VPS ↔ homeserver `wg0`.
 - `L` is the LAN/uplink (`ens9f0` and `eno1` on homeserver, `enp4s0f0` on precision).
 
-In phase 0, inbound swarm rules are bound to an interface in `apiary-swarm`, restricted to the single fibre peer source, and default deny with rate-limited logging. The SSH rule there preserves the existing Arcane fibre forward. `public` logs and drops the swarm protocols on the LAN/uplink and on `wg0` (unzoned, so it falls into the default zone). Ordinary egress and the existing unrelated publications are unchanged.
+Inbound swarm rules are bound to the interfaces in `apiary-swarm` (the fibre, `wg0`, `wg-fibre` and `wg-lan`), restricted to the peer sources in each host's env file, and default deny with rate-limited logging. The peer-scoped SSH rule carries the Arcane tunnel and admin SSH; on the VPS it is TCP 2222, because port 22 there is the cowrie honeypot. `public` logs and drops the swarm protocols on the LAN/uplink and on the VPS `eth0`. Ordinary egress and the existing unrelated publications are unchanged.
 
 | Source → destination | Interface; protocol/port | Purpose | Owner / phase |
 |---|---|---|---|
@@ -103,12 +105,15 @@ In phase 0, inbound swarm rules are bound to an interface in `apiary-swarm`, res
 | VPS portbridge → homeserver sensors | H; exact TCP/UDP mappings in the [inventory](https://github.com/Xore/APIARY/issues/3588#issuecomment-6098046203), including translated ports | Internet honeypot traffic; attacker `source.ip` preserved | #3573 / existing |
 | VPS Traefik/socat → homeserver gateways | H; the dashboard, Arcane, Keycloak, Kibana and other published ports in the inventory | OIDC-gated tools; no new host openings | #3579 / existing |
 | CI runners → precision registry mirror | local Docker bridge; TCP 5555 → 5000 | Image pulls; not LAN-published | CI / existing |
-| VPS worker ↔ homeserver/precision managers | H; WireGuard UDP 51820 underlay, then manager TCP 2377, peer-scoped TCP/UDP 7946, UDP 4789, ESP | Three-node swarm and encrypted overlays | #3589 |
-| homeserver ↔ precision | fibre WG `10.8.1.0/30` over fibre UDP 51821; LAN fallback WG `10.8.2.0/30` over peer-scoped LAN UDP 51822; peer-scoped swarm ports above | Direct encrypted swarm path and failover. The only `public` addition is a peer-scoped accept for UDP 51822 | #3589 |
+| VPS worker ↔ homeserver/precision managers | H; WireGuard UDP 51820 underlay, then manager TCP 2377, peer-scoped TCP/UDP 7946, UDP 4789, ESP | Three-node swarm and encrypted overlays | #3589 / live |
+| homeserver ↔ precision | fibre WG `10.8.1.0/30` over fibre UDP 51821; LAN fallback WG `10.8.2.0/30` over peer-scoped LAN UDP 51822; peer-scoped swarm ports above | Direct encrypted swarm path and failover. The only `public` addition is a peer-scoped accept for UDP 51822 | #3589 / live |
+| precision → homeserver | `wg-fibre`/`wg-lan`; TCP 22 to `10.8.0.2` | `arcane-fibre-tunnel` (`authorized_keys` `from="10.254.250.2,10.8.0.3"`, forward to `10.8.0.2:3552` only) | #3589 / live |
+| homeserver → VPS | H; TCP 2222 | Existing homeserver-initiated SSH to the VPS | existing; peer-scoped in #3589 |
+| VPS → homeserver Docker-published ports | H; `DOCKER-USER` chain `APIARY-WG-IN`: NEW flows from `10.8.0.1` to `10.8.0.2` on the [77-port list](../ops/firewall/hosts/homeserver-wg-ports.txt) only, all else dropped | Sensors and gateways; blocks wildcard publications (pentagi 28012-28013) on the hub | #3589 / live |
 | BFF/backend overlay | rides the overlay (VXLAN/ESP above) | Encrypted BFF overlay; no extra host ports | #3579 |
 
-What the phase 0 firewall does *not* cover:
-- **Docker-published ports.** Do not infer that a firewalld `INPUT` rule protects a Docker-published port: DNAT sends that traffic through `FORWARD`/`DOCKER-USER`, and both chains have no site policy today. Swarm listeners and kernel VXLAN/ESP use `INPUT`, so `swarm-plane.sh` changes no `DOCKER-USER` rule and claims no protection for the unrelated published ports.
+What the swarm-plane firewall does *not* cover:
+- **Docker-published ports.** Do not infer that a firewalld `INPUT` rule protects a Docker-published port: DNAT sends that traffic through `FORWARD`/`DOCKER-USER`. Swarm listeners and kernel VXLAN/ESP use `INPUT`, so `swarm-plane.sh` changes no `DOCKER-USER` rule. Since #3589, the separate [`home-wg-forward`](../ops/firewall/home-wg-forward.sh) policy covers Docker-published ports reached over homeserver `wg0`. Ports published on the LAN are still unprotected (#3604).
 - **Host-mode sensor publication.** #3593 must add peer-scoped `DOCKER-USER` enforcement before it publishes host-mode sensor ports.
 - **Forwarding.** Preserve portbridge forwarding and source attribution in both follow-ups.
 
@@ -149,18 +154,20 @@ moves to loopback, stays on the LAN or closes is decided in
 | Failure | Phase 0 (today) | Phase 1 (after #3589) |
 |---|---|---|
 | **VPS down** | No Internet traffic reaches the sensors (portbridge is on the VPS), so capture pauses because there is nothing to capture. The public dashboards and OIDC gateways are offline. homeserver ↔ precision swarm, Arcane and CI are unaffected (fibre). | The same for ingress. The VPS worker goes `Down`. Both managers keep quorum over the fibre tunnel, so the swarm and overlays between them are unaffected. |
-| **Fibre down** | precision is unreachable on its NodeAddr and goes `Down`. Its tasks stop being managed, and the Arcane agent goes offline (its SSH forward rides the fibre). Sensors and ingest on homeserver continue. | The LAN WireGuard tunnel takes over automatically. Overlay traffic continues at the fallback MTU, which is why failover-surviving overlays are sized for 1390. When the fibre recovers, the route switches back. |
+| **Fibre down** | precision is unreachable on its NodeAddr and goes `Down`. Its tasks stop being managed, and the Arcane agent goes offline (its SSH forward rides the fibre). Sensors and ingest on homeserver continue. | The LAN WireGuard tunnel takes over automatically. Overlay traffic continues at the fallback MTU, which is why failover-surviving overlays are sized for 1390. When the fibre recovers, the route switches back. **Tested 2026-10-10:** all fibre traffic dropped for 40 s, 2.7 s gap, no Raft election, Arcane stayed online, no loss on recovery. |
 | **Fibre and LAN down** | as fibre down | The two managers lose quorum: their hub traffic never routes through the VPS (decision 5). Running tasks continue, but scheduling and updates stop until connectivity returns. precision stays reachable from the VPS. |
 | **homeserver down** | The sole manager is gone, so the control plane is frozen. Running containers on precision keep running but cannot be rescheduled or updated. Sensors are down. | The two-manager quorum is lost. Running tasks continue, but scheduling and updates stop; sensors are down. |
 | **precision down** | Its CI runners and registry mirror are offline. No sensor impact. | The two-manager quorum is lost. Running tasks continue, but scheduling and updates stop; sensors are unaffected. |
 | **Rollback timer fires** | The firewall config from before the change is restored. SSH and established flows survive through conntrack. See Rollback. | The same mechanism for the phase 1 rules. |
 
-**Manager quorum (accepted decision, [#3587](https://github.com/Xore-Inc/APIARY/issues/3587#issuecomment-6091107601)).** Phase 1 runs **two managers: homeserver and precision**, with the VPS as a **worker**. Raft needs both managers for a majority. If either manager fails or their fibre and LAN paths both fail, existing tasks keep running but scheduling and updates stop until quorum returns. Xore accepted this availability trade-off. Today homeserver is still the sole manager; #3589 promotes precision and joins the VPS as a worker. Verify `docker node ls` from both managers after promotion. Never promote the VPS.
+**Manager quorum (accepted decision, [#3587](https://github.com/Xore-Inc/APIARY/issues/3587#issuecomment-6091107601)).** Phase 1 runs **two managers: homeserver and precision**, with the VPS as a **worker** (live since 2026-10-10). Raft needs both managers for a majority. If either manager fails or their fibre and LAN paths both fail, existing tasks keep running but scheduling and updates stop until quorum returns. Xore accepted this availability trade-off. The `peer-route` failover keeps a fibre cut below the roughly 10 s Raft election timeout. Never promote the VPS. Node maintenance: [ops/swarm runbook](../ops/swarm/README.md#runbook-node-maintenance-drain--work--active).
 
 ## Key handling and rotation
 
 Private keys never leave the host that generated them and never enter git,
 issues or logs. The repo holds only templates, public keys and endpoints.
+
+Per-tunnel specifics (hub spokes, the fibre and LAN tunnels, the Arcane tunnel key) are in the [ops/swarm runbook](../ops/swarm/README.md#runbook-key-rotation).
 
 Rotation runbook (on suspected compromise, or yearly), one tunnel and one peer at a time:
 1. Confirm a second path to the host (another tunnel, the LAN or the console) before touching its keys.
@@ -174,6 +181,8 @@ Rotation runbook (on suspected compromise, or yearly), one tunnel and one peer a
 On suspected compromise, remove the old peer key first and accept the short outage. Do not wait for the overlap.
 
 ## Apply, probe and rollback
+
+This section is the phase 0 procedure for the fibre zone. The phase 1 rollout (WireGuard, membership, the hub `DOCKER-USER` policy and the VPS) and its dead-man timers are in [ops/swarm](../ops/swarm/README.md#how-it-was-applied-and-how-to-re-apply).
 
 Apply **precision first, then homeserver**, one host at a time, from a checkout
 of the merged repo on each host. Before touching rules, confirm current interface
@@ -230,3 +239,5 @@ apply timed out before its Arcane proof and was restored by the timer.
 | 2026-10-10 13:56 / 14:00 | precision, homeserver | applied with 20 min timers; probes passed; timers disarmed |
 | 2026-10-10 17:11 | precision | re-applied with a 10 min timer; all probes passed ([evidence](https://github.com/Xore/APIARY/issues/3588#issuecomment-6100122436)); timer disarmed |
 | 2026-10-10 17:15 | homeserver | applied with a 10 min timer; all probes passed ([evidence](https://github.com/Xore/APIARY/issues/3588#issuecomment-6100158469)); timer disarmed |
+| 2026-10-10 20:36–20:48 | precision, homeserver, VPS | phase 1 tunnels: `wg-fibre`/`wg-lan` up, MTU proven, precision hub peer added on the VPS (additive), failover tested (3.1 s gap after the `peer-route` watcher fix); timers disarmed ([#3589](https://github.com/Xore/APIARY/issues/3589)) |
+| 2026-10-10 20:49–21:04 | all | membership rollback fired once on purpose (proof); swarm re-initialised on 10.8.0.x, VPS joined as worker, labels set; `wg0` firewalled on all three; outside `nmap` filtered; real fibre cut survived (2.7 s, no election); timers disarmed ([#3589](https://github.com/Xore/APIARY/issues/3589)) |

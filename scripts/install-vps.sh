@@ -331,6 +331,10 @@ EOF
   chmod 600 /etc/wireguard/wg0.conf
   systemctl enable wg-quick@wg0
   systemctl restart wg-quick@wg0
+  # Swarm phase 1 (#3589): the hub also carries precision (10.8.0.3). This
+  # rewrite drops that peer; re-add it, keys host-only, with
+  # ops/swarm/vps-hub-peer.sh add (see ops/swarm/README.md).
+  echo "Re-add the precision hub peer (10.8.0.3): ops/swarm/vps-hub-peer.sh add ..."
 }
 
 # ---------------------------------------------------------------------------
