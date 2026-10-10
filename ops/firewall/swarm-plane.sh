@@ -157,7 +157,8 @@ all_owned() { return 0; }
 nm_connection_for() {
   # wg-quick devices appear as external NM connections; firewalld owns their zone.
   nmcli -g GENERAL.STATE device show "$1" 2>/dev/null | grep -q 'externally' && return 0
-  nmcli -g GENERAL.CONNECTION device show "$1" 2>/dev/null | head -n1
+  # A WireGuard interface that is not up yet has no device: no connection.
+  nmcli -g GENERAL.CONNECTION device show "$1" 2>/dev/null | head -n1 || true
 }
 
 bind_interface() {

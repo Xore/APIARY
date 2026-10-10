@@ -5,6 +5,7 @@ trap 'rm -rf "$dir"' EXIT
 
 cat > "$dir/ping" <<'EOF'
 #!/bin/sh
+sleep 0.05
 while [ "$#" -gt 0 ]; do
     [ "$1" = -I ] && { [ "$2" = "$PING_OK" ]; exit; }
     shift
@@ -36,3 +37,14 @@ if PING_OK=none "$script" 10.8.0.3 10.8.0.2 10.8.1.2 10.8.2.2 2>/dev/null; then
     exit 1
 fi
 [ ! -s "$FAKE_LOG" ]
+
+# Watch mode: fibre down from boot switches to LAN after two failed probes.
+: > "$FAKE_LOG"
+PING_OK=wg-lan INTERVAL=0 timeout 1 "$script" --watch 10.8.0.3 10.8.0.2 10.8.1.2 10.8.2.2 >/dev/null || true
+grep -qx 'route replace 10.8.0.3/32 dev wg-lan src 10.8.0.2' "$FAKE_LOG"
+if grep -q 'dev wg-fibre' "$FAKE_LOG"; then exit 1; fi
+# Watch mode: healthy fibre while routed via LAN switches back.
+: > "$FAKE_LOG"
+FAKE_ROUTE='10.8.0.3 dev wg-lan scope link src 10.8.0.2' PING_OK=wg-fibre INTERVAL=0 timeout 1 "$script" --watch 10.8.0.3 10.8.0.2 10.8.1.2 10.8.2.2 >/dev/null || true
+grep -qx 'route replace 10.8.0.3/32 dev wg-fibre src 10.8.0.2' "$FAKE_LOG"
+echo 'peer-route tests passed'
