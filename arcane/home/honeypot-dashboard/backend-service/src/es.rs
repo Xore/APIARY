@@ -773,9 +773,39 @@ impl Es {
     }
 }
 
+/// True when a `_search` response reports failed shards. ES answers 200 with
+/// partial results when a shard errors (e.g. a terms agg on a field mapped
+/// `text` in one index, #3570), so a 2xx alone does not mean the aggregations
+/// are complete. Logs a warning naming `context` and the first failure reason.
+pub fn warn_on_failed_shards(context: &str, response: &Value) -> bool {
+    let failed = response["_shards"]["failed"].as_u64().unwrap_or(0);
+    if failed == 0 {
+        return false;
+    }
+    let reason = response["_shards"]["failures"][0]["reason"]["reason"].as_str().unwrap_or("unknown");
+    tracing::warn!(
+        context,
+        failed,
+        total = response["_shards"]["total"].as_u64().unwrap_or(0),
+        reason,
+        "elasticsearch search returned partial results; aggregations are incomplete"
+    );
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_shards_are_detected_and_clean_responses_are_not() {
+        let partial = serde_json::json!({"_shards": {"total": 5, "successful": 4, "failed": 1,
+            "failures": [{"reason": {"reason": "Text fields are not optimised"}}]}});
+        assert!(warn_on_failed_shards("test", &partial));
+        assert!(!warn_on_failed_shards("test", &serde_json::json!({"_shards": {"total": 5, "successful": 5, "failed": 0}})));
+        // Empty placeholder (skipped search) has no _shards at all.
+        assert!(!warn_on_failed_shards("test", &serde_json::json!({})));
+    }
 
     #[test]
     fn logins_filter_has_four_should_clauses_any_one_matches() {
