@@ -87,6 +87,8 @@ image — its own section header says to re-verify on upgrade.
 ## WireGuard addressing
 
 The examples reserve `10.8.0.1` for the VPS and `10.8.0.2` for the home server.
+`10.8.0.3` is reserved for precision, and the homeserver ↔ precision fibre
+tunnel uses `10.8.1.0/30`; see [SWARM-NETWORK.md](SWARM-NETWORK.md).
 Change the subnet consistently if it conflicts with an existing network.
 Sensors bind `HP_BIND=10.8.0.2`, never the home LAN address. The VPS gateway is
 the only internet-facing component.

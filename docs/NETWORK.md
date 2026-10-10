@@ -143,6 +143,12 @@ Isolation rules, in enforcement order:
    isolated-by-default with an optional allowlisted-egress mode) — see
    [sandbox/README.md](sandbox/README.md).
 
+The Docker Swarm plane between homeserver, precision and (from #3589) the
+VPS — its tunnels, addressing, MTU budget, flow matrix and the default-deny
+`apiary-swarm` firewall zone on the fibre — lives in
+[SWARM-NETWORK.md](SWARM-NETWORK.md). That plane is not an ingress path: no
+swarm port is reachable on a LAN or public interface.
+
 WireGuard specifics and the forward-auth request sequence live in
 [CGNAT-DEPLOYMENT.md](CGNAT-DEPLOYMENT.md); the full per-sensor port
 matrix lives in [SENSORS.md](SENSORS.md).
